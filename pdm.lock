@@ -5,7 +5,7 @@
 groups = ["default", "dev", "lint", "test"]
 strategy = []
 lock_version = "4.5.0"
-content_hash = "sha256:17332ec1234794f009bc908b445d0f4485e47919f294495d85e7a8d216398407"
+content_hash = "sha256:564c675f6b3bb8c578b40336b38e43cfa32e9f26d0de4420204b31456a13be6c"
 
 [[metadata.targets]]
 requires_python = ">=3.13,<3.14"
@@ -208,19 +208,19 @@ files = [
 
 [[package]]
 name = "porringer"
-version = "0.1.1.dev6"
+version = "0.1.1.dev8"
 requires_python = ">=3.13"
 summary = ""
 dependencies = [
-    "packaging>=23.2",
-    "platformdirs>=4.1.0",
-    "pydantic>=2.10.3",
-    "typer>=0.15.0",
-    "userpath>=1.9.1",
+    "packaging>=24.2",
+    "platformdirs>=4.3.7",
+    "pydantic>=2.11.3",
+    "typer[all]>=0.15.2",
+    "userpath>=1.9.2",
 ]
 files = [
-    {file = "porringer-0.1.1.dev6-py3-none-any.whl", hash = "sha256:c5910a9c4e41c05448d39c9d0cdcfd8ef31d383e09b0dbae90995731ae62d1bc"},
-    {file = "porringer-0.1.1.dev6.tar.gz", hash = "sha256:facdaa1921ed90489ee26e6ec7d6a1215cc55557224eaabf9dc6eaf43535d9bf"},
+    {file = "porringer-0.1.1.dev8-py3-none-any.whl", hash = "sha256:d65db9bd07afe42b1109a0267e6eab0c4e9678d3a7483666c8dae15bbedbeed3"},
+    {file = "porringer-0.1.1.dev8.tar.gz", hash = "sha256:2eeac2bb848fb8039accbf0c46c65836385c14ca25fa9a683a2b45924834d28a"},
 ]
 
 [[package]]
@@ -448,6 +448,20 @@ dependencies = [
     "rich>=10.11.0",
     "shellingham>=1.3.0",
     "typing-extensions>=3.7.4.3",
+]
+files = [
+    {file = "typer-0.15.2-py3-none-any.whl", hash = "sha256:46a499c6107d645a9c13f7ee46c5d5096cae6f5fc57dd11eccbbb9ae3e44ddfc"},
+    {file = "typer-0.15.2.tar.gz", hash = "sha256:ab2fab47533a813c49fe1f16b1a370fd5819099c00b119e0633df65f22144ba5"},
+]
+
+[[package]]
+name = "typer"
+version = "0.15.2"
+extras = ["all"]
+requires_python = ">=3.7"
+summary = "Typer, build great CLIs. Easy to code. Based on Python type hints."
+dependencies = [
+    "typer==0.15.2",
 ]
 files = [
     {file = "typer-0.15.2-py3-none-any.whl", hash = "sha256:46a499c6107d645a9c13f7ee46c5d5096cae6f5fc57dd11eccbbb9ae3e44ddfc"},

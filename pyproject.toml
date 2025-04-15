@@ -11,7 +11,7 @@ dynamic = ["version"]
 
 requires-python = ">=3.13,<3.14"
 
-dependencies = ["pyside6>=6.9.0", "packaging>=24.2", "porringer>=0.1.1.dev6"]
+dependencies = ["pyside6>=6.9.0", "packaging>=24.2", "porringer>=0.1.1.dev8"]
 
 [project.urls]
 homepage = "https://github.com/Synodic-Software/Synodic-Client"
