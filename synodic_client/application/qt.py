@@ -2,24 +2,13 @@
 
 from typing import LiteralString
 
-from PySide6.QtGui import QAction, QIcon
-from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication
 
+from synodic_client.application.screen.screen import Screen
+from synodic_client.application.screen.tray import TrayScreen
 from synodic_client.client import Client
 
 icon: LiteralString = 'icon.png'
-
-
-class MainWindow(QMainWindow):
-    """_summary_
-
-    Args:
-        QMainWindow: _description_
-    """
-
-    def __init__(self) -> None:
-        """_summary_"""
-        super().__init__()
 
 
 def application() -> None:
@@ -29,30 +18,8 @@ def application() -> None:
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
 
-    with client.resource(icon) as icon_path:
-        qt_icon = QIcon(str(icon_path))
+    screen = Screen()
 
-    tray = QSystemTrayIcon()
-    tray.setIcon(qt_icon)
-
-    tray.setVisible(True)
-
-    window = MainWindow()
-    window.setWindowTitle('Synodic Client')
-
-    menu = QMenu()
-
-    open_action = QAction('Open')
-    menu.addAction(open_action)
-    open_action.triggered.connect(window.show)
-
-    settings_action = QAction('Settings')
-    menu.addAction(settings_action)
-
-    quit_action = QAction('Quit')
-    quit_action.triggered.connect(app.quit)
-    menu.addAction(quit_action)
-
-    tray.setContextMenu(menu)
+    tray = TrayScreen(app, client, icon, screen.window)
 
     app.exec_()
