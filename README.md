@@ -1,1 +1,2 @@
-# Synodic-Client
+# Synodic Client
+

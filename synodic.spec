@@ -1,12 +1,24 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_all, copy_metadata
+
+# Collect porringer and its plugins with metadata
+datas = [('data', 'data')]
+hiddenimports = []
+
+# Add porringer metadata so entry points work
+datas += copy_metadata('porringer')
+
+# Add your plugin packages here as you add them to dependencies
+# Example: datas += copy_metadata('porringer-plugin-name')
+# Example: hiddenimports += ['porringer_plugin_name']
 
 a = Analysis(
     ['gui.py'],
     pathex=[],
     binaries=[],
-    datas=[('data', 'data')],
-    hiddenimports=[],
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
