@@ -64,9 +64,9 @@ skip_empty = true
 
 [tool.pdm.scripts]
 analyze = "ruff check synodic_client tests"
-build = "pyinstaller --clean synodic.spec"
 format = "ruff format"
 lint = { composite = ["analyze", "format", "type-check"] }
+package = "pyinstaller --clean tool/pyinstaller/synodic.spec"
 test = "pytest --cov=synodic_client --verbose tests"
 type-check = "mypy ."
 
