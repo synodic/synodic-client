@@ -9,9 +9,9 @@ readme = "README.md"
 
 dynamic = ["version"]
 
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.14, <3.15"
 
-dependencies = ["pyside6>=6.10.1", "packaging>=25.0", "porringer>=0.1.1.dev8"]
+dependencies = ["pyside6>=6.10.1", "packaging>=25.0", "porringer>=0.1.0"]
 
 [project.urls]
 homepage = "https://github.com/Synodic-Software/Synodic-Client"
@@ -19,7 +19,7 @@ repository = "https://github.com/Synodic-Software/Synodic-Client"
 
 [dependency-groups]
 build = ["pyinstaller>=6.18.0"]
-lint = ["ruff>=0.14.13", "mypy>=1.19.1"]
+lint = ["ruff>=0.14.13", "pyrefly>=0.48.2"]
 test = ["pytest>=9.0.2", "pytest-cov>=7.0.0", "pytest-mock>=3.15.1"]
 
 [project.gui-scripts]
@@ -68,7 +68,7 @@ format = "ruff format"
 lint = { composite = ["analyze", "format", "type-check"] }
 package = "pyinstaller --clean tool/pyinstaller/synodic.spec"
 test = "pytest --cov=synodic_client --verbose tests"
-type-check = "mypy ."
+type-check = "pyrefly check"
 
 # https://pdm-backend.fming.dev/build_config/#wheel-data-files
 [tool.pdm.build.wheel-data]
