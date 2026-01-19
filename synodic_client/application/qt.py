@@ -32,7 +32,7 @@ def application() -> None:
 
     screen = Screen()
 
-    tray = TrayScreen(app, client, icon, screen.window)
+    app.tray = TrayScreen(app, client, icon, screen.window)
 
     app.exec_()
 

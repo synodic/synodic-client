@@ -24,17 +24,17 @@ class TrayScreen:
 
         self.tray.setVisible(True)
 
-        menu = QMenu()
+        self.menu = QMenu()
 
-        open_action = QAction('Open')
-        menu.addAction(open_action)
-        open_action.triggered.connect(window.show)
+        self.open_action = QAction('Open', self.menu)
+        self.menu.addAction(self.open_action)
+        self.open_action.triggered.connect(window.show)
 
-        settings_action = QAction('Settings')
-        menu.addAction(settings_action)
+        self.settings_action = QAction('Settings', self.menu)
+        self.menu.addAction(self.settings_action)
 
-        quit_action = QAction('Quit')
-        quit_action.triggered.connect(app.quit)
-        menu.addAction(quit_action)
+        self.quit_action = QAction('Quit', self.menu)
+        self.quit_action.triggered.connect(app.quit)
+        self.menu.addAction(self.quit_action)
 
-        self.tray.setContextMenu(menu)
+        self.tray.setContextMenu(self.menu)
