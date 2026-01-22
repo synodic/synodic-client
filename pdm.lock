@@ -5,7 +5,7 @@
 groups = ["default"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:43da7f7e5514a2ebb0dae5010ff703cf0a024f293eaf4c8cf66f4c863ea82472"
+content_hash = "sha256:558b9fcb180bc80cda09dc0f79845e41597bcb567bf0683a81bbd1232643cc42"
 
 [[metadata.targets]]
 requires_python = ">=3.14,<3.15"
@@ -254,6 +254,17 @@ files = [
 ]
 
 [[package]]
+name = "securesystemslib"
+version = "1.3.1"
+requires_python = "~=3.8"
+summary = "A library that provides cryptographic and general-purpose routines for Secure Systems Lab projects at NYU"
+groups = ["default"]
+files = [
+    {file = "securesystemslib-1.3.1-py3-none-any.whl", hash = "sha256:2e5414bbdde33155a91805b295cbedc4ae3f12b48dccc63e1089093537f43c81"},
+    {file = "securesystemslib-1.3.1.tar.gz", hash = "sha256:ca915f4b88209bb5450ac05426b859d74b7cd1421cafcf73b8dd3418a0b17486"},
+]
+
+[[package]]
 name = "shellingham"
 version = "1.5.4"
 requires_python = ">=3.7"
@@ -276,6 +287,21 @@ files = [
     {file = "shiboken6-6.10.1-cp39-abi3-manylinux_2_39_aarch64.whl", hash = "sha256:c095b00f4d6bf578c0b2464bb4e264b351a99345374478570f69e2e679a2a1d0"},
     {file = "shiboken6-6.10.1-cp39-abi3-win_amd64.whl", hash = "sha256:c1601d3cda1fa32779b141663873741b54e797cb0328458d7466281f117b0a4e"},
     {file = "shiboken6-6.10.1-cp39-abi3-win_arm64.whl", hash = "sha256:5cf800917008587b551005a45add2d485cca66f5f7ecd5b320e9954e40448cc9"},
+]
+
+[[package]]
+name = "tuf"
+version = "6.0.0"
+requires_python = ">=3.8"
+summary = "A secure updater framework for Python"
+groups = ["default"]
+dependencies = [
+    "securesystemslib~=1.0",
+    "urllib3<3,>=1.21.1",
+]
+files = [
+    {file = "tuf-6.0.0-py3-none-any.whl", hash = "sha256:458f663a233d95cc76dde0e1a3d01796516a05ce2781fefafebe037f7729601a"},
+    {file = "tuf-6.0.0.tar.gz", hash = "sha256:9eed0f7888c5fff45dc62164ff243a05d47fb8a3208035eb268974287e0aee8d"},
 ]
 
 [[package]]
@@ -333,6 +359,17 @@ dependencies = [
 files = [
     {file = "typing_inspection-0.4.2-py3-none-any.whl", hash = "sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7"},
     {file = "typing_inspection-0.4.2.tar.gz", hash = "sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464"},
+]
+
+[[package]]
+name = "urllib3"
+version = "2.6.3"
+requires_python = ">=3.9"
+summary = "HTTP library with thread-safe connection pooling, file post, and more."
+groups = ["default"]
+files = [
+    {file = "urllib3-2.6.3-py3-none-any.whl", hash = "sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4"},
+    {file = "urllib3-2.6.3.tar.gz", hash = "sha256:1b62b6884944a57dbe321509ab94fd4d3b307075e0c2eae991ac71ee15ad38ed"},
 ]
 
 [[package]]

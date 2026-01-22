@@ -1,0 +1,46 @@
+name: Build Development Release
+
+# This workflow builds release artifacts for development versions
+# published to PyPI on branch pushes. It can optionally trigger TUF updates.
+
+on:
+    workflow_run:
+        workflows: ["Update Python Development Release"]
+        types: [completed]
+        branches:
+            - development
+            - main
+
+jobs:
+    get-version:
+        if: github.event.workflow_run.conclusion == 'success'
+        runs-on: ubuntu-latest
+        outputs:
+            version: ${{ steps.set-tag.outputs.version }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+
+            - name: Gather Tag Information
+              id: tag-info
+              uses: synodic/Tag-Metadata@v1
+
+            - name: Set Tag
+              id: set-tag
+              run: |
+                  version=${{steps.tag-info.outputs.next-tag}}.dev${{github.run_number}}
+                  echo "version=${version}" >> $GITHUB_OUTPUT
+                  echo "Development version: $version"
+
+    build:
+        needs: get-version
+        uses: ./.github/workflows/release-build.yml
+        with:
+            version: ${{ needs.get-version.outputs.version }}
+            trigger_tuf: true
+        secrets:
+            ORG_UPDATE_TOKEN: ${{ secrets.ORG_UPDATE_TOKEN }}
+            NEXUS_USER: ${{ secrets.NEXUS_USER }}
+            NEXUS_TOKEN: ${{ secrets.NEXUS_TOKEN }}

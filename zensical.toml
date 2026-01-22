@@ -1,0 +1,5 @@
+[project]
+site_name = "Synodic Client"
+site_url = "https://synodic.github.io/synodic-client"
+docs_dir = "docs"
+site_dir = "dist"
