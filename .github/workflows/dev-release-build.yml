@@ -11,6 +11,9 @@ on:
             - development
             - main
 
+permissions:
+    contents: write
+
 jobs:
     get-version:
         if: github.event.workflow_run.conclusion == 'success' && github.repository == 'synodic/synodic-client'
@@ -35,6 +38,7 @@ jobs:
                   echo "Development version: $version"
 
     build:
+        if: github.repository_owner == 'synodic'
         needs: get-version
         uses: ./.github/workflows/release-build.yml
         with:
