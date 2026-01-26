@@ -4,4 +4,5 @@ on:
 
 jobs:
   check:
+    if: github.repository_owner == 'synodic'
     uses: synodic/.github/.github/workflows/python-check.yml@stable
