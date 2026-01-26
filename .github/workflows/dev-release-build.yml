@@ -38,7 +38,6 @@ jobs:
                   echo "Development version: $version"
 
     build:
-        if: github.repository_owner == 'synodic'
         needs: get-version
         uses: ./.github/workflows/release-build.yml
         with:
@@ -46,5 +45,3 @@ jobs:
             trigger_tuf: true
         secrets:
             ORG_UPDATE_TOKEN: ${{ secrets.ORG_UPDATE_TOKEN }}
-            NEXUS_USER: ${{ secrets.NEXUS_USER }}
-            NEXUS_TOKEN: ${{ secrets.NEXUS_TOKEN }}

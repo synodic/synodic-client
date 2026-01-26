@@ -1,15 +1,11 @@
 name: Build Release Artifacts
 
-# Builds platform executables and uploads to Nexus artifact repository.
-# Triggers TUF update for both stable releases and development builds.
+# Builds platform executables and uploads to GitHub Releases.
+# - Stable releases: versioned tag (v1.0.0)
+# - Dev releases: rolling "dev" tag (overwritten each build)
 #
 # Required secrets:
-#   NEXUS_USER: Nexus repository username
-#   NEXUS_TOKEN: Nexus repository password/token
 #   ORG_UPDATE_TOKEN: GitHub PAT for triggering synodic-updates
-#
-# Required vars:
-#   NEXUS_URL: Base URL of Nexus server (e.g., https://nexus.synodic.software)
 
 on:
   release:
@@ -17,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version tag (e.g., v1.0.0)"
+        description: "Version tag (e.g., 1.0.0)"
         required: true
         type: string
   workflow_call:
@@ -34,17 +30,12 @@ on:
     secrets:
       ORG_UPDATE_TOKEN:
         required: false
-      NEXUS_USER:
-        required: false
-      NEXUS_TOKEN:
-        required: false
 
 permissions:
   contents: write
 
 env:
-  # Nexus repository path for synodic-client artifacts
-  NEXUS_REPO_PATH: repository/synodic-releases/synodic-client
+  GITHUB_RELEASE_BASE: https://github.com/synodic/synodic-client/releases/download
 
 jobs:
   build-windows:
@@ -52,15 +43,16 @@ jobs:
     runs-on: windows-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      artifact_path: ${{ steps.nexus.outputs.path }}
+      is_dev: ${{ steps.version.outputs.is_dev }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Install PDM
         uses: pdm-project/setup-pdm@v4
         with:
-          python-version: "3.14"
+          python-version: "3.13"
           cache: true
 
       - name: Install dependencies
@@ -69,33 +61,31 @@ jobs:
       - name: Build executable
         run: pdm run pyinstaller tool/pyinstaller/synodic.spec --distpath dist/windows
 
-      - name: Get version
+      - name: Get version info
         id: version
         shell: bash
         run: |
           if [ "${{ github.event_name }}" == "release" ]; then
-            echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+            VERSION="${{ github.event.release.tag_name }}"
           else
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            VERSION="${{ inputs.version }}"
           fi
+
+          # Check if this is a dev version
+          if [[ "$VERSION" == *"dev"* ]]; then
+            echo "is_dev=true" >> $GITHUB_OUTPUT
+            echo "release_tag=dev" >> $GITHUB_OUTPUT
+          else
+            echo "is_dev=false" >> $GITHUB_OUTPUT
+            echo "release_tag=v${VERSION}" >> $GITHUB_OUTPUT
+          fi
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
 
       - name: Create archive
         run: |
           Compress-Archive -Path dist/windows/synodic.exe -DestinationPath dist/synodic-windows-x64.zip
-
-      - name: Upload to Nexus
-        id: nexus
-        shell: bash
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          ARTIFACT_PATH="${{ env.NEXUS_REPO_PATH }}/${VERSION}/synodic-windows-x64.zip"
-
-          curl -f -u "${{ secrets.NEXUS_USER }}:${{ secrets.NEXUS_TOKEN }}" \
-            --upload-file dist/synodic-windows-x64.zip \
-            "${{ vars.NEXUS_URL }}/${ARTIFACT_PATH}"
-
-          echo "path=${ARTIFACT_PATH}" >> $GITHUB_OUTPUT
-          echo "Uploaded to: ${{ vars.NEXUS_URL }}/${ARTIFACT_PATH}"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -103,20 +93,12 @@ jobs:
           name: synodic-windows-x64
           path: dist/synodic-windows-x64.zip
 
-      - name: Upload to GitHub release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/synodic-windows-x64.zip
-
   build-linux:
     if: github.repository_owner == 'synodic'
     runs-on: ubuntu-latest
-    outputs:
-      artifact_path: ${{ steps.nexus.outputs.path }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Install system dependencies
         run: |
@@ -126,7 +108,7 @@ jobs:
       - name: Install PDM
         uses: pdm-project/setup-pdm@v4
         with:
-          python-version: "3.14"
+          python-version: "3.13"
           cache: true
 
       - name: Install dependencies
@@ -135,31 +117,9 @@ jobs:
       - name: Build executable
         run: pdm run pyinstaller tool/pyinstaller/synodic.spec --distpath dist/linux
 
-      - name: Get version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" == "release" ]; then
-            echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          fi
-
       - name: Create archive
         run: |
           tar -czvf dist/synodic-linux-x64.tar.gz -C dist/linux synodic
-
-      - name: Upload to Nexus
-        id: nexus
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          ARTIFACT_PATH="${{ env.NEXUS_REPO_PATH }}/${VERSION}/synodic-linux-x64.tar.gz"
-
-          curl -f -u "${{ secrets.NEXUS_USER }}:${{ secrets.NEXUS_TOKEN }}" \
-            --upload-file dist/synodic-linux-x64.tar.gz \
-            "${{ vars.NEXUS_URL }}/${ARTIFACT_PATH}"
-
-          echo "path=${ARTIFACT_PATH}" >> $GITHUB_OUTPUT
-          echo "Uploaded to: ${{ vars.NEXUS_URL }}/${ARTIFACT_PATH}"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -167,25 +127,17 @@ jobs:
           name: synodic-linux-x64
           path: dist/synodic-linux-x64.tar.gz
 
-      - name: Upload to GitHub release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/synodic-linux-x64.tar.gz
-
   build-macos:
     if: github.repository_owner == 'synodic'
     runs-on: macos-latest
-    outputs:
-      artifact_path: ${{ steps.nexus.outputs.path }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Install PDM
         uses: pdm-project/setup-pdm@v4
         with:
-          python-version: "3.14"
+          python-version: "3.13"
           cache: true
 
       - name: Install dependencies
@@ -194,31 +146,9 @@ jobs:
       - name: Build executable
         run: pdm run pyinstaller tool/pyinstaller/synodic.spec --distpath dist/macos
 
-      - name: Get version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" == "release" ]; then
-            echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          fi
-
       - name: Create archive
         run: |
           tar -czvf dist/synodic-macos-x64.tar.gz -C dist/macos synodic
-
-      - name: Upload to Nexus
-        id: nexus
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          ARTIFACT_PATH="${{ env.NEXUS_REPO_PATH }}/${VERSION}/synodic-macos-x64.tar.gz"
-
-          curl -f -u "${{ secrets.NEXUS_USER }}:${{ secrets.NEXUS_TOKEN }}" \
-            --upload-file dist/synodic-macos-x64.tar.gz \
-            "${{ vars.NEXUS_URL }}/${ARTIFACT_PATH}"
-
-          echo "path=${ARTIFACT_PATH}" >> $GITHUB_OUTPUT
-          echo "Uploaded to: ${{ vars.NEXUS_URL }}/${ARTIFACT_PATH}"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -226,92 +156,120 @@ jobs:
           name: synodic-macos-x64
           path: dist/synodic-macos-x64.tar.gz
 
-      - name: Upload to GitHub release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/synodic-macos-x64.tar.gz
-
-  create-version-manifest:
+  publish-release:
     needs: [build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
+    outputs:
+      windows_url: ${{ steps.urls.outputs.windows_url }}
+      linux_url: ${{ steps.urls.outputs.linux_url }}
+      macos_url: ${{ steps.urls.outputs.macos_url }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Get version
-        id: version
+      - name: Prepare release files
         run: |
-          if [ "${{ github.event_name }}" == "release" ]; then
-            echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          fi
+          mkdir -p release
+          cp artifacts/synodic-windows-x64/*.zip release/
+          cp artifacts/synodic-linux-x64/*.tar.gz release/
+          cp artifacts/synodic-macos-x64/*.tar.gz release/
+          ls -la release/
 
       - name: Create version manifest
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          cat > artifacts/version.json << EOF
+          VERSION="${{ needs.build-windows.outputs.version }}"
+          cat > release/version.json << EOF
           {
             "version": "$VERSION",
             "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "nexus_base": "${{ vars.NEXUS_URL }}/${{ env.NEXUS_REPO_PATH }}/${VERSION}",
             "artifacts": {
               "windows-x64": {
                 "filename": "synodic-windows-x64.zip",
-                "sha256": "$(sha256sum artifacts/synodic-windows-x64/*.zip | cut -d' ' -f1)"
+                "sha256": "$(sha256sum release/synodic-windows-x64.zip | cut -d' ' -f1)"
               },
               "linux-x64": {
                 "filename": "synodic-linux-x64.tar.gz",
-                "sha256": "$(sha256sum artifacts/synodic-linux-x64/*.tar.gz | cut -d' ' -f1)"
+                "sha256": "$(sha256sum release/synodic-linux-x64.tar.gz | cut -d' ' -f1)"
               },
               "macos-x64": {
                 "filename": "synodic-macos-x64.tar.gz",
-                "sha256": "$(sha256sum artifacts/synodic-macos-x64/*.tar.gz | cut -d' ' -f1)"
+                "sha256": "$(sha256sum release/synodic-macos-x64.tar.gz | cut -d' ' -f1)"
               }
             }
           }
           EOF
-          cat artifacts/version.json
+          cat release/version.json
 
-      - name: Upload manifest to Nexus
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          curl -f -u "${{ secrets.NEXUS_USER }}:${{ secrets.NEXUS_TOKEN }}" \
-            --upload-file artifacts/version.json \
-            "${{ vars.NEXUS_URL }}/${{ env.NEXUS_REPO_PATH }}/${VERSION}/version.json"
+      # For dev releases: delete existing dev release first (rolling release)
+      - name: Delete existing dev release
+        if: needs.build-windows.outputs.is_dev == 'true'
+        run: gh release delete dev --cleanup-tag -y || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload version manifest artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: version-manifest
-          path: artifacts/version.json
-
-      - name: Upload manifest to GitHub release
+      # For stable releases triggered by release event
+      - name: Upload to existing release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/version.json
+          files: release/*
+
+      # For dev releases or workflow_dispatch/workflow_call
+      - name: Create dev release
+        if: needs.build-windows.outputs.is_dev == 'true' && github.event_name != 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev
+          name: "Development Build"
+          prerelease: true
+          make_latest: false
+          files: release/*
+          body: |
+            **Latest Development Build**
+
+            Version: `${{ needs.build-windows.outputs.version }}`
+            Commit: `${{ github.sha }}`
+
+            ⚠️ This is a development build and may be unstable.
+
+      # For stable workflow_dispatch (non-release event, non-dev version)
+      - name: Create stable release
+        if: needs.build-windows.outputs.is_dev == 'false' && github.event_name != 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build-windows.outputs.release_tag }}
+          name: "Release ${{ needs.build-windows.outputs.version }}"
+          draft: true
+          files: release/*
+          body: |
+            **Release ${{ needs.build-windows.outputs.version }}**
+
+            Commit: `${{ github.sha }}`
+
+      - name: Set download URLs
+        id: urls
+        run: |
+          TAG="${{ needs.build-windows.outputs.release_tag }}"
+          BASE="${{ env.GITHUB_RELEASE_BASE }}"
+
+          echo "windows_url=${BASE}/${TAG}/synodic-windows-x64.zip" >> $GITHUB_OUTPUT
+          echo "linux_url=${BASE}/${TAG}/synodic-linux-x64.tar.gz" >> $GITHUB_OUTPUT
+          echo "macos_url=${BASE}/${TAG}/synodic-macos-x64.tar.gz" >> $GITHUB_OUTPUT
 
   trigger-tuf-update:
-    needs: [build-windows, create-version-manifest]
+    needs: [build-windows, publish-release]
     runs-on: ubuntu-latest
     if: (github.event_name == 'release' || inputs.trigger_tuf == true) && github.repository_owner == 'synodic'
     steps:
-      - name: Get version and event type
+      - name: Determine event type
         id: config
         run: |
-          if [ "${{ github.event_name }}" == "release" ]; then
-            echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
-            echo "event_type=new-release" >> $GITHUB_OUTPUT
-          else
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          if [ "${{ needs.build-windows.outputs.is_dev }}" == "true" ]; then
             echo "event_type=dev-release" >> $GITHUB_OUTPUT
+          else
+            echo "event_type=new-release" >> $GITHUB_OUTPUT
           fi
 
       - name: Trigger TUF repository update
@@ -322,8 +280,8 @@ jobs:
           event-type: ${{ steps.config.outputs.event_type }}
           client-payload: |
             {
-              "version": "${{ steps.config.outputs.version }}",
-              "windows_url": "${{ vars.NEXUS_URL }}/${{ env.NEXUS_REPO_PATH }}/${{ steps.config.outputs.version }}/synodic-windows-x64.zip",
-              "linux_url": "${{ vars.NEXUS_URL }}/${{ env.NEXUS_REPO_PATH }}/${{ steps.config.outputs.version }}/synodic-linux-x64.tar.gz",
-              "macos_url": "${{ vars.NEXUS_URL }}/${{ env.NEXUS_REPO_PATH }}/${{ steps.config.outputs.version }}/synodic-macos-x64.tar.gz"
+              "version": "${{ needs.build-windows.outputs.version }}",
+              "windows_url": "${{ needs.publish-release.outputs.windows_url }}",
+              "linux_url": "${{ needs.publish-release.outputs.linux_url }}",
+              "macos_url": "${{ needs.publish-release.outputs.macos_url }}"
             }
