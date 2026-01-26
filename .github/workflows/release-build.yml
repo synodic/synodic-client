@@ -48,6 +48,7 @@ env:
 
 jobs:
   build-windows:
+    if: github.repository_owner == 'synodic'
     runs-on: windows-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -109,6 +110,7 @@ jobs:
           files: dist/synodic-windows-x64.zip
 
   build-linux:
+    if: github.repository_owner == 'synodic'
     runs-on: ubuntu-latest
     outputs:
       artifact_path: ${{ steps.nexus.outputs.path }}
@@ -172,6 +174,7 @@ jobs:
           files: dist/synodic-linux-x64.tar.gz
 
   build-macos:
+    if: github.repository_owner == 'synodic'
     runs-on: macos-latest
     outputs:
       artifact_path: ${{ steps.nexus.outputs.path }}
@@ -298,7 +301,7 @@ jobs:
   trigger-tuf-update:
     needs: [build-windows, create-version-manifest]
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' || inputs.trigger_tuf == true
+    if: (github.event_name == 'release' || inputs.trigger_tuf == true) && github.repository_owner == 'synodic'
     steps:
       - name: Get version and event type
         id: config
