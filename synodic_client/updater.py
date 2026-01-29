@@ -462,7 +462,7 @@ del "%~f0"
         if sys.platform == 'win32':
             # CREATE_NEW_CONSOLE = 0x00000200, DETACHED_PROCESS = 0x00000008
             flags = 0x00000200 | 0x00000008
-        
+
         subprocess.Popen(
             ['cmd', '/c', str(script_path)],
             creationflags=flags,

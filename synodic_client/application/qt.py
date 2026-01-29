@@ -42,14 +42,12 @@ def application() -> None:
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
 
-    screen = Screen()
+    _screen = Screen()
+    _tray = TrayScreen(app, client, icon, _screen.window)
 
-    # Store tray screen as instance attribute using object.__setattr__
-    # to avoid type checking issues with dynamic attributes
-    tray_screen = TrayScreen(app, client, icon, screen.window)
-    object.__setattr__(app, 'tray', tray_screen)
-
-    app.exec_()
+    # sys.exit ensures proper cleanup and exit code propagation
+    # Leading underscore indicates references kept alive intentionally until exec() returns
+    sys.exit(app.exec())
 
 
 if __name__ == '__main__':
