@@ -1,6 +1,6 @@
 """Schema for the client"""
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel
 
@@ -11,14 +11,14 @@ class VersionInformation(BaseModel):
     version: str
 
 
-class UpdateChannel(str, Enum):
+class UpdateChannel(StrEnum):
     """Update channel for selecting release types."""
 
     STABLE = 'stable'
     DEVELOPMENT = 'development'
 
 
-class UpdateStatus(str, Enum):
+class UpdateStatus(StrEnum):
     """Status of an update check or operation."""
 
     NO_UPDATE = 'no_update'

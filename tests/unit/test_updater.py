@@ -21,12 +21,12 @@ class TestUpdateChannel:
     @staticmethod
     def test_stable_channel_exists() -> None:
         """Verify STABLE channel is defined."""
-        assert UpdateChannel.STABLE is not None
+        assert hasattr(UpdateChannel, 'STABLE')
 
     @staticmethod
     def test_development_channel_exists() -> None:
         """Verify DEVELOPMENT channel is defined."""
-        assert UpdateChannel.DEVELOPMENT is not None
+        assert hasattr(UpdateChannel, 'DEVELOPMENT')
 
 
 class TestUpdateState:
@@ -125,51 +125,58 @@ class TestUpdateConfig:
         assert '.synodic' in str(config.backup_dir)
 
 
+@pytest.fixture
+def mock_porringer_api() -> MagicMock:
+    """Create a mock porringer API."""
+    api = MagicMock()
+    api.update = MagicMock()
+    return api
+
+
+@pytest.fixture
+def updater(mock_porringer_api: MagicMock, tmp_path: Path) -> Updater:
+    """Create an Updater instance with temporary directories."""
+    config = UpdateConfig(
+        metadata_dir=tmp_path / 'metadata',
+        download_dir=tmp_path / 'downloads',
+        backup_dir=tmp_path / 'backup',
+    )
+    return Updater(
+        current_version=Version('1.0.0'),
+        porringer_api=mock_porringer_api,
+        config=config,
+    )
+
+
 class TestUpdater:
     """Tests for Updater class."""
 
-    @pytest.fixture
-    def mock_porringer_api(self) -> MagicMock:
-        """Create a mock porringer API."""
-        api = MagicMock()
-        api.update = MagicMock()
-        return api
-
-    @pytest.fixture
-    def updater(self, mock_porringer_api: MagicMock, tmp_path: Path) -> Updater:
-        """Create an Updater instance with temporary directories."""
-        config = UpdateConfig(
-            metadata_dir=tmp_path / 'metadata',
-            download_dir=tmp_path / 'downloads',
-            backup_dir=tmp_path / 'backup',
-        )
-        return Updater(
-            current_version=Version('1.0.0'),
-            porringer_api=mock_porringer_api,
-            config=config,
-        )
-
-    def test_initial_state(self, updater: Updater) -> None:
+    @staticmethod
+    def test_initial_state(updater: Updater) -> None:
         """Verify updater starts in NO_UPDATE state."""
         assert updater.state == UpdateState.NO_UPDATE
 
-    def test_directories_created(self, updater: Updater) -> None:
+    @staticmethod
+    def test_directories_created(updater: Updater) -> None:
         """Verify configuration directories are created on init."""
         assert updater._config.metadata_dir.exists()
         assert updater._config.download_dir.exists()
         assert updater._config.backup_dir.exists()
 
-    def test_is_frozen_property(self, updater: Updater) -> None:
+    @staticmethod
+    def test_is_frozen_property(updater: Updater) -> None:
         """Verify is_frozen returns False in test environment."""
         # Tests run in non-frozen environment
         assert updater.is_frozen is False
 
-    def test_executable_path_not_frozen(self, updater: Updater) -> None:
+    @staticmethod
+    def test_executable_path_not_frozen(updater: Updater) -> None:
         """Verify executable_path returns a Path in non-frozen mode."""
         path = updater.executable_path
         assert isinstance(path, Path)
 
-    def test_check_for_update_no_update(self, updater: Updater, mock_porringer_api: MagicMock) -> None:
+    @staticmethod
+    def test_check_for_update_no_update(updater: Updater, mock_porringer_api: MagicMock) -> None:
         """Verify check_for_update handles no update available."""
         mock_result = MagicMock()
         mock_result.available = False
@@ -182,7 +189,8 @@ class TestUpdater:
         assert info.current_version == Version('1.0.0')
         assert updater.state == UpdateState.NO_UPDATE
 
-    def test_check_for_update_available(self, updater: Updater, mock_porringer_api: MagicMock) -> None:
+    @staticmethod
+    def test_check_for_update_available(updater: Updater, mock_porringer_api: MagicMock) -> None:
         """Verify check_for_update handles update available."""
         mock_result = MagicMock()
         mock_result.available = True
@@ -196,7 +204,8 @@ class TestUpdater:
         assert info.latest_version == Version('2.0.0')
         assert updater.state == UpdateState.UPDATE_AVAILABLE
 
-    def test_check_for_update_error(self, updater: Updater, mock_porringer_api: MagicMock) -> None:
+    @staticmethod
+    def test_check_for_update_error(updater: Updater, mock_porringer_api: MagicMock) -> None:
         """Verify check_for_update handles errors gracefully."""
         mock_porringer_api.update.check.side_effect = Exception('Network error')
 
@@ -206,27 +215,32 @@ class TestUpdater:
         assert info.error == 'Network error'
         assert updater.state == UpdateState.FAILED
 
-    def test_download_update_no_update_available(self, updater: Updater) -> None:
+    @staticmethod
+    def test_download_update_no_update_available(updater: Updater) -> None:
         """Verify download_update fails when no update is available."""
         result = updater.download_update()
         assert result is None
 
-    def test_apply_update_no_download(self, updater: Updater) -> None:
+    @staticmethod
+    def test_apply_update_no_download(updater: Updater) -> None:
         """Verify apply_update fails when no update is downloaded."""
         result = updater.apply_update()
         assert result is False
 
-    def test_rollback_no_backup(self, updater: Updater) -> None:
+    @staticmethod
+    def test_rollback_no_backup(updater: Updater) -> None:
         """Verify rollback fails when no backup exists."""
         result = updater.rollback()
         assert result is False
 
-    def test_cleanup_backup_no_backup(self, updater: Updater) -> None:
+    @staticmethod
+    def test_cleanup_backup_no_backup(updater: Updater) -> None:
         """Verify cleanup_backup handles missing backup gracefully."""
         # Should not raise
         updater.cleanup_backup()
 
-    def test_cleanup_backup_with_backup(self, updater: Updater) -> None:
+    @staticmethod
+    def test_cleanup_backup_with_backup(updater: Updater) -> None:
         """Verify cleanup_backup removes existing backup."""
         backup_path = updater._get_backup_path()
         backup_path.parent.mkdir(parents=True, exist_ok=True)
@@ -236,7 +250,8 @@ class TestUpdater:
 
         assert not backup_path.exists()
 
-    def test_get_target_name_windows(self, updater: Updater, mock_porringer_api: MagicMock) -> None:
+    @staticmethod
+    def test_get_target_name_windows(updater: Updater, mock_porringer_api: MagicMock) -> None:
         """Verify target name generation for Windows."""
         # Set up update info
         mock_result = MagicMock()
@@ -250,7 +265,8 @@ class TestUpdater:
             target_name = updater._get_target_name()
             assert target_name == 'synodic-2.0.0-windows-x64.exe'
 
-    def test_get_target_name_linux(self, updater: Updater, mock_porringer_api: MagicMock) -> None:
+    @staticmethod
+    def test_get_target_name_linux(updater: Updater, mock_porringer_api: MagicMock) -> None:
         """Verify target name generation for Linux."""
         mock_result = MagicMock()
         mock_result.available = True
@@ -263,7 +279,8 @@ class TestUpdater:
             target_name = updater._get_target_name()
             assert target_name == 'synodic-2.0.0-linux-x64'
 
-    def test_get_target_name_macos(self, updater: Updater, mock_porringer_api: MagicMock) -> None:
+    @staticmethod
+    def test_get_target_name_macos(updater: Updater, mock_porringer_api: MagicMock) -> None:
         """Verify target name generation for macOS."""
         mock_result = MagicMock()
         mock_result.available = True
@@ -280,14 +297,8 @@ class TestUpdater:
 class TestUpdaterIntegration:
     """Integration tests for the full update workflow."""
 
-    @pytest.fixture
-    def mock_porringer_api(self) -> MagicMock:
-        """Create a mock porringer API."""
-        api = MagicMock()
-        api.update = MagicMock()
-        return api
-
-    def test_full_update_check_workflow(self, mock_porringer_api: MagicMock, tmp_path: Path) -> None:
+    @staticmethod
+    def test_full_update_check_workflow(mock_porringer_api: MagicMock, tmp_path: Path) -> None:
         """Test the complete update check workflow."""
         config = UpdateConfig(
             metadata_dir=tmp_path / 'metadata',

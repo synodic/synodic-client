@@ -4,6 +4,7 @@ import logging
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
@@ -160,7 +161,7 @@ class Updater:
                 error=str(e),
             )
 
-    def download_update(self, progress_callback: callable | None = None) -> Path | None:
+    def download_update(self, progress_callback: Callable | None = None) -> Path | None:
         """Download the update artifact using TUF for verification.
 
         Args:
@@ -373,7 +374,7 @@ class Updater:
         exe_name = self.executable_path.name
         return self._config.backup_dir / f'{exe_name}.backup'
 
-    def _download_direct(self, download_path: Path, progress_callback: callable | None = None) -> None:
+    def _download_direct(self, download_path: Path, progress_callback: Callable | None = None) -> None:
         """Download update directly via porringer (fallback for dev mode).
 
         Args:

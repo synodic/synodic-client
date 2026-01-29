@@ -37,7 +37,7 @@ def application() -> None:
     logger.info('Synodic Client v%s started (channel: %s)', client.version, update_channel.name)
 
     list_params = ListPluginsParameters()
-    list_results = porringer.plugin.list(list_params)
+    porringer.plugin.list(list_params)
 
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)

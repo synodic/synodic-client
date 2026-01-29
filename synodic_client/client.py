@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from importlib.resources import as_file, files
 from pathlib import Path
@@ -90,7 +91,7 @@ class Client:
 
         return self._updater.check_for_update()
 
-    def download_update(self, progress_callback: callable | None = None) -> Path | None:
+    def download_update(self, progress_callback: Callable | None = None) -> Path | None:
         """Download an available update.
 
         Args:
