@@ -6,6 +6,7 @@ from typing import LiteralString
 
 from porringer.api import API, APIParameters
 from porringer.schema import ListPluginsParameters, LocalConfiguration
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from synodic_client.application.screen.screen import Screen
@@ -41,6 +42,9 @@ def application() -> None:
 
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
+
+    # Reduce CPU usage when idle - process events less aggressively
+    app.setAttribute(Qt.ApplicationAttribute.AA_CompressHighFrequencyEvents)
 
     _screen = Screen()
     _tray = TrayScreen(app, client, icon, _screen.window)
