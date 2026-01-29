@@ -1,17 +1,29 @@
-"""Self-update functionality using TUF and porringer."""
+"""Self-update functionality using TUF and porringer.
+
+This module handles self-updates for synodic-client with two strategies:
+
+1. **Frozen executables** : Uses TUF
+   for cryptographically verified binary downloads from GitHub releases.
+   The binary is replaced in-place with automatic backup and rollback support.
+
+2. **Python package installs** : Delegates to porringer for version
+   checking. Users are instructed to run their package manager's upgrade command
+   manually, as pip/pipx handle their own security and dependency resolution.
+"""
 
 import logging
 import shutil
 import subprocess
 import sys
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 
 from packaging.version import Version
 from porringer.api import API
-from porringer.schema import CheckUpdateParameters, DownloadParameters, UpdateSource
+from porringer.schema import CheckUpdateParameters, UpdateSource
 from tuf.api.exceptions import DownloadError, RepositoryError
 from tuf.ngclient import Updater as TUFUpdater
 
@@ -120,7 +132,7 @@ class Updater:
         """Check PyPI for available updates.
 
         Returns:
-            UpdateInfo with details about available updates
+            UpdateInfo with details about available updates.
         """
         try:
             params = CheckUpdateParameters(
@@ -134,6 +146,7 @@ class Updater:
 
             if result.available and result.latest_version:
                 latest = Version(str(result.latest_version))
+
                 self._update_info = UpdateInfo(
                     available=True,
                     current_version=self._current_version,
@@ -164,12 +177,18 @@ class Updater:
     def download_update(self, progress_callback: Callable | None = None) -> Path | None:
         """Download the update artifact using TUF for verification.
 
+        This method is only applicable for frozen executables. For pip/pipx installs,
+        use the upgrade_command from UpdateInfo instead.
+
         Args:
             progress_callback: Optional callback for progress updates (received, total)
 
         Returns:
             Path to the downloaded file, or None on failure
         """
+        if not self.is_frozen:
+            raise NotImplementedError('Updates for pip/pipx installs are not yet supported')
+
         if self._state != UpdateState.UPDATE_AVAILABLE or not self._update_info:
             logger.error('No update available to download')
             return None
@@ -196,9 +215,8 @@ class Updater:
                 logger.info('Downloaded and verified update via TUF: %s', download_path)
 
             else:
-                # Fallback: Direct download via porringer (development mode)
-                logger.warning('TUF repository not available, using direct download')
-                self._download_direct(download_path, progress_callback)
+                # No TUF available - cannot proceed safely for frozen builds
+                raise RepositoryError('TUF repository not available. Cannot securely download update.')
 
             self._downloaded_path = download_path
             self._state = UpdateState.DOWNLOADED
@@ -218,12 +236,15 @@ class Updater:
     def apply_update(self) -> bool:
         """Apply the downloaded update.
 
-        For frozen executables: Replaces the executable with the new version.
-        For dev mode: Rebuilds with PyInstaller.
+        This method is only applicable for frozen executables. For pip/pipx installs,
+        users should run the upgrade_command from UpdateInfo manually.
 
         Returns:
             True if update was applied successfully
         """
+        if not self.is_frozen:
+            raise NotImplementedError('Updates for pip/pipx installs are not yet supported')
+
         if self._state != UpdateState.DOWNLOADED or not self._downloaded_path:
             logger.error('No downloaded update to apply')
             return False
@@ -231,10 +252,7 @@ class Updater:
         self._state = UpdateState.APPLYING
 
         try:
-            if self.is_frozen:
-                return self._apply_frozen_update()
-            else:
-                return self._apply_dev_update()
+            return self._apply_frozen_update()
 
         except Exception as e:
             logger.exception('Failed to apply update')
@@ -379,23 +397,6 @@ class Updater:
         exe_name = self.executable_path.name
         return self._config.backup_dir / f'{exe_name}.backup'
 
-    def _download_direct(self, download_path: Path, progress_callback: Callable | None = None) -> None:
-        """Download update directly via porringer (fallback for dev mode).
-
-        Args:
-            download_path: Destination path
-            progress_callback: Progress callback
-        """
-        if not self._update_info or not self._update_info.download_url:
-            raise ValueError('No download URL available')
-
-        params = DownloadParameters(
-            url=self._update_info.download_url,
-            destination=download_path,
-        )
-
-        self._porringer.update.download(params, progress_callback)
-
     def _apply_frozen_update(self) -> bool:
         """Apply update to a frozen executable.
 
@@ -426,91 +427,63 @@ class Updater:
             return True
 
     def _apply_windows_update(self, current_exe: Path, new_exe: Path, backup_path: Path) -> bool:
-        """Apply update on Windows using a batch script.
+        """Apply update on Windows using rename-then-replace.
+
+        Windows allows renaming a running executable but not overwriting it.
+        We rename the current exe, copy the new one to the original path,
+        then the app can restart normally. The old exe is cleaned up on next launch.
 
         Args:
             current_exe: Path to current executable
             new_exe: Path to new executable
-            backup_path: Path to backup
+            backup_path: Path to backup (already created by caller)
 
         Returns:
-            True if update script was created successfully
+            True if update was applied successfully
         """
-        # Create a batch script that will run after we exit
-        script_path = self._config.download_dir / 'update.bat'
+        # Mark the old exe for cleanup (rename it so we can place new one)
+        old_exe_path = current_exe.with_suffix('.exe.old')
 
-        script_content = f'''@echo off
-echo Waiting for application to close...
-timeout /t 2 /nobreak > nul
-echo Applying update...
-copy /y "{new_exe}" "{current_exe}"
-if errorlevel 1 (
-    echo Update failed, restoring backup...
-    copy /y "{backup_path}" "{current_exe}"
-    exit /b 1
-)
-echo Update complete, starting application...
-start "" "{current_exe}"
-del "%~f0"
-'''
+        # Remove any previous .old file from earlier updates
+        # May fail if still locked from a very recent restart, that's ok
+        with suppress(OSError):
+            if old_exe_path.exists():
+                old_exe_path.unlink()
 
-        script_path.write_text(script_content)
+        try:
+            # Rename running exe (Windows allows this)
+            current_exe.rename(old_exe_path)
+            logger.info('Renamed running executable: %s -> %s', current_exe, old_exe_path)
 
-        # Schedule the script to run
-        # Windows-specific process creation flags
-        flags = 0
-        if sys.platform == 'win32':
-            # CREATE_NEW_CONSOLE = 0x00000200, DETACHED_PROCESS = 0x00000008
-            flags = 0x00000200 | 0x00000008
+            # Copy new exe to original location
+            shutil.copy2(new_exe, current_exe)
+            logger.info('Installed new executable: %s', current_exe)
 
-        subprocess.Popen(
-            ['cmd', '/c', str(script_path)],
-            creationflags=flags,
-        )
+            self._state = UpdateState.APPLIED
+            logger.info('Windows update applied successfully (restart required)')
+            return True
 
-        self._state = UpdateState.APPLIED
-        logger.info('Windows update script scheduled')
-        return True
+        except OSError as e:
+            logger.exception('Failed to apply Windows update via rename')
+            # Try to restore if rename succeeded but copy failed
+            if old_exe_path.exists() and not current_exe.exists():
+                with suppress(OSError):
+                    old_exe_path.rename(current_exe)
+            raise RuntimeError(f'Windows update failed: {e}') from e
 
-    def _apply_dev_update(self) -> bool:
-        """Apply update in development mode by rebuilding with PyInstaller.
+    def cleanup_old_executable(self) -> None:
+        """Clean up old executable from previous update.
 
-        Returns:
-            True if successful
+        Call this on application startup to remove the .old file left
+        from the rename-then-replace update strategy on Windows.
         """
-        logger.info('Development mode: Rebuilding with PyInstaller')
+        if sys.platform != 'win32' or not self.is_frozen:
+            return
 
-        # Find the spec file
-        spec_file = Path(__file__).parent.parent.parent / 'tool' / 'pyinstaller' / 'synodic.spec'
-
-        if not spec_file.exists():
-            raise FileNotFoundError(f'PyInstaller spec file not found: {spec_file}')
-
-        # First, update the package
-        logger.info('Updating package via pip...')
-        pip_cmd = [sys.executable, '-m', 'pip', 'install', '--upgrade']
-
-        if self._config.include_prereleases:
-            pip_cmd.append('--pre')
-
-        pip_cmd.append(self._config.package_name)
-
-        pip_result = subprocess.run(pip_cmd, capture_output=True, text=True, check=False)
-
-        if pip_result.returncode != 0:
-            raise RuntimeError(f'Pip upgrade failed: {pip_result.stderr}')
-
-        # Rebuild with PyInstaller
-        logger.info('Rebuilding with PyInstaller...')
-        pyinstaller_cmd = [sys.executable, '-m', 'PyInstaller', '--clean', str(spec_file)]
-
-        build_result = subprocess.run(
-            pyinstaller_cmd, capture_output=True, text=True, cwd=spec_file.parent.parent.parent, check=False
-        )
-
-        if build_result.returncode != 0:
-            raise RuntimeError(f'PyInstaller build failed: {build_result.stderr}')
-
-        self._state = UpdateState.APPLIED
-        logger.info('Development build complete')
-        return True
+        old_exe_path = self.executable_path.with_suffix('.exe.old')
+        if old_exe_path.exists():
+            try:
+                old_exe_path.unlink()
+                logger.info('Cleaned up old executable: %s', old_exe_path)
+            except OSError as e:
+                logger.warning('Failed to clean up old executable: %s', e)

@@ -216,16 +216,16 @@ class TestUpdater:
         assert updater.state == UpdateState.FAILED
 
     @staticmethod
-    def test_download_update_no_update_available(updater: Updater) -> None:
-        """Verify download_update fails when no update is available."""
-        result = updater.download_update()
-        assert result is None
+    def test_download_update_not_frozen(updater: Updater) -> None:
+        """Verify download_update raises NotImplementedError when not frozen."""
+        with pytest.raises(NotImplementedError, match='pip/pipx'):
+            updater.download_update()
 
     @staticmethod
-    def test_apply_update_no_download(updater: Updater) -> None:
-        """Verify apply_update fails when no update is downloaded."""
-        result = updater.apply_update()
-        assert result is False
+    def test_apply_update_not_frozen(updater: Updater) -> None:
+        """Verify apply_update raises NotImplementedError when not frozen."""
+        with pytest.raises(NotImplementedError, match='pip/pipx'):
+            updater.apply_update()
 
     @staticmethod
     def test_rollback_no_backup(updater: Updater) -> None:

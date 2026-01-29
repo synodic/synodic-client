@@ -28,12 +28,27 @@ class Client:
 
     @property
     def version(self) -> Version:
-        """Extracts the version from the installed client
+        """Extracts the version from the installed client.
+
+        Priority:
+        1. importlib.metadata
+        2. _version.py
 
         Returns:
             The version data
         """
-        return Version(importlib.metadata.version(self.distribution))
+        try:
+            return Version(importlib.metadata.version(self.distribution))
+        except importlib.metadata.PackageNotFoundError:
+            # Frozen executable or missing metadata - use bundled version from SCM
+            # Import lazily since _version.py is generated at build time and not committed
+            try:
+                from synodic_client._version import __version__ as bundled_version  # noqa: PLC0415
+
+                return Version(bundled_version)
+            except ImportError:
+                # Development without build - no version file exists
+                return Version('0.0.0.dev0')
 
     @property
     def package(self) -> str:

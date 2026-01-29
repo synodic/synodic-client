@@ -68,6 +68,8 @@ search_path = ["synodic_client/..."]
 
 [tool.pdm.version]
 source = "scm"
+write_to = "synodic_client/_version.py"
+write_template = "__version__ = '{}'\n"
 
 [tool.pdm.scripts]
 analyze = "ruff check synodic_client tests"

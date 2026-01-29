@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Generated version file (created by pdm build)
+synodic_client/_version.py
+
 # C extensions
 *.so
 
