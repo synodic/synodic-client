@@ -133,7 +133,7 @@ class Updater:
             result = self._porringer.update.check(params)
 
             if result.available and result.latest_version:
-                latest = Version(result.latest_version)
+                latest = Version(str(result.latest_version))
                 self._update_info = UpdateInfo(
                     available=True,
                     current_version=self._current_version,
@@ -239,7 +239,8 @@ class Updater:
         except Exception as e:
             logger.exception('Failed to apply update')
             self._state = UpdateState.ROLLBACK_REQUIRED
-            self._update_info.error = str(e)
+            if self._update_info is not None:
+                self._update_info.error = str(e)
             return False
 
     def rollback(self) -> bool:
@@ -341,9 +342,13 @@ class Updater:
             Path to root.json if bundled, None otherwise
         """
         if self.is_frozen:
-            # PyInstaller bundle
-            bundle_dir = Path(sys._MEIPASS)  # type: ignore[attr-defined]
-            root_path = bundle_dir / 'data' / 'tuf_root.json'
+            # PyInstaller bundle - _MEIPASS is set by PyInstaller at runtime
+            meipass = getattr(sys, '_MEIPASS', None)
+            if meipass is not None:
+                bundle_dir = Path(meipass)
+                root_path = bundle_dir / 'data' / 'tuf_root.json'
+            else:
+                return None
         else:
             # Development mode
             root_path = Path(__file__).parent.parent / 'data' / 'tuf_root.json'
@@ -401,6 +406,10 @@ class Updater:
         backup_path = self._get_backup_path()
         new_exe = self._downloaded_path
 
+        if new_exe is None:
+            logger.error('No downloaded executable found')
+            return False
+
         # Create backup of current executable
         logger.info('Creating backup: %s -> %s', current_exe, backup_path)
         shutil.copy2(current_exe, backup_path)
@@ -448,9 +457,15 @@ del "%~f0"
         script_path.write_text(script_content)
 
         # Schedule the script to run
+        # Windows-specific process creation flags
+        flags = 0
+        if sys.platform == 'win32':
+            # CREATE_NEW_CONSOLE = 0x00000200, DETACHED_PROCESS = 0x00000008
+            flags = 0x00000200 | 0x00000008
+        
         subprocess.Popen(
             ['cmd', '/c', str(script_path)],
-            creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS,
+            creationflags=flags,
         )
 
         self._state = UpdateState.APPLIED

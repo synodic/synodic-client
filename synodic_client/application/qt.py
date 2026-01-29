@@ -44,7 +44,10 @@ def application() -> None:
 
     screen = Screen()
 
-    app.tray = TrayScreen(app, client, icon, screen.window)
+    # Store tray screen as instance attribute using object.__setattr__
+    # to avoid type checking issues with dynamic attributes
+    tray_screen = TrayScreen(app, client, icon, screen.window)
+    object.__setattr__(app, 'tray', tray_screen)
 
     app.exec_()
 

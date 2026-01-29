@@ -63,6 +63,9 @@ quote-style = "single"
 [tool.coverage.report]
 skip_empty = true
 
+[tool.pyrefly]
+search_path = ["synodic_client/..."]
+
 [tool.pdm.version]
 source = "scm"
 
