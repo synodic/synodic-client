@@ -63,6 +63,9 @@ quote-style = "single"
 [tool.coverage.report]
 skip_empty = true
 
+[tool.pdm.version]
+source = "scm"
+
 [tool.pdm.scripts]
 analyze = "ruff check synodic_client tests"
 format = "ruff format"
