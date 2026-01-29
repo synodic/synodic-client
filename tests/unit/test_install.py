@@ -5,7 +5,6 @@ from pathlib import Path
 
 from packaging.version import Version
 
-from synodic_client.application.qt import icon
 from synodic_client.client import Client
 
 
@@ -37,9 +36,11 @@ class TestInstall:
             assert entry.load()
 
     @staticmethod
-    def icon_exists() -> None:
-        """Verifies that the icon file used exists"""
-        assert Path(icon).exists()
+    def test_icon_exists() -> None:
+        """Verifies that the icon file used exists."""
+        client = Client()
+        with client.resource(Client.icon) as icon_path:
+            assert icon_path.exists()
 
     @staticmethod
     def test_data() -> None:

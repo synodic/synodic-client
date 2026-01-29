@@ -1,21 +1,17 @@
 """The client type"""
 
-from __future__ import annotations
-
 import importlib.metadata
 import logging
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from importlib.resources import as_file, files
 from pathlib import Path
-from typing import TYPE_CHECKING, LiteralString
+from typing import LiteralString
 
 from packaging.version import Version
+from porringer.api import API
 
 from synodic_client.updater import UpdateConfig, UpdateInfo, Updater
-
-if TYPE_CHECKING:
-    from porringer.api import API
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +20,12 @@ class Client:
     """The client"""
 
     distribution: LiteralString = 'synodic_client'
+    icon: LiteralString = 'icon.png'
     _updater: Updater | None = None
 
     @property
     def version(self) -> Version:
         """Extracts the version from the installed client.
-
-        Priority:
-        1. importlib.metadata
-        2. _version.py
 
         Returns:
             The version data
@@ -40,15 +33,7 @@ class Client:
         try:
             return Version(importlib.metadata.version(self.distribution))
         except importlib.metadata.PackageNotFoundError:
-            # Frozen executable or missing metadata - use bundled version from SCM
-            # Import lazily since _version.py is generated at build time and not committed
-            try:
-                from synodic_client._version import __version__ as bundled_version  # noqa: PLC0415
-
-                return Version(bundled_version)
-            except ImportError:
-                # Development without build - no version file exists
-                return Version('0.0.0.dev0')
+            return Version('0.0.0.dev0')
 
     @property
     def package(self) -> str:

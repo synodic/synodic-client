@@ -2,7 +2,6 @@
 
 import logging
 import sys
-from typing import LiteralString
 
 from porringer.api import API, APIParameters
 from porringer.schema import ListPluginsParameters, LocalConfiguration
@@ -13,8 +12,6 @@ from synodic_client.application.screen.screen import Screen
 from synodic_client.application.screen.tray import TrayScreen
 from synodic_client.client import Client
 from synodic_client.updater import UpdateChannel, UpdateConfig
-
-icon: LiteralString = 'icon.png'
 
 
 def application() -> None:
@@ -47,7 +44,7 @@ def application() -> None:
     app.setAttribute(Qt.ApplicationAttribute.AA_CompressHighFrequencyEvents)
 
     _screen = Screen()
-    _tray = TrayScreen(app, client, icon, _screen.window)
+    _tray = TrayScreen(app, client, Client.icon, _screen.window)
 
     # sys.exit ensures proper cleanup and exit code propagation
     # Leading underscore indicates references kept alive intentionally until exec() returns
