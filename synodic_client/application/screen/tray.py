@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QProgressDialog,
 
 from synodic_client.application.screen.screen import MainWindow
 from synodic_client.client import Client
-from synodic_client.updater import UpdateInfo, UpdateState
+from synodic_client.updater import UpdateInfo
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,8 @@ class UpdateCheckWorker(QObject):
 class UpdateDownloadWorker(QObject):
     """Worker for downloading updates in a background thread."""
 
-    finished = Signal(object)  # Path or None
-    progress = Signal(int, int)  # received, total
+    finished = Signal(bool)  # success status
+    progress = Signal(int)  # percentage (0-100)
     error = Signal(str)
 
     def __init__(self, client: Client) -> None:
@@ -51,11 +51,11 @@ class UpdateDownloadWorker(QObject):
         """Run the update download."""
         try:
 
-            def progress_callback(received: int, total: int) -> None:
-                self.progress.emit(received, total)
+            def progress_callback(percentage: int) -> None:
+                self.progress.emit(percentage)
 
-            result = self._client.download_update(progress_callback)
-            self.finished.emit(result)
+            success = self._client.download_update(progress_callback)
+            self.finished.emit(success)
         except Exception as e:
             logger.exception('Update download failed')
             self.error.emit(str(e))
@@ -219,25 +219,19 @@ class TrayScreen:
         # Start the thread
         self._update_thread.start()
 
-    def _on_download_progress(self, received: int, total: int) -> None:
+    def _on_download_progress(self, percentage: int) -> None:
         """Handle download progress update."""
         if self._progress_dialog:
-            if total > 0:
-                percentage = int((received / total) * 100)
-                self._progress_dialog.setValue(percentage)
-                self._progress_dialog.setLabelText(
-                    f'Downloading update... ({received // 1024} KB / {total // 1024} KB)'
-                )
-            else:
-                self._progress_dialog.setLabelText(f'Downloading update... ({received // 1024} KB)')
+            self._progress_dialog.setValue(percentage)
+            self._progress_dialog.setLabelText(f'Downloading update... {percentage}%')
 
-    def _on_download_finished(self, download_path) -> None:
+    def _on_download_finished(self, success: bool) -> None:
         """Handle download completion."""
         if self._progress_dialog:
             self._progress_dialog.close()
             self._progress_dialog = None
 
-        if download_path is None:
+        if not success:
             QMessageBox.warning(
                 self._window,
                 'Download Failed',
@@ -276,55 +270,21 @@ class TrayScreen:
         if self._client.updater is None:
             return
 
-        success = self._client.apply_update()
+        try:
+            # Schedule update to apply on exit, then quit the app
+            self._client.apply_update_on_exit(restart=True)
 
-        if success:
-            updater = self._client.updater
-
-            if updater.state == UpdateState.APPLIED:
-                QMessageBox.information(
-                    self._window,
-                    'Update Applied',
-                    'The update has been applied successfully.\nThe application will now restart.',
-                )
-                self._client.restart_for_update()
-            else:
-                # Update scheduled (Windows batch script)
-                QMessageBox.information(
-                    self._window,
-                    'Update Scheduled',
-                    'The update has been scheduled.\nThe application will close and restart with the new version.',
-                )
-                self._app.quit()
-            return
-
-        # Update failed - check if rollback is needed
-        updater = self._client.updater
-        if updater and updater.state == UpdateState.ROLLBACK_REQUIRED:
-            reply = QMessageBox.critical(
+            QMessageBox.information(
                 self._window,
-                'Update Failed',
-                'Failed to apply the update.\n\nWould you like to rollback to the previous version?',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes,
+                'Update Ready',
+                'The update will be applied when the application closes.\n'
+                'The application will restart automatically with the new version.',
             )
+            self._app.quit()
 
-            if reply == QMessageBox.StandardButton.Yes:
-                if updater.rollback():
-                    QMessageBox.information(
-                        self._window,
-                        'Rollback Complete',
-                        'Successfully rolled back to the previous version.',
-                    )
-                else:
-                    QMessageBox.critical(
-                        self._window,
-                        'Rollback Failed',
-                        'Failed to rollback. The application may be in an inconsistent state.',
-                    )
-        else:
+        except Exception as e:
             QMessageBox.warning(
                 self._window,
                 'Update Failed',
-                'Failed to apply the update. Please try again later.',
+                f'Failed to apply the update: {e}',
             )

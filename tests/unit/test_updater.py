@@ -1,17 +1,18 @@
-"""Tests for the self-update functionality."""
+"""Tests for the self-update functionality using Velopack."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 from packaging.version import Version
 
 from synodic_client.updater import (
+    GITHUB_REPO_URL,
     UpdateChannel,
     UpdateConfig,
     UpdateInfo,
     Updater,
     UpdateState,
+    initialize_velopack,
 )
 
 
@@ -43,7 +44,6 @@ class TestUpdateState:
             'APPLYING',
             'APPLIED',
             'FAILED',
-            'ROLLBACK_REQUIRED',
         ]
         for state_name in expected_states:
             assert hasattr(UpdateState, state_name)
@@ -63,22 +63,33 @@ class TestUpdateInfo:
         assert info.current_version == Version('1.0.0')
         assert info.latest_version is None
         assert info.error is None
+        assert info._velopack_info is None
 
     @staticmethod
     def test_full_creation() -> None:
         """Verify UpdateInfo can be created with all fields."""
+        mock_velopack_info = MagicMock()
         info = UpdateInfo(
             available=True,
             current_version=Version('1.0.0'),
             latest_version=Version('2.0.0'),
-            download_url='https://example.com/update.exe',
-            target_name='synodic-2.0.0-windows-x64.exe',
-            file_size=1024000,
             error=None,
+            _velopack_info=mock_velopack_info,
         )
         assert info.available is True
         assert info.latest_version == Version('2.0.0')
-        assert info.download_url == 'https://example.com/update.exe'
+        assert info._velopack_info is mock_velopack_info
+
+    @staticmethod
+    def test_with_error() -> None:
+        """Verify UpdateInfo can be created with error."""
+        info = UpdateInfo(
+            available=False,
+            current_version=Version('1.0.0'),
+            error='Network error',
+        )
+        assert info.available is False
+        assert info.error == 'Network error'
 
 
 class TestUpdateConfig:
@@ -88,64 +99,46 @@ class TestUpdateConfig:
     def test_default_values() -> None:
         """Verify default configuration values."""
         config = UpdateConfig()
-        assert config.package_name == 'synodic_client'
+        assert config.repo_url == GITHUB_REPO_URL
         assert config.channel == UpdateChannel.STABLE
-        assert config.tuf_repository_url == 'https://synodic.github.io/synodic-updates'
 
     @staticmethod
     def test_custom_values() -> None:
         """Verify custom configuration values are applied."""
         config = UpdateConfig(
-            package_name='custom_package',
+            repo_url='https://github.com/custom/repo',
             channel=UpdateChannel.DEVELOPMENT,
-            tuf_repository_url='https://custom.example.com/tuf',
         )
-        assert config.package_name == 'custom_package'
+        assert config.repo_url == 'https://github.com/custom/repo'
         assert config.channel == UpdateChannel.DEVELOPMENT
-        assert config.tuf_repository_url == 'https://custom.example.com/tuf'
 
     @staticmethod
-    def test_include_prereleases_stable() -> None:
-        """Verify STABLE channel does not include prereleases."""
+    def test_channel_name_stable() -> None:
+        """Verify STABLE channel returns 'stable' name."""
         config = UpdateConfig(channel=UpdateChannel.STABLE)
-        assert config.include_prereleases is False
+        assert config.channel_name == 'stable'
 
     @staticmethod
-    def test_include_prereleases_development() -> None:
-        """Verify DEVELOPMENT channel includes prereleases."""
+    def test_channel_name_development() -> None:
+        """Verify DEVELOPMENT channel returns 'dev' name."""
         config = UpdateConfig(channel=UpdateChannel.DEVELOPMENT)
-        assert config.include_prereleases is True
-
-    @staticmethod
-    def test_default_paths(tmp_path: Path) -> None:
-        """Verify default paths are under user home directory."""
-        config = UpdateConfig()
-        assert '.synodic' in str(config.metadata_dir)
-        assert '.synodic' in str(config.download_dir)
-        assert '.synodic' in str(config.backup_dir)
+        assert config.channel_name == 'dev'
 
 
 @pytest.fixture
-def mock_porringer_api() -> MagicMock:
-    """Create a mock porringer API."""
-    api = MagicMock()
-    api.update = MagicMock()
-    return api
+def updater() -> Updater:
+    """Create an Updater instance for testing."""
+    return Updater(current_version=Version('1.0.0'))
 
 
 @pytest.fixture
-def updater(mock_porringer_api: MagicMock, tmp_path: Path) -> Updater:
-    """Create an Updater instance with temporary directories."""
+def updater_with_config() -> Updater:
+    """Create an Updater instance with custom config."""
     config = UpdateConfig(
-        metadata_dir=tmp_path / 'metadata',
-        download_dir=tmp_path / 'downloads',
-        backup_dir=tmp_path / 'backup',
+        repo_url='https://github.com/test/repo',
+        channel=UpdateChannel.DEVELOPMENT,
     )
-    return Updater(
-        current_version=Version('1.0.0'),
-        porringer_api=mock_porringer_api,
-        config=config,
-    )
+    return Updater(current_version=Version('1.0.0'), config=config)
 
 
 class TestUpdater:
@@ -157,178 +150,297 @@ class TestUpdater:
         assert updater.state == UpdateState.NO_UPDATE
 
     @staticmethod
-    def test_directories_created(updater: Updater) -> None:
-        """Verify configuration directories are created on init."""
-        assert updater._config.metadata_dir.exists()
-        assert updater._config.download_dir.exists()
-        assert updater._config.backup_dir.exists()
+    def test_initial_update_info_is_none(updater: Updater) -> None:
+        """Verify initial update info is None."""
+        assert updater._update_info is None
 
     @staticmethod
-    def test_is_frozen_property(updater: Updater) -> None:
-        """Verify is_frozen returns False in test environment."""
-        # Tests run in non-frozen environment
-        assert updater.is_frozen is False
+    def test_default_config(updater: Updater) -> None:
+        """Verify default config is used when not provided."""
+        assert updater._config.repo_url == GITHUB_REPO_URL
+        assert updater._config.channel == UpdateChannel.STABLE
 
     @staticmethod
-    def test_executable_path_not_frozen(updater: Updater) -> None:
-        """Verify executable_path returns a Path in non-frozen mode."""
-        path = updater.executable_path
-        assert isinstance(path, Path)
+    def test_custom_config(updater_with_config: Updater) -> None:
+        """Verify custom config is applied."""
+        assert updater_with_config._config.repo_url == 'https://github.com/test/repo'
+        assert updater_with_config._config.channel == UpdateChannel.DEVELOPMENT
 
     @staticmethod
-    def test_check_for_update_no_update(updater: Updater, mock_porringer_api: MagicMock) -> None:
+    def test_is_installed_not_velopack(updater: Updater) -> None:
+        """Verify is_installed returns False in test environment."""
+        # Tests run in non-Velopack environment
+        with patch.object(updater, '_get_velopack_manager', return_value=None):
+            assert updater.is_installed is False
+
+    @staticmethod
+    def test_is_installed_with_velopack(updater: Updater) -> None:
+        """Verify is_installed returns True when Velopack manager available."""
+        mock_manager = MagicMock()
+        with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
+            assert updater.is_installed is True
+
+    @staticmethod
+    def test_is_installed_handles_exception(updater: Updater) -> None:
+        """Verify is_installed returns False when exception occurs."""
+        with patch.object(updater, '_get_velopack_manager', side_effect=Exception('Test')):
+            assert updater.is_installed is False
+
+
+class TestUpdaterCheckForUpdate:
+    """Tests for check_for_update method."""
+
+    @staticmethod
+    def test_check_not_installed(updater: Updater) -> None:
+        """Verify check_for_update handles non-Velopack environment."""
+        with patch.object(updater, '_get_velopack_manager', return_value=None):
+            info = updater.check_for_update()
+
+        assert info.available is False
+        assert info.error == 'Not installed via Velopack'
+        assert info.current_version == Version('1.0.0')
+
+    @staticmethod
+    def test_check_no_update(updater: Updater) -> None:
         """Verify check_for_update handles no update available."""
-        mock_result = MagicMock()
-        mock_result.available = False
-        mock_result.latest_version = None
-        mock_porringer_api.update.check.return_value = mock_result
+        mock_manager = MagicMock()
+        mock_manager.check_for_updates.return_value = None
 
-        info = updater.check_for_update()
+        with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
+            info = updater.check_for_update()
 
         assert info.available is False
         assert info.current_version == Version('1.0.0')
         assert updater.state == UpdateState.NO_UPDATE
 
     @staticmethod
-    def test_check_for_update_available(updater: Updater, mock_porringer_api: MagicMock) -> None:
+    def test_check_update_available(updater: Updater) -> None:
         """Verify check_for_update handles update available."""
-        mock_result = MagicMock()
-        mock_result.available = True
-        mock_result.latest_version = '2.0.0'
-        mock_result.download_url = 'https://example.com/update.exe'
-        mock_porringer_api.update.check.return_value = mock_result
+        mock_velopack_info = MagicMock()
+        mock_velopack_info.target_full_release.version = '2.0.0'
 
-        info = updater.check_for_update()
+        mock_manager = MagicMock()
+        mock_manager.check_for_updates.return_value = mock_velopack_info
+
+        with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
+            info = updater.check_for_update()
 
         assert info.available is True
         assert info.latest_version == Version('2.0.0')
+        assert info._velopack_info is mock_velopack_info
         assert updater.state == UpdateState.UPDATE_AVAILABLE
 
     @staticmethod
-    def test_check_for_update_error(updater: Updater, mock_porringer_api: MagicMock) -> None:
+    def test_check_error(updater: Updater) -> None:
         """Verify check_for_update handles errors gracefully."""
-        mock_porringer_api.update.check.side_effect = Exception('Network error')
+        mock_manager = MagicMock()
+        mock_manager.check_for_updates.side_effect = Exception('Network error')
 
-        info = updater.check_for_update()
+        with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
+            info = updater.check_for_update()
 
         assert info.available is False
         assert info.error == 'Network error'
         assert updater.state == UpdateState.FAILED
 
+
+class TestUpdaterDownloadUpdate:
+    """Tests for download_update method."""
+
     @staticmethod
-    def test_download_update_not_frozen(updater: Updater) -> None:
-        """Verify download_update raises NotImplementedError when not frozen."""
-        with pytest.raises(NotImplementedError, match='pip/pipx'):
+    def test_download_not_installed(updater: Updater) -> None:
+        """Verify download_update raises NotImplementedError when not installed."""
+        with (
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=False),
+            pytest.raises(NotImplementedError, match='Velopack installs'),
+        ):
             updater.download_update()
 
     @staticmethod
-    def test_apply_update_not_frozen(updater: Updater) -> None:
-        """Verify apply_update raises NotImplementedError when not frozen."""
-        with pytest.raises(NotImplementedError, match='pip/pipx'):
-            updater.apply_update()
+    def test_download_no_update_available(updater: Updater) -> None:
+        """Verify download_update returns False when no update available."""
+        with patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True):
+            result = updater.download_update()
 
-    @staticmethod
-    def test_rollback_no_backup(updater: Updater) -> None:
-        """Verify rollback fails when no backup exists."""
-        result = updater.rollback()
         assert result is False
 
     @staticmethod
-    def test_cleanup_backup_no_backup(updater: Updater) -> None:
-        """Verify cleanup_backup handles missing backup gracefully."""
-        # Should not raise
-        updater.cleanup_backup()
-
-    @staticmethod
-    def test_cleanup_backup_with_backup(updater: Updater) -> None:
-        """Verify cleanup_backup removes existing backup."""
-        backup_path = updater._get_backup_path()
-        backup_path.parent.mkdir(parents=True, exist_ok=True)
-        backup_path.write_text('backup content')
-
-        updater.cleanup_backup()
-
-        assert not backup_path.exists()
-
-    @staticmethod
-    def test_get_target_name_windows(updater: Updater, mock_porringer_api: MagicMock) -> None:
-        """Verify target name generation for Windows."""
-        # Set up update info
-        mock_result = MagicMock()
-        mock_result.available = True
-        mock_result.latest_version = '2.0.0'
-        mock_result.download_url = 'https://example.com/update.exe'
-        mock_porringer_api.update.check.return_value = mock_result
-        updater.check_for_update()
-
-        with patch('synodic_client.updater.sys.platform', 'win32'):
-            target_name = updater._get_target_name()
-            assert target_name == 'synodic-2.0.0-windows-x64.exe'
-
-    @staticmethod
-    def test_get_target_name_linux(updater: Updater, mock_porringer_api: MagicMock) -> None:
-        """Verify target name generation for Linux."""
-        mock_result = MagicMock()
-        mock_result.available = True
-        mock_result.latest_version = '2.0.0'
-        mock_result.download_url = 'https://example.com/update'
-        mock_porringer_api.update.check.return_value = mock_result
-        updater.check_for_update()
-
-        with patch('synodic_client.updater.sys.platform', 'linux'):
-            target_name = updater._get_target_name()
-            assert target_name == 'synodic-2.0.0-linux-x64'
-
-    @staticmethod
-    def test_get_target_name_macos(updater: Updater, mock_porringer_api: MagicMock) -> None:
-        """Verify target name generation for macOS."""
-        mock_result = MagicMock()
-        mock_result.available = True
-        mock_result.latest_version = '2.0.0'
-        mock_result.download_url = 'https://example.com/update'
-        mock_porringer_api.update.check.return_value = mock_result
-        updater.check_for_update()
-
-        with patch('synodic_client.updater.sys.platform', 'darwin'):
-            target_name = updater._get_target_name()
-            assert target_name == 'synodic-2.0.0-macos-x64'
-
-
-class TestUpdaterIntegration:
-    """Integration tests for the full update workflow."""
-
-    @staticmethod
-    def test_full_update_check_workflow(mock_porringer_api: MagicMock, tmp_path: Path) -> None:
-        """Test the complete update check workflow."""
-        config = UpdateConfig(
-            metadata_dir=tmp_path / 'metadata',
-            download_dir=tmp_path / 'downloads',
-            backup_dir=tmp_path / 'backup',
-            channel=UpdateChannel.DEVELOPMENT,
-        )
-
-        updater = Updater(
+    def test_download_success(updater: Updater) -> None:
+        """Verify download_update succeeds with valid update info."""
+        mock_velopack_info = MagicMock()
+        updater._update_info = UpdateInfo(
+            available=True,
             current_version=Version('1.0.0'),
-            porringer_api=mock_porringer_api,
-            config=config,
+            latest_version=Version('2.0.0'),
+            _velopack_info=mock_velopack_info,
         )
+        updater._state = UpdateState.UPDATE_AVAILABLE
 
-        # Simulate update available
-        mock_result = MagicMock()
-        mock_result.available = True
-        mock_result.latest_version = '1.1.0.dev1'
-        mock_result.download_url = 'https://example.com/update.exe'
-        mock_porringer_api.update.check.return_value = mock_result
+        mock_manager = MagicMock()
 
-        # Check for update
-        info = updater.check_for_update()
+        with (
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
+            patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
+        ):
+            result = updater.download_update()
 
-        # Verify the workflow
-        assert info.available is True
-        assert info.latest_version == Version('1.1.0.dev1')
-        assert updater.state == UpdateState.UPDATE_AVAILABLE
+        assert result is True
+        assert updater.state == UpdateState.DOWNLOADED
+        mock_manager.download_updates.assert_called_once_with(mock_velopack_info, None)
 
-        # Verify porringer was called with correct parameters
-        call_args = mock_porringer_api.update.check.call_args
-        params = call_args[0][0]
-        assert params.include_prereleases is True  # DEVELOPMENT channel
+    @staticmethod
+    def test_download_with_progress_callback(updater: Updater) -> None:
+        """Verify download_update passes progress callback."""
+        mock_velopack_info = MagicMock()
+        updater._update_info = UpdateInfo(
+            available=True,
+            current_version=Version('1.0.0'),
+            latest_version=Version('2.0.0'),
+            _velopack_info=mock_velopack_info,
+        )
+        updater._state = UpdateState.UPDATE_AVAILABLE
+
+        mock_manager = MagicMock()
+        progress_cb = MagicMock()
+
+        with (
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
+            patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
+        ):
+            result = updater.download_update(progress_callback=progress_cb)
+
+        assert result is True
+        mock_manager.download_updates.assert_called_once_with(mock_velopack_info, progress_cb)
+
+    @staticmethod
+    def test_download_error(updater: Updater) -> None:
+        """Verify download_update handles errors gracefully."""
+        mock_velopack_info = MagicMock()
+        updater._update_info = UpdateInfo(
+            available=True,
+            current_version=Version('1.0.0'),
+            latest_version=Version('2.0.0'),
+            _velopack_info=mock_velopack_info,
+        )
+        updater._state = UpdateState.UPDATE_AVAILABLE
+
+        mock_manager = MagicMock()
+        mock_manager.download_updates.side_effect = Exception('Download failed')
+
+        with (
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
+            patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
+        ):
+            result = updater.download_update()
+
+        assert result is False
+        assert updater.state == UpdateState.FAILED
+        assert updater._update_info.error == 'Download failed'
+
+
+class TestUpdaterApplyUpdate:
+    """Tests for apply_update methods."""
+
+    @staticmethod
+    def test_apply_and_restart_not_installed(updater: Updater) -> None:
+        """Verify apply_update_and_restart raises when not installed."""
+        with (
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=False),
+            pytest.raises(NotImplementedError, match='Velopack installs'),
+        ):
+            updater.apply_update_and_restart()
+
+    @staticmethod
+    def test_apply_and_restart_no_downloaded_update(updater: Updater) -> None:
+        """Verify apply_update_and_restart raises when no downloaded update."""
+        with (
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
+            pytest.raises(RuntimeError, match='No downloaded update'),
+        ):
+            updater.apply_update_and_restart()
+
+    @staticmethod
+    def test_apply_on_exit_not_installed(updater: Updater) -> None:
+        """Verify apply_update_on_exit raises when not installed."""
+        with (
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=False),
+            pytest.raises(NotImplementedError, match='Velopack installs'),
+        ):
+            updater.apply_update_on_exit()
+
+    @staticmethod
+    def test_apply_on_exit_no_downloaded_update(updater: Updater) -> None:
+        """Verify apply_update_on_exit raises when no downloaded update."""
+        with (
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
+            pytest.raises(RuntimeError, match='No downloaded update'),
+        ):
+            updater.apply_update_on_exit()
+
+    @staticmethod
+    def test_apply_on_exit_success(updater: Updater) -> None:
+        """Verify apply_update_on_exit schedules update."""
+        mock_velopack_info = MagicMock()
+        updater._update_info = UpdateInfo(
+            available=True,
+            current_version=Version('1.0.0'),
+            latest_version=Version('2.0.0'),
+            _velopack_info=mock_velopack_info,
+        )
+        updater._state = UpdateState.DOWNLOADED
+
+        mock_manager = MagicMock()
+
+        with (
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
+            patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
+        ):
+            updater.apply_update_on_exit(restart=True)
+
+        assert updater.state == UpdateState.APPLIED
+        mock_manager.apply_updates_and_exit.assert_called_once_with(mock_velopack_info)
+
+    @staticmethod
+    def test_apply_on_exit_no_restart(updater: Updater) -> None:
+        """Verify apply_update_on_exit can disable restart (note: not supported by Velopack)."""
+        mock_velopack_info = MagicMock()
+        updater._update_info = UpdateInfo(
+            available=True,
+            current_version=Version('1.0.0'),
+            latest_version=Version('2.0.0'),
+            _velopack_info=mock_velopack_info,
+        )
+        updater._state = UpdateState.DOWNLOADED
+
+        mock_manager = MagicMock()
+
+        with (
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
+            patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
+        ):
+            updater.apply_update_on_exit(restart=False)
+
+        # Note: Velopack's apply_updates_and_exit doesn't support restart parameter
+        mock_manager.apply_updates_and_exit.assert_called_once_with(mock_velopack_info)
+
+
+class TestInitializeVelopack:
+    """Tests for initialize_velopack function."""
+
+    @staticmethod
+    def test_initialize_success() -> None:
+        """Verify initialize_velopack calls velopack.App().run()."""
+        mock_app = MagicMock()
+        with patch('synodic_client.updater.velopack.App', return_value=mock_app) as mock_app_class:
+            initialize_velopack()
+            mock_app_class.assert_called_once()
+            mock_app.run.assert_called_once()
+
+    @staticmethod
+    def test_initialize_handles_exception() -> None:
+        """Verify initialize_velopack handles exceptions gracefully."""
+        mock_app = MagicMock()
+        mock_app.run.side_effect = Exception('Test')
+        with patch('synodic_client.updater.velopack.App', return_value=mock_app):
+            # Should not raise
+            initialize_velopack()

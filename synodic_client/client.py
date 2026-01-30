@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import LiteralString
 
 from packaging.version import Version
-from porringer.api import API
 
 from synodic_client.updater import UpdateConfig, UpdateInfo, Updater
 
@@ -57,17 +56,16 @@ class Client:
         source = files('data').joinpath(resource)
         return as_file(source)
 
-    def initialize_updater(self, porringer_api: API, config: UpdateConfig | None = None) -> Updater:
-        """Initialize the updater with the porringer API.
+    def initialize_updater(self, config: UpdateConfig | None = None) -> Updater:
+        """Initialize the updater.
 
         Args:
-            porringer_api: The porringer API instance
             config: Optional update configuration
 
         Returns:
             The initialized Updater instance
         """
-        self._updater = Updater(self.version, porringer_api, config)
+        self._updater = Updater(self.version, config)
         return self._updater
 
     @property
@@ -91,37 +89,40 @@ class Client:
 
         return self._updater.check_for_update()
 
-    def download_update(self, progress_callback: Callable | None = None) -> Path | None:
+    def download_update(self, progress_callback: Callable[[int], None] | None = None) -> bool:
         """Download an available update.
 
         Args:
-            progress_callback: Optional callback for progress updates
+            progress_callback: Optional callback for progress updates (0-100)
 
         Returns:
-            Path to downloaded file if successful, None otherwise
-        """
-        if self._updater is None:
-            logger.warning('Updater not initialized')
-            return None
-
-        return self._updater.download_update(progress_callback)
-
-    def apply_update(self) -> bool:
-        """Apply a downloaded update.
-
-        Returns:
-            True if update was applied successfully
+            True if download succeeded, False otherwise
         """
         if self._updater is None:
             logger.warning('Updater not initialized')
             return False
 
-        return self._updater.apply_update()
+        return self._updater.download_update(progress_callback)
 
-    def restart_for_update(self) -> None:
-        """Restart the application to complete the update."""
+    def apply_update_and_restart(self) -> None:
+        """Apply a downloaded update and restart the application.
+
+        This method will not return - it exits and relaunches the app.
+        """
         if self._updater is None:
             logger.warning('Updater not initialized')
             return
 
-        self._updater.restart_application()
+        self._updater.apply_update_and_restart()
+
+    def apply_update_on_exit(self, restart: bool = True) -> None:
+        """Schedule the update to apply when the application exits.
+
+        Args:
+            restart: Whether to restart after applying
+        """
+        if self._updater is None:
+            logger.warning('Updater not initialized')
+            return
+
+        self._updater.apply_update_on_exit(restart=restart)

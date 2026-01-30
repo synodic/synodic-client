@@ -1,11 +1,7 @@
-name: Build Release Artifacts
+name: Release Build
 
-# Builds platform executables and uploads to GitHub Releases.
-# - Stable releases: versioned tag (v1.0.0)
-# - Dev releases: rolling "dev" tag (overwritten each build)
-#
-# Required secrets:
-#   ORG_UPDATE_TOKEN: GitHub PAT for triggering synodic-updates
+# Builds and publishes stable releases to GitHub Releases using Velopack.
+# Triggered by published releases or manual dispatch.
 
 on:
   release:
@@ -13,275 +9,76 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version tag (e.g., 1.0.0)"
+        description: "Version tag"
         required: true
         type: string
-  workflow_call:
-    inputs:
-      version:
-        description: "Version to build"
-        required: true
-        type: string
-      trigger_tuf:
-        description: "Trigger TUF update after build"
-        required: false
-        type: boolean
-        default: false
-    secrets:
-      ORG_UPDATE_TOKEN:
-        required: false
 
 permissions:
   contents: write
 
-env:
-  GITHUB_RELEASE_BASE: https://github.com/synodic/synodic-client/releases/download
-
 jobs:
-  build-windows:
-    if: github.repository_owner == 'synodic'
-    runs-on: windows-latest
+  get-version:
+    runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      is_dev: ${{ steps.version.outputs.is_dev }}
-      release_tag: ${{ steps.version.outputs.release_tag }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install PDM
-        uses: pdm-project/setup-pdm@v4
-        with:
-          python-version: "3.14"
-          cache: true
-
-      - name: Install dependencies
-        run: pdm install -G build
-
-      - name: Build executable
-        run: pdm run pyinstaller tool/pyinstaller/synodic.spec --distpath dist/windows
-
-      - name: Get version info
+      - name: Get version
         id: version
-        shell: bash
         run: |
           if [ "${{ github.event_name }}" == "release" ]; then
             VERSION="${{ github.event.release.tag_name }}"
           else
             VERSION="${{ inputs.version }}"
           fi
-
-          # Check if this is a dev version
-          if [[ "$VERSION" == *"dev"* ]]; then
-            echo "is_dev=true" >> $GITHUB_OUTPUT
-            echo "release_tag=dev" >> $GITHUB_OUTPUT
-          else
-            echo "is_dev=false" >> $GITHUB_OUTPUT
-            echo "release_tag=v${VERSION}" >> $GITHUB_OUTPUT
-          fi
-
+          # Strip leading 'v' if present
+          VERSION="${VERSION#v}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION"
+          echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
 
-      - name: Create archive
-        run: |
-          Compress-Archive -Path dist/windows/synodic.exe -DestinationPath dist/synodic-windows-x64.zip
+  build:
+    needs: get-version
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.get-version.outputs.version }}
 
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: synodic-windows-x64
-          path: dist/synodic-windows-x64.zip
+  package:
+    needs: [get-version, build]
+    uses: ./.github/workflows/package.yml
+    with:
+      version: ${{ needs.get-version.outputs.version }}
+      channel: stable
 
-  build-linux:
-    if: github.repository_owner == 'synodic'
+  release:
+    needs: [get-version, package]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxcb-cursor0 libxkbcommon-x11-0
-
-      - name: Install PDM
-        uses: pdm-project/setup-pdm@v4
-        with:
-          python-version: "3.14"
-          cache: true
-
-      - name: Install dependencies
-        run: pdm install -G build
-
-      - name: Build executable
-        run: pdm run pyinstaller tool/pyinstaller/synodic.spec --distpath dist/linux
-
-      - name: Create archive
-        run: |
-          tar -czvf dist/synodic-linux-x64.tar.gz -C dist/linux synodic
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: synodic-linux-x64
-          path: dist/synodic-linux-x64.tar.gz
-
-  build-macos:
-    if: github.repository_owner == 'synodic'
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install PDM
-        uses: pdm-project/setup-pdm@v4
-        with:
-          python-version: "3.14"
-          cache: true
-
-      - name: Install dependencies
-        run: pdm install -G build
-
-      - name: Build executable
-        run: pdm run pyinstaller tool/pyinstaller/synodic.spec --distpath dist/macos
-
-      - name: Create archive
-        run: |
-          tar -czvf dist/synodic-macos-x64.tar.gz -C dist/macos synodic
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: synodic-macos-x64
-          path: dist/synodic-macos-x64.tar.gz
-
-  publish-release:
-    needs: [build-windows, build-linux, build-macos]
-    runs-on: ubuntu-latest
-    outputs:
-      windows_url: ${{ steps.urls.outputs.windows_url }}
-      linux_url: ${{ steps.urls.outputs.linux_url }}
-      macos_url: ${{ steps.urls.outputs.macos_url }}
-    steps:
-      - name: Download all artifacts
+      - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: velopack-releases
+          path: releases
 
-      - name: Prepare release files
-        run: |
-          mkdir -p release
-          cp artifacts/synodic-windows-x64/*.zip release/
-          cp artifacts/synodic-linux-x64/*.tar.gz release/
-          cp artifacts/synodic-macos-x64/*.tar.gz release/
-          ls -la release/
-
-      - name: Create version manifest
-        run: |
-          VERSION="${{ needs.build-windows.outputs.version }}"
-          cat > release/version.json << EOF
-          {
-            "version": "$VERSION",
-            "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "artifacts": {
-              "windows-x64": {
-                "filename": "synodic-windows-x64.zip",
-                "sha256": "$(sha256sum release/synodic-windows-x64.zip | cut -d' ' -f1)"
-              },
-              "linux-x64": {
-                "filename": "synodic-linux-x64.tar.gz",
-                "sha256": "$(sha256sum release/synodic-linux-x64.tar.gz | cut -d' ' -f1)"
-              },
-              "macos-x64": {
-                "filename": "synodic-macos-x64.tar.gz",
-                "sha256": "$(sha256sum release/synodic-macos-x64.tar.gz | cut -d' ' -f1)"
-              }
-            }
-          }
-          EOF
-          cat release/version.json
-
-      # For dev releases: delete existing dev release first (rolling release)
-      - name: Delete existing dev release
-        if: needs.build-windows.outputs.is_dev == 'true'
-        run: gh release delete dev --cleanup-tag -y || true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # For stable releases triggered by release event
+      # For releases triggered by release event
       - name: Upload to existing release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*
+          files: releases/*
 
-      # For dev releases or workflow_dispatch/workflow_call
-      - name: Create dev release
-        if: needs.build-windows.outputs.is_dev == 'true' && github.event_name != 'release'
+      # For manual workflow_dispatch
+      - name: Create release
+        if: github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: dev
-          name: "Development Build"
-          prerelease: true
-          make_latest: false
-          files: release/*
-          body: |
-            **Latest Development Build**
-
-            Version: `${{ needs.build-windows.outputs.version }}`
-            Commit: `${{ github.sha }}`
-
-            ⚠️ This is a development build and may be unstable.
-
-      # For stable workflow_dispatch (non-release event, non-dev version)
-      - name: Create stable release
-        if: needs.build-windows.outputs.is_dev == 'false' && github.event_name != 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.build-windows.outputs.release_tag }}
-          name: "Release ${{ needs.build-windows.outputs.version }}"
+          tag_name: ${{ needs.get-version.outputs.tag }}
+          name: "Release ${{ needs.get-version.outputs.version }}"
           draft: true
-          files: release/*
+          files: releases/*
           body: |
-            **Release ${{ needs.build-windows.outputs.version }}**
+            **Release ${{ needs.get-version.outputs.version }}**
 
-            Commit: `${{ github.sha }}`
-
-      - name: Set download URLs
-        id: urls
-        run: |
-          TAG="${{ needs.build-windows.outputs.release_tag }}"
-          BASE="${{ env.GITHUB_RELEASE_BASE }}"
-
-          echo "windows_url=${BASE}/${TAG}/synodic-windows-x64.zip" >> $GITHUB_OUTPUT
-          echo "linux_url=${BASE}/${TAG}/synodic-linux-x64.tar.gz" >> $GITHUB_OUTPUT
-          echo "macos_url=${BASE}/${TAG}/synodic-macos-x64.tar.gz" >> $GITHUB_OUTPUT
-
-  trigger-tuf-update:
-    needs: [build-windows, publish-release]
-    runs-on: ubuntu-latest
-    if: (github.event_name == 'release' || inputs.trigger_tuf == true) && github.repository_owner == 'synodic'
-    steps:
-      - name: Determine event type
-        id: config
-        run: |
-          if [ "${{ needs.build-windows.outputs.is_dev }}" == "true" ]; then
-            echo "event_type=dev-release" >> $GITHUB_OUTPUT
-          else
-            echo "event_type=new-release" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Trigger TUF repository update
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.ORG_UPDATE_TOKEN }}
-          repository: synodic/synodic-updates
-          event-type: ${{ steps.config.outputs.event_type }}
-          client-payload: |
-            {
-              "version": "${{ needs.build-windows.outputs.version }}",
-              "windows_url": "${{ needs.publish-release.outputs.windows_url }}",
-              "linux_url": "${{ needs.publish-release.outputs.linux_url }}",
-              "macos_url": "${{ needs.publish-release.outputs.macos_url }}"
-            }
+            ## Installation
+            - **Windows**: Download `synodic-Setup.exe` and run it
+            - **Linux**: Download the `.AppImage` file, make it executable with `chmod +x`, and run
+            - **macOS**: Download and extract the package

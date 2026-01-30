@@ -1,0 +1,93 @@
+name: Build Executables
+
+# Reusable workflow that builds PyInstaller executables for all platforms.
+# Does not handle packaging or publishing - that's the caller's responsibility.
+
+on:
+    workflow_call:
+        inputs:
+            version:
+                description: "Version string for the build"
+                required: true
+                type: string
+
+jobs:
+    build-windows:
+        if: github.repository_owner == 'synodic'
+        runs-on: windows-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Install PDM
+              uses: pdm-project/setup-pdm@v4
+              with:
+                  python-version: "3.14"
+                  cache: true
+
+            - name: Install dependencies
+              run: pdm install -G build
+
+            - name: Build executable
+              run: pdm run pyinstaller tool/pyinstaller/synodic.spec --distpath dist
+
+            - name: Upload build artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: build-windows-x64
+                  path: dist/*
+
+    build-linux:
+        if: github.repository_owner == 'synodic'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Install system dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y libxcb-cursor0 libxkbcommon-x11-0
+
+            - name: Install PDM
+              uses: pdm-project/setup-pdm@v4
+              with:
+                  python-version: "3.14"
+                  cache: true
+
+            - name: Install dependencies
+              run: pdm install -G build
+
+            - name: Build executable
+              run: pdm run pyinstaller tool/pyinstaller/synodic.spec --distpath dist
+
+            - name: Upload build artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: build-linux-x64
+                  path: dist/*
+
+    build-macos:
+        if: github.repository_owner == 'synodic'
+        runs-on: macos-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Install PDM
+              uses: pdm-project/setup-pdm@v4
+              with:
+                  python-version: "3.14"
+                  cache: true
+
+            - name: Install dependencies
+              run: pdm install -G build
+
+            - name: Build executable
+              run: pdm run pyinstaller tool/pyinstaller/synodic.spec --distpath dist
+
+            - name: Upload build artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: build-macos-x64
+                  path: dist/*

@@ -1,7 +1,7 @@
-name: Build Development Release
+name: Development Release Build
 
-# This workflow builds release artifacts for development versions
-# published to PyPI on branch pushes. It can optionally trigger TUF updates.
+# Builds and publishes development releases to GitHub Releases using Velopack.
+# Triggered after successful Python dev release workflow.
 
 on:
     workflow_run:
@@ -19,29 +19,74 @@ jobs:
         if: github.event.workflow_run.conclusion == 'success' && github.repository == 'synodic/synodic-client'
         runs-on: ubuntu-latest
         outputs:
-            version: ${{ steps.set-tag.outputs.version }}
+            version: ${{ steps.set-version.outputs.version }}
         steps:
             - name: Checkout
-              uses: actions/checkout@v6
+              uses: actions/checkout@v4
               with:
                   fetch-depth: 0
+                  filter: blob:none
 
-            - name: Gather Tag Information
-              id: tag-info
-              uses: synodic/Tag-Metadata@v1
+            - name: Semantic Version
+              id: version
+              uses: PaulHatch/semantic-version@v6.0.1
+              with:
+                  tag_prefix: "v"
+                  version_format: "${major}.${minor}.${patch}"
 
-            - name: Set Tag
-              id: set-tag
+            - name: Set Version
+              id: set-version
               run: |
-                  version=${{steps.tag-info.outputs.next-tag}}.dev${{github.run_number}}
+                  version=${{ steps.version.outputs.version }}.dev${{ github.run_number }}
                   echo "version=${version}" >> $GITHUB_OUTPUT
                   echo "Development version: $version"
 
     build:
         needs: get-version
-        uses: ./.github/workflows/release-build.yml
+        uses: ./.github/workflows/build.yml
         with:
             version: ${{ needs.get-version.outputs.version }}
-            trigger_tuf: true
-        secrets:
-            ORG_UPDATE_TOKEN: ${{ secrets.ORG_UPDATE_TOKEN }}
+
+    package:
+        needs: [get-version, build]
+        uses: ./.github/workflows/package.yml
+        with:
+            version: ${{ needs.get-version.outputs.version }}
+            channel: dev
+
+    release:
+        needs: [get-version, package]
+        runs-on: ubuntu-latest
+        steps:
+            - name: Download release artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  name: velopack-releases
+                  path: releases
+
+            - name: Delete existing dev release
+              run: gh release delete dev --cleanup-tag -y || true
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_REPO: ${{ github.repository }}
+
+            - name: Create dev release
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: dev
+                  name: "Development Build"
+                  prerelease: true
+                  make_latest: false
+                  files: releases/*
+                  body: |
+                      **Latest Development Build**
+
+                      Version: `${{ needs.get-version.outputs.version }}`
+                      Commit: `${{ github.sha }}`
+
+                      ⚠️ This is a development build and may be unstable.
+
+                      ## Installation
+                      - **Windows**: Download `synodic-Setup.exe` and run it
+                      - **Linux**: Download the `.AppImage` file, make it executable with `chmod +x`, and run
+                      - **macOS**: Download and extract the package

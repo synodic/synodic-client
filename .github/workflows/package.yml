@@ -1,0 +1,98 @@
+name: Package with Velopack
+
+# Reusable workflow that packages build artifacts with Velopack.
+# Expects build artifacts from the build.yml workflow.
+
+on:
+    workflow_call:
+        inputs:
+            version:
+                description: "Version string for the package"
+                required: true
+                type: string
+            channel:
+                description: "Velopack channel (stable or dev)"
+                required: true
+                type: string
+        outputs:
+            artifact-name:
+                description: "Name of the uploaded release artifact"
+                value: ${{ jobs.package.outputs.artifact-name }}
+
+env:
+    VELOPACK_APP_ID: synodic
+
+jobs:
+    package:
+        runs-on: ubuntu-latest
+        outputs:
+            artifact-name: velopack-releases
+        steps:
+            - name: Download all build artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: builds
+
+            - name: Install Velopack CLI
+              run: dotnet tool install -g vpk
+
+            - name: Download previous release (for delta packages)
+              continue-on-error: true
+              run: |
+                  vpk download github \
+                    --repoUrl https://github.com/${{ github.repository }} \
+                    --channel ${{ inputs.channel }} \
+                    --token ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Install libfuse2 for AppImage
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y libfuse2
+
+            - name: Create Velopack packages
+              run: |
+                  mkdir -p releases
+
+                  # Windows package
+                  if [ -d "builds/build-windows-x64" ]; then
+                    vpk pack \
+                      --packId ${{ env.VELOPACK_APP_ID }} \
+                      --packVersion ${{ inputs.version }} \
+                      --packDir builds/build-windows-x64 \
+                      --mainExe synodic.exe \
+                      --packTitle "Synodic Client" \
+                      --channel ${{ inputs.channel }} \
+                      --outputDir releases
+                  fi
+
+                  # Linux package
+                  if [ -d "builds/build-linux-x64" ]; then
+                    vpk pack \
+                      --packId ${{ env.VELOPACK_APP_ID }} \
+                      --packVersion ${{ inputs.version }} \
+                      --packDir builds/build-linux-x64 \
+                      --mainExe synodic \
+                      --packTitle "Synodic Client" \
+                      --channel ${{ inputs.channel }} \
+                      --outputDir releases
+                  fi
+
+                  # macOS package
+                  if [ -d "builds/build-macos-x64" ]; then
+                    vpk pack \
+                      --packId ${{ env.VELOPACK_APP_ID }} \
+                      --packVersion ${{ inputs.version }} \
+                      --packDir builds/build-macos-x64 \
+                      --mainExe synodic \
+                      --packTitle "Synodic Client" \
+                      --channel ${{ inputs.channel }} \
+                      --outputDir releases
+                  fi
+
+                  ls -la releases/
+
+            - name: Upload release artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: velopack-releases
+                  path: releases/*
