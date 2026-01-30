@@ -22,7 +22,7 @@ jobs:
             version: ${{ steps.set-version.outputs.version }}
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v6
               with:
                   fetch-depth: 0
                   filter: blob:none
@@ -37,7 +37,7 @@ jobs:
             - name: Set Version
               id: set-version
               run: |
-                  version=${{ steps.version.outputs.version }}.dev${{ github.run_number }}
+                  version=${{ steps.version.outputs.version }}.dev${{ steps.version.outputs.increment }}
                   echo "version=${version}" >> $GITHUB_OUTPUT
                   echo "Development version: $version"
 
