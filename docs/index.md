@@ -5,9 +5,9 @@ An application frontend for [porringer](https://www.github.com/synodic/porringer
 ## Features
 
 - **System Tray Application**: Runs unobtrusively in the system tray
-- **Secure Self-Updates**: Automatic updates using [TUF](https://theupdateframework.io/) for cryptographic verification
+- **Secure Self-Updates**: Automatic updates using [Velopack](https://velopack.io/) for seamless installation and delta updates
 - **Multiple Update Channels**: Support for stable releases and development prereleases
-- **Rollback Support**: Automatic backup and rollback on update failure
+- **Cross-Platform**: Windows, macOS, and Linux support
 
 ## Installation
 

@@ -9,9 +9,6 @@ hiddenimports = []
 # Add porringer metadata so entry points work
 datas += copy_metadata('porringer')
 
-# Add TUF metadata for secure updates
-datas += copy_metadata('tuf')
-
 # Add your plugin packages here as you add them to dependencies
 # Example: datas += copy_metadata('porringer-plugin-name')
 # Example: hiddenimports += ['porringer_plugin_name']

@@ -1,73 +1,58 @@
 # Self-Update System
 
-Synodic Client includes a secure self-update mechanism built on:
+Synodic Client includes a self-update mechanism built on:
 
-- **[TUF (The Update Framework)](https://theupdateframework.io/)** - Cryptographic verification of update artifacts
-- **[porringer](https://www.github.com/synodic/porringer)** - Version checking via PyPI and download management
+- **[Velopack](https://velopack.io/)** - Cross-platform installer and auto-update framework
+- **GitHub Releases** - Distribution of update packages
 
 ## Update Channels
 
-| Channel | Description | PyPI Versions |
+| Channel | Description | Release Type |
 |---------|-------------|---------------|
-| `STABLE` | Production releases only | Final releases (e.g., `1.0.0`) |
-| `DEVELOPMENT` | Includes prereleases | All versions (e.g., `1.0.0.dev1`) |
-
-The channel is automatically selected based on how the application is running:
-
-- **Frozen executable** (PyInstaller): Uses `STABLE` channel
-- **Running from source**: Uses `DEVELOPMENT` channel
+| `stable` | Production releases only | Final releases (e.g., `1.0.0`) |
+| `dev` | Development builds | Prereleases (e.g., `1.0.0.dev123`) |
 
 ## Update Workflow
 
 ```mermaid
 flowchart TD
-    A[Check PyPI] --> B{Update Available?}
+    A[Check GitHub Releases] --> B{Update Available?}
     B -->|No| C[Done]
-    B -->|Yes| D[Download via TUF]
-    D --> E[Verify Signature]
-    E --> F[Backup Current]
-    F --> G[Apply Update]
-    G --> H{Success?}
-    H -->|Yes| I[Restart]
-    H -->|No| J[Rollback]
-    I --> K[Cleanup Backup]
+    B -->|Yes| D[Download Update]
+    D --> E[Apply Delta/Full Package]
+    E --> F[Restart Application]
 ```
 
-1. **Check** - Query PyPI for newer versions
-2. **Download** - Fetch artifact with TUF verification
-3. **Backup** - Create backup of current executable
-4. **Apply** - Replace executable with new version
-5. **Restart** - Spawn new process and exit
-6. **Cleanup** - Remove backup after successful verification
-
-If an update fails to apply, the system automatically offers rollback to the previous version.
+1. **Check** - Query GitHub releases for newer versions via Velopack
+2. **Download** - Fetch full or delta package
+3. **Apply** - Velopack handles installation
+4. **Restart** - Launch updated version
 
 ## Programmatic Usage
 
 ```python
-from porringer.api import API, APIParameters
-from porringer.schema import LocalConfiguration
-
 from synodic_client.client import Client
 from synodic_client.updater import UpdateChannel, UpdateConfig
 
 # Initialize
 client = Client()
-porringer = API(LocalConfiguration(), APIParameters(logger))
 
 # Configure for development channel
 config = UpdateConfig(channel=UpdateChannel.DEVELOPMENT)
-client.initialize_updater(porringer, config)
+client.initialize_updater(config)
 
 # Check for updates
 info = client.check_for_update()
 if info and info.available:
     print(f"Update available: {info.current_version} -> {info.latest_version}")
     
-    # Download and apply
-    if client.download_update():
-        if client.apply_update():
-            client.restart_for_update()
+    # Download with progress
+    def on_progress(percent: int) -> None:
+        print(f"Downloading: {percent}%")
+    
+    if client.download_update(on_progress):
+        # Apply and restart
+        client.apply_update_and_restart()
 ```
 
 ## Configuration
@@ -77,33 +62,26 @@ The `UpdateConfig` dataclass controls update behavior:
 ```python
 @dataclass
 class UpdateConfig:
-    # PyPI package name for version checks
-    package_name: str = 'synodic_client'
+    # GitHub repository URL for Velopack to discover releases
+    repo_url: str = 'https://github.com/synodic/synodic-client'
 
-    # TUF repository URL for secure artifact download
-    tuf_repository_url: str = 'https://synodic.github.io/synodic-updates'
-
-    # Channel determines whether to include prereleases
+    # Channel determines whether to use dev or stable releases
     channel: UpdateChannel = UpdateChannel.STABLE
 
-    # Local paths for metadata, downloads, and backups
-    metadata_dir: Path = Path.home() / '.synodic' / 'tuf_metadata'
-    download_dir: Path = Path.home() / '.synodic' / 'downloads'
-    backup_dir: Path = Path.home() / '.synodic' / 'backup'
+    @property
+    def channel_name(self) -> str:
+        """Get the channel name for Velopack."""
+        return 'dev' if self.channel == UpdateChannel.DEVELOPMENT else 'stable'
 ```
 
-## TUF Repository
+## GitHub Releases Structure
 
-The TUF repository is managed separately at [synodic/synodic-updates](https://github.com/synodic/synodic-updates) using [tuf-on-ci](https://github.com/theupdateframework/tuf-on-ci).
+Velopack packages are published to GitHub Releases with the following structure:
 
-After initialization, copy the `root.json` from the published repository to `data/tuf_root.json` in this project for bundling with the executable.
+| Platform | Files |
+|----------|-------|
+| Windows | `synodic-Setup.exe`, `synodic-{version}-full.nupkg` |
+| Linux | `synodic.AppImage` |
+| macOS | `synodic.app` (packaged) |
 
-### Target Naming Convention
-
-Artifacts are named by platform:
-
-| Platform | Target Name Pattern |
-|----------|---------------------|
-| Windows | `synodic-{version}-windows-x64.exe` |
-| macOS | `synodic-{version}-macos-x64` |
-| Linux | `synodic-{version}-linux-x64` |
+Velopack automatically manages `releases.{channel}.json` files for update discovery.
