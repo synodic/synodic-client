@@ -39,11 +39,11 @@ class TestClientUpdater:
     def test_initialize_updater_with_config() -> None:
         """Verify updater can be initialized with custom config."""
         client = Client()
-        config = UpdateConfig(update_url='https://custom.example.com/releases')
+        config = UpdateConfig(repo_url='https://github.com/custom/repo')
 
         updater = client.initialize_updater(config)
 
-        assert updater._config.update_url == 'https://custom.example.com/releases'
+        assert updater._config.repo_url == 'https://github.com/custom/repo'
 
     @staticmethod
     def test_check_for_update_without_init() -> None:

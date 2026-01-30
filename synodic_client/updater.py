@@ -279,11 +279,11 @@ class Updater:
             return self._velopack_manager
 
         try:
-            options = velopack.UpdateOptions()
+            options = velopack.UpdateOptions()  # type: ignore[attr-defined]
             options.allow_version_downgrade = False
             options.explicit_channel = self._config.channel_name
 
-            self._velopack_manager = velopack.UpdateManager(
+            self._velopack_manager = velopack.UpdateManager(  # type: ignore[attr-defined]
                 self._config.repo_url,
                 options,
             )
@@ -301,7 +301,7 @@ def initialize_velopack() -> None:
     pending updates.
     """
     try:
-        velopack.App().run()
+        velopack.App().run()  # type: ignore[attr-defined]
         logger.debug('Velopack initialized')
     except Exception as e:
         logger.debug('Velopack initialization skipped: %s', e)
