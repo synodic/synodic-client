@@ -46,7 +46,7 @@ def application() -> None:
     # Reduce CPU usage when idle - process events less aggressively
     app.setAttribute(Qt.ApplicationAttribute.AA_CompressHighFrequencyEvents)
 
-    _screen = Screen()
+    _screen = Screen(porringer)
     _tray = TrayScreen(app, client, Client.icon, _screen.window)
 
     # sys.exit ensures proper cleanup and exit code propagation
