@@ -173,8 +173,7 @@ class TrayScreen:
         self._pending_update_info = result
         self.tray.showMessage(
             'Update Available',
-            f'Version {result.latest_version} is available (current: {result.current_version}).\n'
-            'Click to download.',
+            f'Version {result.latest_version} is available (current: {result.current_version}).\nClick to download.',
             QSystemTrayIcon.MessageIcon.Information,
         )
 
@@ -287,8 +286,7 @@ class TrayScreen:
 
             self.tray.showMessage(
                 'Update Ready',
-                'The update will be applied when the application closes.\n'
-                'The application will restart automatically.',
+                'The update will be applied when the application closes.\nThe application will restart automatically.',
                 QSystemTrayIcon.MessageIcon.Information,
             )
             self._app.quit()
