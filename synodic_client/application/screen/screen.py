@@ -68,7 +68,8 @@ class PluginsView(QWidget):
         self._table.setRowCount(len(plugins))
         for row, plugin in enumerate(plugins):
             name_item = QTableWidgetItem(plugin.name)
-            version_item = QTableWidgetItem(str(plugin.version))
+
+            version_item = QTableWidgetItem('-')
             status_item = QTableWidgetItem('Installed' if plugin.installed else 'Not Installed')
 
             version_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
