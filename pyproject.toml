@@ -14,7 +14,7 @@ requires-python = ">=3.14, <3.15"
 dependencies = [
     "pyside6>=6.10.2",
     "packaging>=26.0",
-    "porringer>=0.1.2.dev6",
+    "porringer>=0.1.2.dev7",
     "velopack>=0.0.1369.dev7516",
 ]
 
@@ -70,6 +70,9 @@ search_path = ["synodic_client/..."]
 source = "scm"
 write_to = "synodic_client/_version.py"
 write_template = "__version__ = '{}'\n"
+
+[tool.pdm.resolution]
+allow-prereleases = true
 
 [tool.pdm.scripts]
 analyze = "ruff check synodic_client tests"
