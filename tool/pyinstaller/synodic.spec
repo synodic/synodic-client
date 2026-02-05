@@ -9,9 +9,17 @@ hiddenimports = []
 # Add porringer metadata so entry points work
 datas += copy_metadata('porringer')
 
-# Add your plugin packages here as you add them to dependencies
-# Example: datas += copy_metadata('porringer-plugin-name')
-# Example: hiddenimports += ['porringer_plugin_name']
+# Porringer bundled plugins (discovered via entry points at runtime)
+hiddenimports += [
+    'porringer.plugin.apt.plugin',
+    'porringer.plugin.brew.plugin',
+    'porringer.plugin.npm.plugin',
+    'porringer.plugin.pim.plugin',
+    'porringer.plugin.pip.plugin',
+    'porringer.plugin.pipx.plugin',
+    'porringer.plugin.uv.plugin',
+    'porringer.plugin.winget.plugin',
+]
 
 a = Analysis(
     ['../../synodic_client/application/qt.py'],
