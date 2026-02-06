@@ -3,14 +3,8 @@
 import importlib.metadata
 
 from synodic_client.client import Client
-from synodic_client.schema import (
-    UpdateChannel,
-    UpdateCheckResult,
-    UpdateProgress,
-    UpdateStatus,
-    VersionInformation,
-)
 from synodic_client.updater import (
+    UpdateChannel,
     UpdateConfig,
     UpdateInfo,
     Updater,
@@ -26,12 +20,8 @@ __all__ = [
     '__version__',
     'Client',
     'UpdateChannel',
-    'UpdateCheckResult',
     'UpdateConfig',
     'UpdateInfo',
-    'UpdateProgress',
     'UpdateState',
-    'UpdateStatus',
     'Updater',
-    'VersionInformation',
 ]

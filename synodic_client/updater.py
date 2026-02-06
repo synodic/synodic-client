@@ -11,7 +11,7 @@ import logging
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 from typing import Any
 
 import velopack
@@ -26,11 +26,11 @@ logger = logging.getLogger(__name__)
 GITHUB_REPO_URL = 'https://github.com/synodic/synodic-client'
 
 
-class UpdateChannel(Enum):
+class UpdateChannel(StrEnum):
     """Update channel selection."""
 
-    STABLE = auto()
-    DEVELOPMENT = auto()
+    STABLE = 'stable'
+    DEVELOPMENT = 'development'
 
 
 class UpdateState(Enum):
