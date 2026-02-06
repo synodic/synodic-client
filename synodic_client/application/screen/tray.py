@@ -95,6 +95,7 @@ class TrayScreen:
         self.tray = QSystemTrayIcon()
         self.tray.setIcon(self.tray_icon)
         self.tray.messageClicked.connect(self._on_notification_clicked)
+        self.tray.activated.connect(self._on_tray_activated)
 
         self.tray.setVisible(True)
 
@@ -156,6 +157,13 @@ class TrayScreen:
         is_dev = config.update_channel == 'dev'
         self._channel_stable_action.setChecked(not is_dev)
         self._channel_dev_action.setChecked(is_dev)
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        """Handle tray icon activation (e.g. double-click)."""
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._window.show()
+            self._window.raise_()
+            self._window.activateWindow()
 
     def _on_update_source(self) -> None:
         """Open a dialog to edit the update source URL or local path."""
