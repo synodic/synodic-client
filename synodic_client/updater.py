@@ -17,6 +17,8 @@ from typing import Any
 import velopack
 from packaging.version import Version
 
+from synodic_client.protocol import register_protocol, remove_protocol
+
 logger = logging.getLogger(__name__)
 
 # GitHub repository for Velopack updates
@@ -293,15 +295,42 @@ class Updater:
             return None
 
 
+def _on_after_install(version: str) -> None:  # noqa: ARG001
+    """Velopack hook: called after the app is installed.
+
+    Registers the ``synodic://`` URI protocol handler.
+
+    Args:
+        version: The installed version string (provided by Velopack).
+    """
+    register_protocol(sys.executable)
+
+
+def _on_before_uninstall(version: str) -> None:  # noqa: ARG001
+    """Velopack hook: called before the app is uninstalled.
+
+    Removes the ``synodic://`` URI protocol handler registration.
+
+    Args:
+        version: The current version string (provided by Velopack).
+    """
+    remove_protocol()
+
+
 def initialize_velopack() -> None:
     """Initialize Velopack at application startup.
 
     This should be called as early as possible in the application lifecycle,
     before any UI is shown. Velopack may need to perform cleanup or apply
     pending updates.
+
+    On Windows, install/uninstall hooks register the ``synodic://`` URI protocol.
     """
     try:
-        velopack.App().run()  # type: ignore[attr-defined]
+        app = velopack.App()  # type: ignore[attr-defined]
+        app.on_after_install_fast_callback(_on_after_install)
+        app.on_before_uninstall_fast_callback(_on_before_uninstall)
+        app.run()
         logger.debug('Velopack initialized')
     except Exception as e:
         logger.debug('Velopack initialization skipped: %s', e)

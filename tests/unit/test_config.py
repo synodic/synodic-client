@@ -1,0 +1,139 @@
+"""Tests for the persistent configuration module."""
+
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from synodic_client.config import (
+    GlobalConfiguration,
+    LocalConfiguration,
+    config_dir,
+    save_config,
+)
+
+
+class TestLocalConfiguration:
+    """Tests for the LocalConfiguration model."""
+
+    @staticmethod
+    def test_defaults() -> None:
+        """Verify default values for a fresh config."""
+        config = LocalConfiguration()
+        assert config.update_source is None
+        assert config.update_channel is None
+
+    @staticmethod
+    def test_with_values() -> None:
+        """Verify config accepts explicit values."""
+        config = LocalConfiguration(update_source='/path/to/releases', update_channel='dev')
+        assert config.update_source == '/path/to/releases'
+        assert config.update_channel == 'dev'
+
+
+class TestGlobalConfiguration:
+    """Tests for the GlobalConfiguration model."""
+
+    @staticmethod
+    def test_defaults() -> None:
+        """Verify default values for a fresh config."""
+        config = GlobalConfiguration()
+        assert config.update_source is None
+        assert config.update_channel is None
+
+    @staticmethod
+    def test_with_values() -> None:
+        """Verify config accepts explicit values."""
+        config = GlobalConfiguration(update_source='/path/to/releases', update_channel='dev')
+        assert config.update_source == '/path/to/releases'
+        assert config.update_channel == 'dev'
+
+    @staticmethod
+    def test_json_round_trip() -> None:
+        """Verify config can round-trip through JSON."""
+        original = GlobalConfiguration(update_source='https://example.com', update_channel='stable')
+        data = json.loads(original.model_dump_json())
+        restored = GlobalConfiguration.model_validate(data)
+        assert restored == original
+
+    @staticmethod
+    def test_json_round_trip_defaults() -> None:
+        """Verify default config round-trips cleanly."""
+        original = GlobalConfiguration()
+        data = json.loads(original.model_dump_json())
+        restored = GlobalConfiguration.model_validate(data)
+        assert restored.update_source is None
+        assert restored.update_channel is None
+
+    @staticmethod
+    def test_extra_fields_ignored() -> None:
+        """Verify unrecognized fields do not cause errors."""
+        data = {'update_source': None, 'update_channel': None, 'unknown_field': 42}
+        config = GlobalConfiguration.model_validate(data)
+        assert config.update_source is None
+
+
+class TestConfigDir:
+    """Tests for the config_dir helper."""
+
+    @staticmethod
+    @pytest.mark.skipif(__import__('sys').platform != 'win32', reason='Windows only')
+    def test_windows_uses_localappdata() -> None:
+        """Verify config dir uses LOCALAPPDATA on Windows."""
+        with patch.dict('os.environ', {'LOCALAPPDATA': 'C:\\Users\\Test\\AppData\\Local'}):
+            result = config_dir()
+        assert result == Path('C:\\Users\\Test\\AppData\\Local\\Synodic')
+
+    @staticmethod
+    @pytest.mark.skipif(__import__('sys').platform != 'win32', reason='Windows only')
+    def test_windows_fallback_without_env() -> None:
+        """Verify fallback when LOCALAPPDATA is not set."""
+        with patch.dict('os.environ', {'LOCALAPPDATA': ''}):
+            result = config_dir()
+        # Should still produce a path ending in Synodic
+        assert result.name == 'Synodic'
+
+
+class TestSaveConfig:
+    """Tests for save_config."""
+
+    @staticmethod
+    def test_creates_file(tmp_path: Path) -> None:
+        """Verify config is saved to disk."""
+        config = GlobalConfiguration(update_source='/my/releases', update_channel='stable')
+
+        with patch('synodic_client.config.config_dir', return_value=tmp_path):
+            save_config(config)
+
+        saved_path = tmp_path / 'config.json'
+        assert saved_path.exists()
+
+        data = json.loads(saved_path.read_text(encoding='utf-8'))
+        assert data['update_source'] == '/my/releases'
+        assert data['update_channel'] == 'stable'
+
+    @staticmethod
+    def test_creates_directory(tmp_path: Path) -> None:
+        """Verify save_config creates the directory if missing."""
+        nested = tmp_path / 'nested' / 'dir'
+        config = GlobalConfiguration()
+
+        with patch('synodic_client.config.config_dir', return_value=nested):
+            save_config(config)
+
+        assert (nested / 'config.json').exists()
+
+    @staticmethod
+    def test_overwrites_existing(tmp_path: Path) -> None:
+        """Verify save_config overwrites an existing file."""
+        config_path = tmp_path / 'config.json'
+        config_path.write_text('{}', encoding='utf-8')
+
+        config = GlobalConfiguration(update_source='http://new-source')
+
+        with patch('synodic_client.config.config_dir', return_value=tmp_path):
+            save_config(config)
+
+        data = json.loads(config_path.read_text(encoding='utf-8'))
+        assert data['update_source'] == 'http://new-source'

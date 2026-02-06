@@ -78,7 +78,7 @@ allow-prereleases = true
 analyze = "ruff check synodic_client tests"
 format = "ruff format"
 lint = { composite = ["analyze", "format", "type-check"] }
-package = "pyinstaller --clean tool/pyinstaller/synodic.spec"
+package = { call = "tool.scripts.package:main" }
 test = "pytest --cov=synodic_client --verbose tests"
 type-check = "pyrefly check"
 serve = "zensical serve"

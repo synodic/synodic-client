@@ -5,11 +5,25 @@ from typing import LiteralString
 
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtGui import QAction, QIcon
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QProgressDialog, QSystemTrayIcon
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QMessageBox,
+    QProgressDialog,
+    QPushButton,
+    QSystemTrayIcon,
+    QVBoxLayout,
+)
 
 from synodic_client.application.screen.screen import MainWindow
 from synodic_client.client import Client
-from synodic_client.updater import UpdateInfo
+from synodic_client.resolution import resolve_config, update_and_resolve
+from synodic_client.updater import GITHUB_REPO_URL, UpdateChannel, UpdateInfo
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +111,30 @@ class TrayScreen:
         self.update_action.triggered.connect(self._on_check_updates)
         self.settings_menu.addAction(self.update_action)
 
+        self.settings_menu.addSeparator()
+
+        # Update Source action
+        self.update_source_action = QAction('Update Source...', self.settings_menu)
+        self.update_source_action.triggered.connect(self._on_update_source)
+        self.settings_menu.addAction(self.update_source_action)
+
+        # Update Channel submenu
+        self.channel_menu = QMenu('Update Channel', self.settings_menu)
+        self.settings_menu.addMenu(self.channel_menu)
+
+        self._channel_stable_action = QAction('Stable', self.channel_menu)
+        self._channel_stable_action.setCheckable(True)
+        self._channel_stable_action.triggered.connect(lambda: self._on_channel_changed(UpdateChannel.STABLE))
+        self.channel_menu.addAction(self._channel_stable_action)
+
+        self._channel_dev_action = QAction('Development', self.channel_menu)
+        self._channel_dev_action.setCheckable(True)
+        self._channel_dev_action.triggered.connect(lambda: self._on_channel_changed(UpdateChannel.DEVELOPMENT))
+        self.channel_menu.addAction(self._channel_dev_action)
+
+        # Set initial channel check state from config
+        self._sync_channel_checks()
+
         self.menu.addSeparator()
 
         self.quit_action = QAction('Quit', self.menu)
@@ -104,6 +142,77 @@ class TrayScreen:
         self.menu.addAction(self.quit_action)
 
         self.tray.setContextMenu(self.menu)
+
+    def _sync_channel_checks(self) -> None:
+        """Synchronize channel checkmarks with the current config."""
+        config = resolve_config()
+        is_dev = config.update_channel == 'dev'
+        self._channel_stable_action.setChecked(not is_dev)
+        self._channel_dev_action.setChecked(is_dev)
+
+    def _on_update_source(self) -> None:
+        """Open a dialog to edit the update source URL or local path."""
+        config = resolve_config()
+
+        dialog = QDialog(self._window if self._window.isVisible() else None)
+        dialog.setWindowTitle('Update Source')
+        dialog.setMinimumWidth(450)
+
+        layout = QVBoxLayout(dialog)
+
+        label = QLabel(
+            'Enter a URL or local path for Velopack releases.\nLeave blank to use the default GitHub source.',
+        )
+        layout.addWidget(label)
+
+        source_edit = QLineEdit(config.update_source or '')
+        source_edit.setPlaceholderText(GITHUB_REPO_URL)
+
+        browse_button = QPushButton('Browse...')
+
+        row = QHBoxLayout()
+        row.addWidget(source_edit)
+        row.addWidget(browse_button)
+        layout.addLayout(row)
+
+        button_row = QHBoxLayout()
+        ok_button = QPushButton('OK')
+        cancel_button = QPushButton('Cancel')
+        button_row.addStretch()
+        button_row.addWidget(ok_button)
+        button_row.addWidget(cancel_button)
+        layout.addLayout(button_row)
+
+        def _browse() -> None:
+            path = QFileDialog.getExistingDirectory(dialog, 'Select Releases Directory')
+            if path:
+                source_edit.setText(path)
+
+        browse_button.clicked.connect(_browse)
+        ok_button.clicked.connect(dialog.accept)
+        cancel_button.clicked.connect(dialog.reject)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_source = source_edit.text().strip() or None
+            config.update_source = new_source
+            logger.info('Update source changed to: %s', new_source or '(default)')
+
+            update_cfg = update_and_resolve(config)
+            self._client.initialize_updater(update_cfg)
+            logger.info(
+                'Updater re-initialized (channel: %s, source: %s)', update_cfg.channel.name, update_cfg.repo_url
+            )
+
+    def _on_channel_changed(self, channel: UpdateChannel) -> None:
+        """Handle channel selection change."""
+        config = resolve_config()
+        config.update_channel = 'dev' if channel == UpdateChannel.DEVELOPMENT else 'stable'
+        logger.info('Update channel changed to: %s', config.update_channel)
+
+        update_cfg = update_and_resolve(config)
+        self._sync_channel_checks()
+        self._client.initialize_updater(update_cfg)
+        logger.info('Updater re-initialized (channel: %s, source: %s)', update_cfg.channel.name, update_cfg.repo_url)
 
     def _on_check_updates(self) -> None:
         """Handle check for updates action."""
