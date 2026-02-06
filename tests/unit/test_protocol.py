@@ -10,6 +10,9 @@ from synodic_client.protocol import PROTOCOL_NAME, register_protocol, remove_pro
 
 _EXPECTED_REGISTRY_KEY_COUNT = 2
 
+_TEST_PROTOCOL = f'{PROTOCOL_NAME}_test'
+"""Temporary protocol name used by integration tests to avoid clobbering the real registration."""
+
 
 class TestRegisterProtocol:
     """Tests for register_protocol."""
@@ -95,3 +98,107 @@ class TestRemoveProtocol:
         with patch('synodic_client.protocol.sys') as mock_sys:
             mock_sys.platform = 'linux'
             remove_protocol()
+
+
+class TestProtocolIntegration:
+    """Integration tests that read/write real registry keys under a test protocol name."""
+
+    @staticmethod
+    @pytest.mark.skipif(sys.platform != 'win32', reason='Windows only')
+    def test_register_creates_valid_registry_entries() -> None:
+        """Register under a test key, verify values, then clean up."""
+        test_exe = r'C:\test\synodic_test.exe'
+        key_path = f'Software\\Classes\\{_TEST_PROTOCOL}'
+
+        try:
+            # Register using the test protocol name
+            with patch('synodic_client.protocol.PROTOCOL_NAME', _TEST_PROTOCOL):
+                register_protocol(test_exe)
+
+            # Verify the protocol key
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                description, _ = winreg.QueryValueEx(key, '')
+                assert description == 'Synodic Client Protocol'
+
+                url_protocol, _ = winreg.QueryValueEx(key, 'URL Protocol')
+                assert url_protocol == ''
+
+            # Verify the command key
+            command_path = f'{key_path}\\shell\\open\\command'
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, command_path) as key:
+                command, _ = winreg.QueryValueEx(key, '')
+                assert test_exe in command
+                assert '"%1"' in command
+
+        finally:
+            # Clean up the test key
+            with patch('synodic_client.protocol.PROTOCOL_NAME', _TEST_PROTOCOL):
+                remove_protocol()
+
+    @staticmethod
+    @pytest.mark.skipif(sys.platform != 'win32', reason='Windows only')
+    def test_remove_deletes_registry_entries() -> None:
+        """Register then remove under a test key, verify the key is gone."""
+        key_path = f'Software\\Classes\\{_TEST_PROTOCOL}'
+
+        with patch('synodic_client.protocol.PROTOCOL_NAME', _TEST_PROTOCOL):
+            register_protocol(r'C:\test\synodic_test.exe')
+            remove_protocol()
+
+        with pytest.raises(FileNotFoundError):
+            winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path)
+
+    @staticmethod
+    @pytest.mark.skipif(sys.platform != 'win32', reason='Windows only')
+    def test_register_is_idempotent() -> None:
+        """Calling register twice with a different exe updates the command."""
+        key_path = f'Software\\Classes\\{_TEST_PROTOCOL}\\shell\\open\\command'
+        exe_v1 = r'C:\test\v1\synodic.exe'
+        exe_v2 = r'C:\test\v2\synodic.exe'
+
+        try:
+            with patch('synodic_client.protocol.PROTOCOL_NAME', _TEST_PROTOCOL):
+                register_protocol(exe_v1)
+                register_protocol(exe_v2)
+
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                command, _ = winreg.QueryValueEx(key, '')
+                assert exe_v2 in command
+                assert exe_v1 not in command
+
+        finally:
+            with patch('synodic_client.protocol.PROTOCOL_NAME', _TEST_PROTOCOL):
+                remove_protocol()
+
+
+class TestProtocolLive:
+    """Verify the live protocol registration on this machine."""
+
+    @staticmethod
+    @pytest.mark.skipif(sys.platform != 'win32', reason='Windows only')
+    def test_protocol_is_registered() -> None:
+        """Verify that the synodic:// protocol handler is currently registered."""
+        key_path = f'Software\\Classes\\{PROTOCOL_NAME}'
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                _, reg_type = winreg.QueryValueEx(key, 'URL Protocol')
+                assert reg_type == winreg.REG_SZ
+        except FileNotFoundError:
+            pytest.fail(f'Protocol handler not registered. Run the application once to register HKCU\\{key_path}')
+
+    @staticmethod
+    @pytest.mark.skipif(sys.platform != 'win32', reason='Windows only')
+    def test_command_points_to_existing_exe() -> None:
+        """Verify the registered command points to an exe path (may not exist in CI)."""
+        from pathlib import Path
+
+        key_path = f'Software\\Classes\\{PROTOCOL_NAME}\\shell\\open\\command'
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                command, _ = winreg.QueryValueEx(key, '')
+                # Command format: "C:\...\synodic.exe" "%1"
+                exe_path = command.split('"')[1]
+                assert exe_path.endswith('.exe'), f'Expected .exe path, got: {exe_path}'
+                assert Path(exe_path).name in {'synodic.exe', 'python.exe'}, f'Unexpected exe: {exe_path}'
+        except FileNotFoundError:
+            pytest.skip('Protocol handler not registered on this machine')

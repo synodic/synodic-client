@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from synodic_client.application.screen.screen import MainWindow
 from synodic_client.client import Client
+from synodic_client.logging import open_log
 from synodic_client.resolution import resolve_config, update_and_resolve
 from synodic_client.updater import GITHUB_REPO_URL, UpdateChannel, UpdateInfo
 
@@ -134,6 +135,12 @@ class TrayScreen:
 
         # Set initial channel check state from config
         self._sync_channel_checks()
+
+        self.settings_menu.addSeparator()
+
+        self.open_log_action = QAction('Open Log...', self.settings_menu)
+        self.open_log_action.triggered.connect(open_log)
+        self.settings_menu.addAction(self.open_log_action)
 
         self.menu.addSeparator()
 

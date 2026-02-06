@@ -1,0 +1,40 @@
+{
+    "version": "1",
+    "prerequisites": [
+        {
+            "plugin": "pip"
+        },
+        {
+            "plugin": "pipx"
+        },
+        {
+            "plugin": "winget",
+            "platforms": [
+                "win32"
+            ]
+        },
+        {
+            "plugin": "apt",
+            "platforms": [
+                "linux"
+            ]
+        },
+        {
+            "plugin": "brew",
+            "platforms": [
+                "darwin"
+            ]
+        }
+    ],
+    "packages": {
+        "pip": [
+            "ruff",
+            "pyrefly",
+            "pytest",
+            "pytest-cov"
+        ],
+        "pipx": [
+            "pdm"
+        ]
+    }
+}
