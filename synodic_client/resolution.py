@@ -15,7 +15,7 @@ from synodic_client.config import (
     _load_local_config,
     save_config,
 )
-from synodic_client.updater import GITHUB_REPO_URL, UpdateChannel, UpdateConfig
+from synodic_client.updater import DEFAULT_AUTO_UPDATE_INTERVAL_HOURS, GITHUB_REPO_URL, UpdateChannel, UpdateConfig
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,12 @@ def resolve_update_config(config: GlobalConfiguration) -> UpdateConfig:
         channel = UpdateChannel.DEVELOPMENT if is_dev else UpdateChannel.STABLE
 
     repo_url = config.update_source or GITHUB_REPO_URL
-    return UpdateConfig(channel=channel, repo_url=repo_url)
+
+    interval = config.auto_update_interval_hours
+    if interval is None:
+        interval = DEFAULT_AUTO_UPDATE_INTERVAL_HOURS
+
+    return UpdateConfig(channel=channel, repo_url=repo_url, auto_update_interval_hours=interval)
 
 
 def update_and_resolve(config: GlobalConfiguration) -> UpdateConfig:

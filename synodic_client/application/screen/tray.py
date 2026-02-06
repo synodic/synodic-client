@@ -3,7 +3,7 @@
 import logging
 from typing import LiteralString
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from synodic_client.application.screen.screen import MainWindow
 from synodic_client.client import Client
 from synodic_client.logging import open_log
-from synodic_client.resolution import resolve_config, update_and_resolve
+from synodic_client.resolution import resolve_config, resolve_update_config, update_and_resolve
 from synodic_client.updater import GITHUB_REPO_URL, UpdateChannel, UpdateInfo
 
 logger = logging.getLogger(__name__)
@@ -97,9 +97,16 @@ class TrayScreen:
         self.tray.setIcon(self.tray_icon)
         self.tray.messageClicked.connect(self._on_notification_clicked)
         self.tray.activated.connect(self._on_tray_activated)
-
         self.tray.setVisible(True)
 
+        self._build_menu(app, window)
+
+        # Periodic auto-update checking
+        self._auto_update_timer: QTimer | None = None
+        self._start_auto_update_timer()
+
+    def _build_menu(self, app: QApplication, window: MainWindow) -> None:
+        """Build the tray context menu."""
         self.menu = QMenu()
 
         self.open_action = QAction('Open', self.menu)
@@ -151,6 +158,25 @@ class TrayScreen:
         self.menu.addAction(self.quit_action)
 
         self.tray.setContextMenu(self.menu)
+
+    def _start_auto_update_timer(self) -> None:
+        """Start (or restart) the periodic auto-update timer from config."""
+        if self._auto_update_timer is not None:
+            self._auto_update_timer.stop()
+            self._auto_update_timer = None
+
+        config = resolve_update_config(resolve_config())
+        interval_hours = config.auto_update_interval_hours
+        if interval_hours <= 0:
+            logger.info('Automatic update checking is disabled')
+            return
+
+        interval_ms = interval_hours * 60 * 60 * 1000
+        self._auto_update_timer = QTimer()
+        self._auto_update_timer.setInterval(interval_ms)
+        self._auto_update_timer.timeout.connect(self._on_check_updates)
+        self._auto_update_timer.start()
+        logger.info('Automatic update checking enabled (every %d hour(s))', interval_hours)
 
     def _sync_channel_checks(self) -> None:
         """Synchronize channel checkmarks with the current config."""
@@ -215,6 +241,7 @@ class TrayScreen:
 
             update_cfg = update_and_resolve(config)
             self._client.initialize_updater(update_cfg)
+            self._start_auto_update_timer()
             logger.info(
                 'Updater re-initialized (channel: %s, source: %s)', update_cfg.channel.name, update_cfg.repo_url
             )
@@ -228,6 +255,7 @@ class TrayScreen:
         update_cfg = update_and_resolve(config)
         self._sync_channel_checks()
         self._client.initialize_updater(update_cfg)
+        self._start_auto_update_timer()
         logger.info('Updater re-initialized (channel: %s, source: %s)', update_cfg.channel.name, update_cfg.repo_url)
 
     def _on_check_updates(self) -> None:
