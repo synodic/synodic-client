@@ -19,7 +19,7 @@ import logging
 import shutil
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -131,7 +131,7 @@ class InstallPreviewWindow(QMainWindow):
         self._manifest_url = manifest_url
         self._preview: SetupResults | None = None
         self._manifest_path: Path | None = None
-        self._temp_dir: tempfile.TemporaryDirectory[str] | None = None
+        self._temp_dir_path: str | None = None
         self._thread: QThread | None = None
         self._worker: InstallWorker | None = None
         self._progress_dialog: QProgressDialog | None = None
@@ -188,6 +188,19 @@ class InstallPreviewWindow(QMainWindow):
         button_bar.addWidget(self._close_btn)
 
         layout.addLayout(button_bar)
+
+    # --- Lifecycle ---
+
+    def closeEvent(self, event: Any) -> None:
+        """Clean up the temp directory when the window is closed."""
+        self._cleanup_temp_dir()
+        super().closeEvent(event)
+
+    def _cleanup_temp_dir(self) -> None:
+        """Remove the temporary download directory if it exists."""
+        if self._temp_dir_path:
+            _safe_rmtree(self._temp_dir_path)
+            self._temp_dir_path = None
 
     # --- Public API ---
 
