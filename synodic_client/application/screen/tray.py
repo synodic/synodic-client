@@ -88,6 +88,7 @@ class TrayScreen:
         self._update_worker: UpdateCheckWorker | UpdateDownloadWorker | None = None
         self._progress_dialog: QProgressDialog | None = None
         self._pending_update_info: UpdateInfo | None = None
+        self._download_cancelled = False
 
         with client.resource(icon_name) as icon_path:
             self.tray_icon = QIcon(str(icon_path))
@@ -335,6 +336,8 @@ class TrayScreen:
         self._progress_dialog.setWindowTitle('Downloading Update')
         self._progress_dialog.setAutoClose(False)
         self._progress_dialog.setAutoReset(False)
+        self._progress_dialog.canceled.connect(self._on_download_cancelled)
+        self._download_cancelled = False
         self._progress_dialog.show()
 
         # Create worker and thread
@@ -353,9 +356,17 @@ class TrayScreen:
         # Start the thread
         self._update_thread.start()
 
+    def _on_download_cancelled(self) -> None:
+        """Handle cancel button on the download progress dialog."""
+        self._download_cancelled = True
+        if self._progress_dialog:
+            self._progress_dialog.close()
+            self._progress_dialog = None
+        logger.info('Update download cancelled by user')
+
     def _on_download_progress(self, percentage: int) -> None:
         """Handle download progress update."""
-        if self._progress_dialog:
+        if self._progress_dialog and not self._download_cancelled:
             self._progress_dialog.setValue(percentage)
             self._progress_dialog.setLabelText(f'Downloading update... {percentage}%')
 
@@ -364,6 +375,9 @@ class TrayScreen:
         if self._progress_dialog:
             self._progress_dialog.close()
             self._progress_dialog = None
+
+        if self._download_cancelled:
+            return
 
         if not success:
             self.tray.showMessage(
