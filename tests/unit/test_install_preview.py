@@ -12,6 +12,7 @@ from porringer.schema import (
     ProgressEventKind,
     SetupActionResult,
     SetupActionType,
+    SetupParameters,
     SetupResults,
 )
 
@@ -187,7 +188,7 @@ class TestPreviewWorkerLocal:
         worker = PreviewWorker(porringer, str(manifest))
 
         results: list[tuple[object, str, str]] = []
-        worker.finished.connect(lambda r, p, t: results.append((r, p, t)))
+        worker.preview_ready.connect(lambda r, p, t: results.append((r, p, t)))
         worker.run()
 
         assert len(results) == 1
@@ -234,8 +235,8 @@ class TestPreviewWorker:
         assert 'Network error' in errors[0]
 
     @staticmethod
-    def test_emits_finished_on_success() -> None:
-        """Verify PreviewWorker emits finished with SetupResults."""
+    def test_emits_preview_ready_on_success() -> None:
+        """Verify PreviewWorker emits preview_ready with SetupResults."""
         porringer = MagicMock()
         porringer.update.download.return_value = DownloadResult(
             success=True,
@@ -250,8 +251,148 @@ class TestPreviewWorker:
         worker = PreviewWorker(porringer, 'https://example.com/good.json')
 
         results: list[tuple[object, str, str]] = []
-        worker.finished.connect(lambda r, p, t: results.append((r, p, t)))
+        worker.preview_ready.connect(lambda r, p, t: results.append((r, p, t)))
         worker.run()
 
         assert len(results) == 1
         assert results[0][0] is expected
+
+
+class TestPreviewWorkerDryRun:
+    """Tests for PreviewWorker dry-run status check."""
+
+    @staticmethod
+    def _make_action(
+        action_type: str = 'PACKAGE',
+        description: str = 'Install test',
+        plugin: str = 'pip',
+        package: str = 'requests',
+    ) -> MagicMock:
+        """Create a mock SetupAction."""
+        action = MagicMock()
+        action.action_type = getattr(SetupActionType, action_type)
+        action.description = description
+        action.plugin = plugin
+        action.package = package
+        return action
+
+    def test_emits_action_checked_for_each_result(self, tmp_path: Path) -> None:
+        """Verify worker emits action_checked for each dry-run result."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+        action1 = self._make_action(package='ruff')
+        action2 = self._make_action(package='pytest')
+        preview = SetupResults(actions=[action1, action2])
+        porringer.update.preview_single.return_value = preview
+
+        result1 = SetupActionResult(
+            action=action1,
+            success=True,
+            message=None,
+            skipped=True,
+            skip_reason='Already installed',
+        )
+        result2 = SetupActionResult(
+            action=action2,
+            success=True,
+            message=None,
+            skipped=False,
+            skip_reason=None,
+        )
+
+        event1 = ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action1, result=result1)
+        event2 = ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action2, result=result2)
+
+        async def mock_stream(*args, **kwargs):  # noqa: ANN002, ANN003
+            yield event1
+            yield event2
+
+        porringer.update.execute_stream = mock_stream
+
+        worker = PreviewWorker(porringer, str(manifest))
+
+        checked: list[tuple[int, SetupActionResult]] = []
+        worker.action_checked.connect(lambda row, r: checked.append((row, r)))
+        worker.run()
+
+        assert len(checked) == 2  # noqa: PLR2004
+        assert checked[0] == (0, result1)
+        assert checked[1] == (1, result2)
+        assert checked[0][1].skipped is True
+        assert checked[1][1].skipped is False
+
+    @staticmethod
+    def test_emits_finished_after_completion(tmp_path: Path) -> None:
+        """Verify worker emits finished signal after dry-run."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+        preview = SetupResults(actions=[])
+        porringer.update.preview_single.return_value = preview
+
+        worker = PreviewWorker(porringer, str(manifest))
+
+        finished_count: list[int] = []
+        worker.finished.connect(lambda: finished_count.append(1))
+        worker.run()
+
+        assert len(finished_count) == 1
+
+    @staticmethod
+    def test_finishes_even_when_dry_run_fails(tmp_path: Path) -> None:
+        """Verify worker emits finished (not error) when dry-run raises."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+        action = MagicMock()
+        action.action_type = SetupActionType.PACKAGE
+        preview = SetupResults(actions=[action])
+        porringer.update.preview_single.return_value = preview
+
+        async def mock_stream(*args, **kwargs):  # noqa: ANN002, ANN003
+            if False:
+                yield  # pragma: no cover — establishes async generator protocol
+            msg = 'dry-run boom'
+            raise RuntimeError(msg)
+
+        porringer.update.execute_stream = mock_stream
+
+        worker = PreviewWorker(porringer, str(manifest))
+
+        errors: list[str] = []
+        finished_count: list[int] = []
+        worker.error.connect(errors.append)
+        worker.finished.connect(lambda: finished_count.append(1))
+        worker.run()
+
+        assert len(errors) == 0
+        assert len(finished_count) == 1
+
+    def test_uses_dry_run_parameter(self, tmp_path: Path) -> None:
+        """Verify the worker passes dry_run=True via SetupParameters."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+        action = self._make_action()
+        preview = SetupResults(actions=[action])
+        porringer.update.preview_single.return_value = preview
+
+        captured_params: list[SetupParameters] = []
+
+        async def mock_stream(previews, params, **kwargs):  # noqa: ANN001, ANN002, ANN003
+            captured_params.append(params)
+            if False:
+                yield  # pragma: no cover — establishes async generator protocol
+
+        porringer.update.execute_stream = mock_stream
+
+        worker = PreviewWorker(porringer, str(manifest))
+        worker.run()
+
+        assert len(captured_params) == 1
+        assert captured_params[0].dry_run is True

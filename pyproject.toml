@@ -78,6 +78,7 @@ allow-prereleases = true
 [tool.pdm.scripts]
 analyze = "ruff check synodic_client tests"
 dev = { call = "tool.scripts.dev:main" }
+dev-uri = { call = "tool.scripts.dev:main_uri" }
 format = "ruff format"
 lint = { composite = ["analyze", "format", "type-check"] }
 package = { call = "tool.scripts.package:main" }
