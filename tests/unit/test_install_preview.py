@@ -64,14 +64,14 @@ class TestInstallPreviewWindow:
     def _make_action(
         action_type: str = 'PACKAGE',
         description: str = 'Install test',
-        plugin: str = 'pip',
+        installer: str = 'pip',
         package: str = 'requests',
     ) -> MagicMock:
         """Create a mock SetupAction."""
         action = MagicMock()
         action.action_type = getattr(SetupActionType, action_type)
         action.description = description
-        action.plugin = plugin
+        action.installer = installer
         action.package = package
         action.command = None
         action.cli_command = None
@@ -104,7 +104,7 @@ class TestInstallWorker:
         async def mock_stream(*args, **kwargs):  # noqa: ANN002, ANN003
             yield completed_event
 
-        porringer.update.execute_stream = mock_stream
+        porringer.sync.execute_stream = mock_stream
 
         token = CancellationToken()
         worker = InstallWorker(porringer, preview, token)
@@ -128,7 +128,7 @@ class TestInstallWorker:
             msg = 'boom'
             raise RuntimeError(msg)
 
-        porringer.update.execute_stream = mock_stream
+        porringer.sync.execute_stream = mock_stream
 
         token = CancellationToken()
         worker = InstallWorker(porringer, preview, token)
@@ -183,7 +183,7 @@ class TestPreviewWorkerLocal:
 
         porringer = MagicMock()
         expected = SetupResults(actions=[])
-        porringer.update.preview_single.return_value = expected
+        porringer.sync.preview_single.return_value = expected
 
         worker = PreviewWorker(porringer, str(manifest))
 
@@ -194,7 +194,7 @@ class TestPreviewWorkerLocal:
         assert len(results) == 1
         assert results[0][0] is expected
         # download should NOT have been called
-        porringer.update.download.assert_not_called()
+        porringer.sync.download.assert_not_called()
 
     @staticmethod
     def test_local_manifest_not_found() -> None:
@@ -217,7 +217,7 @@ class TestPreviewWorker:
     def test_emits_error_on_download_failure() -> None:
         """Verify PreviewWorker emits error when download fails."""
         porringer = MagicMock()
-        porringer.update.download.return_value = DownloadResult(
+        porringer.sync.download.return_value = DownloadResult(
             success=False,
             path=None,
             verified=False,
@@ -238,7 +238,7 @@ class TestPreviewWorker:
     def test_emits_preview_ready_on_success() -> None:
         """Verify PreviewWorker emits preview_ready with SetupResults."""
         porringer = MagicMock()
-        porringer.update.download.return_value = DownloadResult(
+        porringer.sync.download.return_value = DownloadResult(
             success=True,
             path=Path('/tmp/test/porringer.json'),
             verified=True,
@@ -246,7 +246,7 @@ class TestPreviewWorker:
             message='OK',
         )
         expected = SetupResults(actions=[])
-        porringer.update.preview_single.return_value = expected
+        porringer.sync.preview_single.return_value = expected
 
         worker = PreviewWorker(porringer, 'https://example.com/good.json')
 
@@ -265,14 +265,14 @@ class TestPreviewWorkerDryRun:
     def _make_action(
         action_type: str = 'PACKAGE',
         description: str = 'Install test',
-        plugin: str = 'pip',
+        installer: str = 'pip',
         package: str = 'requests',
     ) -> MagicMock:
         """Create a mock SetupAction."""
         action = MagicMock()
         action.action_type = getattr(SetupActionType, action_type)
         action.description = description
-        action.plugin = plugin
+        action.installer = installer
         action.package = package
         return action
 
@@ -285,7 +285,7 @@ class TestPreviewWorkerDryRun:
         action1 = self._make_action(package='ruff')
         action2 = self._make_action(package='pytest')
         preview = SetupResults(actions=[action1, action2])
-        porringer.update.preview_single.return_value = preview
+        porringer.sync.preview_single.return_value = preview
 
         result1 = SetupActionResult(
             action=action1,
@@ -309,7 +309,7 @@ class TestPreviewWorkerDryRun:
             yield event1
             yield event2
 
-        porringer.update.execute_stream = mock_stream
+        porringer.sync.execute_stream = mock_stream
 
         worker = PreviewWorker(porringer, str(manifest))
 
@@ -331,7 +331,7 @@ class TestPreviewWorkerDryRun:
 
         porringer = MagicMock()
         preview = SetupResults(actions=[])
-        porringer.update.preview_single.return_value = preview
+        porringer.sync.preview_single.return_value = preview
 
         worker = PreviewWorker(porringer, str(manifest))
 
@@ -351,7 +351,7 @@ class TestPreviewWorkerDryRun:
         action = MagicMock()
         action.action_type = SetupActionType.PACKAGE
         preview = SetupResults(actions=[action])
-        porringer.update.preview_single.return_value = preview
+        porringer.sync.preview_single.return_value = preview
 
         async def mock_stream(*args, **kwargs):  # noqa: ANN002, ANN003
             if False:
@@ -359,7 +359,7 @@ class TestPreviewWorkerDryRun:
             msg = 'dry-run boom'
             raise RuntimeError(msg)
 
-        porringer.update.execute_stream = mock_stream
+        porringer.sync.execute_stream = mock_stream
 
         worker = PreviewWorker(porringer, str(manifest))
 
@@ -380,7 +380,7 @@ class TestPreviewWorkerDryRun:
         porringer = MagicMock()
         action = self._make_action()
         preview = SetupResults(actions=[action])
-        porringer.update.preview_single.return_value = preview
+        porringer.sync.preview_single.return_value = preview
 
         captured_params: list[SetupParameters] = []
 
@@ -389,7 +389,7 @@ class TestPreviewWorkerDryRun:
             if False:
                 yield  # pragma: no cover — establishes async generator protocol
 
-        porringer.update.execute_stream = mock_stream
+        porringer.sync.execute_stream = mock_stream
 
         worker = PreviewWorker(porringer, str(manifest))
         worker.run()

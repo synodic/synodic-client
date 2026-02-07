@@ -55,7 +55,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ACTION_TYPE_LABELS = {
-    SetupActionType.CHECK_PLUGIN: 'Check Plugin',
     SetupActionType.PACKAGE: 'Package',
     SetupActionType.RUN_COMMAND: 'Run Command',
 }
@@ -107,7 +106,7 @@ class InstallWorker(QObject):
         params = SetupParameters()
         collected: list[SetupActionResult] = []
 
-        async for event in self._porringer.update.execute_stream(previews, params):
+        async for event in self._porringer.sync.execute_stream(previews, params):
             if self._cancellation_token.is_cancelled:
                 raise asyncio.CancelledError
 
@@ -356,7 +355,7 @@ class InstallPreviewWindow(QMainWindow):
         self._table.setRowCount(len(actions))
         for row, action in enumerate(actions):
             self._table.setItem(row, 0, QTableWidgetItem(ACTION_TYPE_LABELS.get(action.action_type, '?')))
-            self._table.setItem(row, 1, QTableWidgetItem(action.plugin or ''))
+            self._table.setItem(row, 1, QTableWidgetItem(action.installer or ''))
             self._table.setItem(row, 2, QTableWidgetItem(str(action.package) if action.package else ''))
             self._table.setItem(row, 3, QTableWidgetItem(action.package_description or action.description))
 
@@ -499,7 +498,7 @@ class PreviewWorker(QObject):
                 if not local_path.exists():
                     self.error.emit(f'Manifest not found:\n{local_path}')
                     return
-                preview = self._porringer.update.preview_single(local_path)
+                preview = self._porringer.sync.preview_single(local_path)
                 self.preview_ready.emit(preview, str(local_path), '')
             else:
                 # Remote URL — download to a temp directory
@@ -507,14 +506,14 @@ class PreviewWorker(QObject):
                 dest = Path(temp_dir) / 'porringer.json'
 
                 params = DownloadParameters(url=self._url, destination=dest, timeout=3)
-                result = self._porringer.update.download(params)
+                result = self._porringer.sync.download(params)
 
                 if not result.success:
                     _safe_rmtree(temp_dir)
                     self.error.emit(f'Failed to download manifest:\n{result.message}')
                     return
 
-                preview = self._porringer.update.preview_single(dest)
+                preview = self._porringer.sync.preview_single(dest)
                 self.preview_ready.emit(preview, str(dest), temp_dir)
 
             # Dry-run to check which actions are already satisfied
@@ -542,7 +541,7 @@ class PreviewWorker(QObject):
         params = SetupParameters(dry_run=True)
         action_indices: dict[int, int] = {id(a): i for i, a in enumerate(preview.actions)}
 
-        async for event in self._porringer.update.execute_stream(previews, params):
+        async for event in self._porringer.sync.execute_stream(previews, params):
             if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result and event.action:
                 row = action_indices.get(id(event.action))
                 if row is not None:
