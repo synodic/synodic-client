@@ -11,7 +11,7 @@ import logging
 import sys
 from pathlib import Path
 
-from porringer.api import API, APIParameters
+from porringer.api import API
 from porringer.schema import LocalConfiguration
 from rich.console import Console
 
@@ -32,8 +32,7 @@ def main() -> None:
         sys.exit(1)
 
     local_config = LocalConfiguration()
-    api_params = APIParameters(logger)
-    porringer = API(local_config, api_params)
+    porringer = API(local_config)
 
     registered = {d.path.resolve() for d in porringer.cache.list_directories()}
     added = 0

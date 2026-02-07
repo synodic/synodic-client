@@ -8,9 +8,11 @@ from unittest.mock import MagicMock
 from porringer.schema import (
     CancellationToken,
     DownloadResult,
+    ProgressEvent,
+    ProgressEventKind,
+    SetupActionResult,
     SetupActionType,
     SetupResults,
-    ThreadSafeProgressAdapter,
 )
 
 from synodic_client.application.qt import parse_uri
@@ -59,7 +61,7 @@ class TestInstallPreviewWindow:
 
     @staticmethod
     def _make_action(
-        action_type: str = 'INSTALL_PACKAGE',
+        action_type: str = 'PACKAGE',
         description: str = 'Install test',
         plugin: str = 'pip',
         package: str = 'requests',
@@ -88,41 +90,47 @@ class TestInstallWorker:
     def test_worker_emits_finished_on_success() -> None:
         """Verify worker emits finished signal with results."""
         porringer = MagicMock()
-        expected = SetupResults(actions=[])
+        preview = SetupResults(actions=[])
 
-        # Make execute_single_async an awaitable that returns expected
-        async def mock_execute(*args, **kwargs):  # noqa: ANN002, ANN003
-            return expected
+        action = MagicMock()
+        result = MagicMock(spec=SetupActionResult)
+        completed_event = ProgressEvent(
+            kind=ProgressEventKind.ACTION_COMPLETED,
+            action=action,
+            result=result,
+        )
 
-        porringer.update.execute_single_async = mock_execute
+        async def mock_stream(*args, **kwargs):  # noqa: ANN002, ANN003
+            yield completed_event
 
-        adapter = MagicMock(spec=ThreadSafeProgressAdapter)
+        porringer.update.execute_stream = mock_stream
+
         token = CancellationToken()
-
-        worker = InstallWorker(porringer, [], Path('/tmp/test'), adapter, token)
+        worker = InstallWorker(porringer, preview, token)
 
         received: list[SetupResults] = []
         worker.finished.connect(received.append)
         worker.run()
 
         assert len(received) == 1
-        assert received[0] is expected
+        assert received[0].actions == preview.actions
 
     @staticmethod
     def test_worker_emits_error_on_failure() -> None:
         """Verify worker emits error signal on exception."""
         porringer = MagicMock()
+        preview = SetupResults(actions=[])
 
-        async def mock_execute(*args, **kwargs):  # noqa: ANN002, ANN003
+        async def mock_stream(*args, **kwargs):  # noqa: ANN002, ANN003
+            if False:
+                yield  # pragma: no cover — establishes async generator protocol
             msg = 'boom'
             raise RuntimeError(msg)
 
-        porringer.update.execute_single_async = mock_execute
+        porringer.update.execute_stream = mock_stream
 
-        adapter = MagicMock(spec=ThreadSafeProgressAdapter)
         token = CancellationToken()
-
-        worker = InstallWorker(porringer, [], Path('/tmp/test'), adapter, token)
+        worker = InstallWorker(porringer, preview, token)
 
         errors: list[str] = []
         worker.error.connect(errors.append)

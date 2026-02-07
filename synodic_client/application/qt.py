@@ -5,7 +5,7 @@ import sys
 from collections.abc import Callable
 from urllib.parse import parse_qs, urlparse
 
-from porringer.api import API, APIParameters
+from porringer.api import API
 from porringer.schema import ListPluginsParameters, LocalConfiguration
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
@@ -70,8 +70,7 @@ def _init_services(logger: logging.Logger) -> tuple[Client, API]:
     client = Client()
 
     local_config = LocalConfiguration()
-    api_params = APIParameters(logger)
-    porringer = API(local_config, api_params)
+    porringer = API(local_config)
 
     update_config = resolve_update_config(config)
     client.initialize_updater(update_config)

@@ -24,15 +24,17 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 from porringer.schema import (
+    BatchSetupResults,
     CancellationToken,
     DownloadParameters,
+    ProgressEventKind,
     SetupAction,
+    SetupActionResult,
     SetupActionType,
     SetupParameters,
     SetupResults,
-    ThreadSafeProgressAdapter,
 )
-from PySide6.QtCore import QObject, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
@@ -54,39 +56,38 @@ logger = logging.getLogger(__name__)
 
 ACTION_TYPE_LABELS = {
     SetupActionType.CHECK_PLUGIN: 'Check Plugin',
-    SetupActionType.INSTALL_PACKAGE: 'Install Package',
+    SetupActionType.PACKAGE: 'Package',
     SetupActionType.RUN_COMMAND: 'Run Command',
 }
 
 
 class InstallWorker(QObject):
-    """Background worker that executes setup actions via porringer."""
+    """Background worker that executes setup actions via porringer.
+
+    Uses the ``execute_stream`` async generator to consume progress events
+    and emits per-action progress signals for GUI updates.
+    """
 
     finished = Signal(object)  # SetupResults
+    progress = Signal(object, object)  # (SetupAction, SetupActionResult | None)
     error = Signal(str)
 
     def __init__(
         self,
         porringer: API,
-        actions: list[SetupAction],
-        manifest_path: Path,
-        adapter: ThreadSafeProgressAdapter,
+        preview: SetupResults,
         cancellation_token: CancellationToken,
     ) -> None:
         """Initialize the worker.
 
         Args:
             porringer: The porringer API instance.
-            actions: Previewed actions to execute.
-            manifest_path: Path to the downloaded manifest.
-            adapter: Thread-safe progress adapter for GUI updates.
+            preview: The preview results containing actions and manifest_path.
             cancellation_token: Token for cooperative cancellation.
         """
         super().__init__()
         self._porringer = porringer
-        self._actions = actions
-        self._manifest_path = manifest_path
-        self._adapter = adapter
+        self._preview = preview
         self._cancellation_token = cancellation_token
 
     def run(self) -> None:
@@ -95,24 +96,36 @@ class InstallWorker(QObject):
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                results = loop.run_until_complete(
-                    self._porringer.update.execute_single_async(
-                        self._actions,
-                        self._manifest_path,
-                        SetupParameters(),
-                        progress_callback=self._adapter.callback,
-                        cancellation_token=self._cancellation_token,
-                    )
-                )
+                results = loop.run_until_complete(self._execute())
                 self.finished.emit(results)
             finally:
                 loop.close()
         except asyncio.CancelledError:
-            # Cancellation is expected — emit an empty result
-            self.finished.emit(SetupResults(actions=self._actions))
+            self.finished.emit(SetupResults(actions=self._preview.actions))
         except Exception as exc:
             logger.exception('Install execution failed')
             self.error.emit(str(exc))
+
+    async def _execute(self) -> SetupResults:
+        """Stream execution events and collect results."""
+        previews = BatchSetupResults(manifest_results=[self._preview], failed_paths=[])
+        params = SetupParameters()
+        collected: list[SetupActionResult] = []
+
+        async for event in self._porringer.update.execute_stream(previews, params):
+            if self._cancellation_token.is_cancelled:
+                raise asyncio.CancelledError
+
+            if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
+                collected.append(event.result)
+                self.progress.emit(event.action, event.result)
+
+        return SetupResults(
+            actions=self._preview.actions,
+            results=collected,
+            manifest_path=self._preview.manifest_path,
+            metadata=self._preview.metadata,
+        )
 
 
 class InstallPreviewWindow(QMainWindow):
@@ -136,7 +149,6 @@ class InstallPreviewWindow(QMainWindow):
         self._worker: InstallWorker | None = None
         self._progress_dialog: QProgressDialog | None = None
         self._cancellation_token: CancellationToken | None = None
-        self._progress_timer: QTimer | None = None
         self._completed_count = 0
 
         self.setWindowTitle('Install Preview')
@@ -155,6 +167,22 @@ class InstallPreviewWindow(QMainWindow):
         self._url_label = QLabel()
         self._url_label.setWordWrap(True)
         layout.addWidget(self._url_label)
+
+        # Metadata labels (populated after preview completes)
+        self._name_label = QLabel()
+        self._name_label.setStyleSheet('font-size: 14px; font-weight: bold;')
+        self._name_label.hide()
+        layout.addWidget(self._name_label)
+
+        self._description_label = QLabel()
+        self._description_label.setWordWrap(True)
+        self._description_label.hide()
+        layout.addWidget(self._description_label)
+
+        self._meta_label = QLabel()
+        self._meta_label.setStyleSheet('color: grey;')
+        self._meta_label.hide()
+        layout.addWidget(self._meta_label)
 
         # Status label (shown during download/preview)
         self._status_label = QLabel()
@@ -243,6 +271,25 @@ class InstallPreviewWindow(QMainWindow):
         # Keep the temp directory alive until the window closes
         self._temp_dir_path = temp_dir_path
 
+        # Display manifest metadata if available
+        metadata = preview.metadata
+        if metadata:
+            if metadata.name:
+                self._name_label.setText(metadata.name)
+                self._name_label.show()
+                self.setWindowTitle(f'Install Preview — {metadata.name}')
+            if metadata.description:
+                self._description_label.setText(metadata.description)
+                self._description_label.show()
+            meta_parts: list[str] = []
+            if metadata.author:
+                meta_parts.append(f'Author: {metadata.author}')
+            if metadata.url:
+                meta_parts.append(f'URL: {metadata.url}')
+            if meta_parts:
+                self._meta_label.setText('  |  '.join(meta_parts))
+                self._meta_label.show()
+
         if not preview.actions:
             self._status_label.setText('No actions to perform — the manifest is empty.')
             return
@@ -265,8 +312,8 @@ class InstallPreviewWindow(QMainWindow):
         for row, action in enumerate(actions):
             self._table.setItem(row, 0, QTableWidgetItem(ACTION_TYPE_LABELS.get(action.action_type, '?')))
             self._table.setItem(row, 1, QTableWidgetItem(action.plugin or ''))
-            self._table.setItem(row, 2, QTableWidgetItem(action.package or ''))
-            self._table.setItem(row, 3, QTableWidgetItem(action.description))
+            self._table.setItem(row, 2, QTableWidgetItem(str(action.package) if action.package else ''))
+            self._table.setItem(row, 3, QTableWidgetItem(action.package_description or action.description))
 
     # --- Install execution ---
 
@@ -280,7 +327,6 @@ class InstallPreviewWindow(QMainWindow):
 
         total = len(self._preview.actions)
         self._cancellation_token = CancellationToken()
-        adapter = ThreadSafeProgressAdapter()
 
         # Progress dialog
         self._progress_dialog = QProgressDialog(
@@ -296,24 +342,17 @@ class InstallPreviewWindow(QMainWindow):
         self._progress_dialog.canceled.connect(self._on_cancel)
         self._progress_dialog.show()
 
-        # Poll the adapter periodically from the GUI thread
-        self._progress_timer = QTimer(self)
-        self._progress_timer.setInterval(100)
-        self._progress_timer.timeout.connect(lambda: self._drain_progress(adapter))
-        self._progress_timer.start()
-
         # Worker thread
         self._thread = QThread()
         self._worker = InstallWorker(
             self._porringer,
-            self._preview.actions,
-            self._manifest_path,
-            adapter,
+            self._preview,
             self._cancellation_token,
         )
         self._worker.moveToThread(self._thread)
 
         self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(self._on_action_progress)
         self._worker.finished.connect(self._on_install_finished)
         self._worker.error.connect(self._on_install_error)
         self._worker.finished.connect(self._thread.quit)
@@ -323,19 +362,18 @@ class InstallPreviewWindow(QMainWindow):
 
         self._thread.start()
 
-    def _drain_progress(self, adapter: ThreadSafeProgressAdapter) -> None:
-        """Process queued progress updates from the adapter."""
-        for action, result in adapter.drain():
-            self._completed_count += 1
-            label = action.description
-            if result and result.skipped:
-                label += f' (skipped: {result.skip_reason})'
-            elif result and not result.success:
-                label += f' (FAILED: {result.message})'
+    def _on_action_progress(self, action: SetupAction, result: SetupActionResult) -> None:
+        """Handle a single action completion from the worker."""
+        self._completed_count += 1
+        label = action.description
+        if result.skipped:
+            label += f' (skipped: {result.skip_reason})'
+        elif not result.success:
+            label += f' (FAILED: {result.message})'
 
-            if self._progress_dialog:
-                self._progress_dialog.setValue(self._completed_count)
-                self._progress_dialog.setLabelText(label)
+        if self._progress_dialog:
+            self._progress_dialog.setValue(self._completed_count)
+            self._progress_dialog.setLabelText(label)
 
     def _on_cancel(self) -> None:
         """Handle cancel button on the progress dialog."""
@@ -374,10 +412,7 @@ class InstallPreviewWindow(QMainWindow):
         self._install_btn.setEnabled(True)
 
     def _cleanup_progress(self) -> None:
-        """Stop the progress timer and close the dialog."""
-        if self._progress_timer:
-            self._progress_timer.stop()
-            self._progress_timer = None
+        """Close the progress dialog."""
         if self._progress_dialog:
             self._progress_dialog.close()
             self._progress_dialog = None

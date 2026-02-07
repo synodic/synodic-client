@@ -2,6 +2,7 @@
 
 import sys
 import winreg
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -121,7 +122,7 @@ class TestProtocolIntegration:
                 assert description == 'Synodic Client Protocol'
 
                 url_protocol, _ = winreg.QueryValueEx(key, 'URL Protocol')
-                assert url_protocol == ''
+                assert not url_protocol
 
             # Verify the command key
             command_path = f'{key_path}\\shell\\open\\command'
@@ -190,8 +191,6 @@ class TestProtocolLive:
     @pytest.mark.skipif(sys.platform != 'win32', reason='Windows only')
     def test_command_points_to_existing_exe() -> None:
         """Verify the registered command points to an exe path (may not exist in CI)."""
-        from pathlib import Path
-
         key_path = f'Software\\Classes\\{PROTOCOL_NAME}\\shell\\open\\command'
         try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
