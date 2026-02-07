@@ -1,7 +1,9 @@
 """GUI entry point for the Synodic Client application."""
 
 import logging
+import subprocess
 import sys
+import types
 from collections.abc import Callable
 from urllib.parse import parse_qs, urlparse
 
@@ -98,14 +100,54 @@ def _process_uri(uri: str, handler: Callable[[str], None]) -> None:
             handler(manifests[0])
 
 
+def _suppress_subprocess_consoles() -> None:
+    """Monkey-patch ``subprocess.Popen`` to hide console windows on Windows.
+
+    When the application is built as a windowed executable (``console=False``
+    in PyInstaller), every ``subprocess.Popen`` call that launches a console
+    program (pip, pipx, uv, winget, etc.) would briefly flash a visible
+    console window.  This patch adds ``CREATE_NO_WINDOW`` to *creationflags*
+    for all calls that don't already set it, suppressing those flashes.
+    """
+    if sys.platform != 'win32':
+        return
+
+    _original_init = subprocess.Popen.__init__
+
+    def _patched_init(self: subprocess.Popen, *args: object, **kwargs: object) -> None:  # type: ignore[override]
+        if 'creationflags' not in kwargs:
+            kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+        _original_init(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    subprocess.Popen.__init__ = _patched_init  # type: ignore[assignment]
+
+
 def application() -> None:
     """Application entry point."""
+    # Suppress console window flashes from subprocess calls (e.g. porringer
+    # running pip, pipx, uv) before any subprocesses are spawned.
+    _suppress_subprocess_consoles()
+
     # Initialize Velopack early, before any UI
     initialize_velopack()
     register_protocol(sys.executable)
 
     configure_logging()
     logger = logging.getLogger('synodic_client')
+
+    # Redirect unhandled exceptions to the log file so they are visible
+    # even in windowed (console=False) PyInstaller builds.
+    _original_excepthook = sys.excepthook
+
+    def _exception_hook(
+        exc_type: type[BaseException],
+        exc_value: BaseException,
+        exc_tb: types.TracebackType | None,
+    ) -> None:
+        logger.critical('Unhandled exception', exc_info=(exc_type, exc_value, exc_tb))
+        _original_excepthook(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _exception_hook
 
     uri = find_uri(sys.argv[1:])
     if uri:
@@ -133,6 +175,7 @@ def application() -> None:
     _install_windows: list[InstallPreviewWindow] = []
 
     def _handle_install_uri(manifest_url: str) -> None:
+        logger.info('Opening install preview for: %s', manifest_url)
         window = InstallPreviewWindow(porringer, manifest_url)
         _install_windows.append(window)
         window.show()

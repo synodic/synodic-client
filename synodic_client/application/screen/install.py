@@ -214,8 +214,14 @@ class InstallPreviewWindow(QMainWindow):
 
     # --- Lifecycle ---
 
+    def showEvent(self, event: Any) -> None:
+        """Log when the window becomes visible."""
+        super().showEvent(event)
+        logger.info('Install preview window shown (visible=%s)', self.isVisible())
+
     def closeEvent(self, event: Any) -> None:
         """Clean up the temp directory when the window is closed."""
+        logger.info('Install preview window closing')
         self._cleanup_temp_dir()
         super().closeEvent(event)
 
@@ -232,6 +238,7 @@ class InstallPreviewWindow(QMainWindow):
 
         Call this after ``show()`` to begin the download → preview flow.
         """
+        logger.info('Starting install preview for: %s', self._manifest_url)
         self._url_label.setText(f'<b>Manifest:</b> {self._manifest_url}')
         self._status_label.setText('Loading manifest…')
         self._install_btn.setEnabled(False)
@@ -263,6 +270,7 @@ class InstallPreviewWindow(QMainWindow):
             manifest_path: Path to the downloaded manifest file.
             temp_dir_path: Path to the temp directory (kept alive for execution).
         """
+        logger.info('Preview ready: %d action(s) from %s', len(preview.actions), manifest_path)
         self._preview = preview
         self._manifest_path = Path(manifest_path)
         # Keep the temp directory alive until the window closes
@@ -280,8 +288,10 @@ class InstallPreviewWindow(QMainWindow):
 
     def _on_preview_error(self, message: str) -> None:
         """Handle a preview error."""
+        logger.error('Preview failed: %s', message)
         self._status_label.setText('')
         QMessageBox.critical(self, 'Preview Failed', message)
+        logger.info('Closing window due to preview error')
         self.close()
 
     def _show_metadata(self, preview: SetupResults) -> None:
@@ -347,6 +357,14 @@ class InstallPreviewWindow(QMainWindow):
             self._install_btn.setEnabled(False)
         else:
             self._status_label.setText(f'{total} action(s): {needed} needed, {satisfied} already satisfied.')
+
+        logger.info(
+            'Preview complete: %d total, %d needed, %d satisfied (window visible=%s)',
+            total,
+            needed,
+            satisfied,
+            self.isVisible(),
+        )
 
     # --- Table ---
 
@@ -489,6 +507,7 @@ class PreviewWorker(QObject):
 
     def run(self) -> None:
         """Download the manifest, preview actions, and check status via dry-run."""
+        logger.info('PreviewWorker starting for: %s', self._url)
         temp_dir = None
         try:
             local_path = resolve_local_path(self._url)

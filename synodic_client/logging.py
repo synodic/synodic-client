@@ -47,8 +47,8 @@ def configure_logging() -> None:
     """Set up application-wide logging.
 
     Attaches a :class:`EagerRotatingFileHandler` to the ``synodic_client``
-    logger and configures :func:`logging.basicConfig` for ``INFO`` level
-    output on *stderr*.
+    and ``porringer`` loggers and configures :func:`logging.basicConfig`
+    for ``INFO`` level output on *stderr*.
     """
     logging.basicConfig(level=logging.INFO)
 
@@ -62,6 +62,10 @@ def configure_logging() -> None:
 
     app_logger = logging.getLogger('synodic_client')
     app_logger.addHandler(handler)
+
+    porringer_logger = logging.getLogger('porringer')
+    porringer_logger.addHandler(handler)
+    porringer_logger.setLevel(logging.INFO)
 
 
 def open_log() -> None:
