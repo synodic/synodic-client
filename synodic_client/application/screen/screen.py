@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from synodic_client.application.theme import COMPACT_MARGINS, MAIN_WINDOW_MIN_SIZE
+
 if TYPE_CHECKING:
     from porringer.api import API
 
@@ -42,7 +44,7 @@ class PluginsView(QWidget):
     def _init_ui(self) -> None:
         """Initialize the UI components."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(*COMPACT_MARGINS)
 
         self._table = QTableWidget()
         self._table.setColumnCount(3)
@@ -97,7 +99,7 @@ class DirectoriesView(QWidget):
     def _init_ui(self) -> None:
         """Initialize the UI components."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(*COMPACT_MARGINS)
 
         # Toolbar with add/remove buttons
         toolbar = QHBoxLayout()
@@ -206,7 +208,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._porringer = porringer
         self.setWindowTitle('Synodic Client')
-        self.setMinimumSize(600, 400)
+        self.setMinimumSize(*MAIN_WINDOW_MIN_SIZE)
 
     def show(self) -> None:
         """Show the window, initializing UI lazily on first show."""

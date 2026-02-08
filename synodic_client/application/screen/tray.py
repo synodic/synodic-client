@@ -3,7 +3,7 @@
 import logging
 from typing import LiteralString
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -18,10 +18,14 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSystemTrayIcon,
     QVBoxLayout,
+    QWidget,
 )
 
 from synodic_client.application.screen.screen import MainWindow
+from synodic_client.application.theme import UPDATE_SOURCE_DIALOG_MIN_WIDTH
+from synodic_client.application.threading import ThreadRunner
 from synodic_client.client import Client
+from synodic_client.config import GlobalConfiguration
 from synodic_client.logging import open_log
 from synodic_client.resolution import resolve_config, resolve_update_config, update_and_resolve
 from synodic_client.updater import GITHUB_REPO_URL, UpdateChannel, UpdateInfo
@@ -76,16 +80,86 @@ class UpdateDownloadWorker(QObject):
             self.error.emit(str(e))
 
 
+class UpdateSourceDialog(QDialog):
+    """Dialog for editing the Velopack update source URL or local path."""
+
+    def __init__(self, current_source: str | None, parent: QWidget | None = None) -> None:
+        """Initialise the dialog.
+
+        Args:
+            current_source: The current update source value (may be ``None``).
+            parent: Optional parent widget.
+        """
+        super().__init__(parent)
+        self.setWindowTitle('Update Source')
+        self.setMinimumWidth(UPDATE_SOURCE_DIALOG_MIN_WIDTH)
+
+        layout = QVBoxLayout(self)
+
+        label = QLabel(
+            'Enter a URL or local path for Velopack releases.\nLeave blank to use the default GitHub source.',
+        )
+        layout.addWidget(label)
+
+        self._source_edit = QLineEdit(current_source or '')
+        self._source_edit.setPlaceholderText(GITHUB_REPO_URL)
+
+        browse_button = QPushButton('Browse...')
+        browse_button.clicked.connect(self._browse)
+
+        row = QHBoxLayout()
+        row.addWidget(self._source_edit)
+        row.addWidget(browse_button)
+        layout.addLayout(row)
+
+        button_row = QHBoxLayout()
+        ok_button = QPushButton('OK')
+        cancel_button = QPushButton('Cancel')
+        button_row.addStretch()
+        button_row.addWidget(ok_button)
+        button_row.addWidget(cancel_button)
+        layout.addLayout(button_row)
+
+        ok_button.clicked.connect(self.accept)
+        cancel_button.clicked.connect(self.reject)
+
+    def _browse(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, 'Select Releases Directory')
+        if path:
+            self._source_edit.setText(path)
+
+    @property
+    def source(self) -> str | None:
+        """Return the trimmed source text, or ``None`` if blank."""
+        return self._source_edit.text().strip() or None
+
+
 class TrayScreen:
     """Tray screen for the application."""
 
-    def __init__(self, app: QApplication, client: Client, icon_name: LiteralString, window: MainWindow) -> None:
-        """Initialize the tray icon."""
+    def __init__(
+        self,
+        app: QApplication,
+        client: Client,
+        icon_name: LiteralString,
+        window: MainWindow,
+        config: GlobalConfiguration | None = None,
+    ) -> None:
+        """Initialize the tray icon.
+
+        Args:
+            app: The running ``QApplication``.
+            client: The Synodic Client service.
+            icon_name: Resource name for the tray icon.
+            window: The main application window.
+            config: Optional pre-resolved configuration.  When ``None``,
+                the configuration is resolved from disk on demand.
+        """
         self._app = app
         self._client = client
         self._window = window
-        self._update_thread: QThread | None = None
-        self._update_worker: UpdateCheckWorker | UpdateDownloadWorker | None = None
+        self._config = config
+        self._runner: ThreadRunner | None = None
         self._progress_dialog: QProgressDialog | None = None
         self._pending_update_info: UpdateInfo | None = None
         self._download_cancelled = False
@@ -159,13 +233,21 @@ class TrayScreen:
 
         self.tray.setContextMenu(self.menu)
 
+    # -- Config helpers --
+
+    def _resolve_config(self) -> GlobalConfiguration:
+        """Return the injected config or resolve from disk."""
+        if self._config is not None:
+            return self._config
+        return resolve_config()
+
     def _start_auto_update_timer(self) -> None:
         """Start (or restart) the periodic auto-update timer from config."""
         if self._auto_update_timer is not None:
             self._auto_update_timer.stop()
             self._auto_update_timer = None
 
-        config = resolve_update_config(resolve_config())
+        config = resolve_update_config(self._resolve_config())
         interval_hours = config.auto_update_interval_hours
         if interval_hours <= 0:
             logger.info('Automatic update checking is disabled')
@@ -180,7 +262,7 @@ class TrayScreen:
 
     def _sync_channel_checks(self) -> None:
         """Synchronize channel checkmarks with the current config."""
-        config = resolve_config()
+        config = self._resolve_config()
         is_dev = config.update_channel == 'dev'
         self._channel_stable_action.setChecked(not is_dev)
         self._channel_dev_action.setChecked(is_dev)
@@ -194,69 +276,41 @@ class TrayScreen:
 
     def _on_update_source(self) -> None:
         """Open a dialog to edit the update source URL or local path."""
-        config = resolve_config()
+        config = self._resolve_config()
 
-        dialog = QDialog(self._window if self._window.isVisible() else None)
-        dialog.setWindowTitle('Update Source')
-        dialog.setMinimumWidth(450)
-
-        layout = QVBoxLayout(dialog)
-
-        label = QLabel(
-            'Enter a URL or local path for Velopack releases.\nLeave blank to use the default GitHub source.',
-        )
-        layout.addWidget(label)
-
-        source_edit = QLineEdit(config.update_source or '')
-        source_edit.setPlaceholderText(GITHUB_REPO_URL)
-
-        browse_button = QPushButton('Browse...')
-
-        row = QHBoxLayout()
-        row.addWidget(source_edit)
-        row.addWidget(browse_button)
-        layout.addLayout(row)
-
-        button_row = QHBoxLayout()
-        ok_button = QPushButton('OK')
-        cancel_button = QPushButton('Cancel')
-        button_row.addStretch()
-        button_row.addWidget(ok_button)
-        button_row.addWidget(cancel_button)
-        layout.addLayout(button_row)
-
-        def _browse() -> None:
-            path = QFileDialog.getExistingDirectory(dialog, 'Select Releases Directory')
-            if path:
-                source_edit.setText(path)
-
-        browse_button.clicked.connect(_browse)
-        ok_button.clicked.connect(dialog.accept)
-        cancel_button.clicked.connect(dialog.reject)
+        parent = self._window if self._window.isVisible() else None
+        dialog = UpdateSourceDialog(config.update_source, parent)
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            new_source = source_edit.text().strip() or None
-            config.update_source = new_source
-            logger.info('Update source changed to: %s', new_source or '(default)')
-
-            update_cfg = update_and_resolve(config)
-            self._client.initialize_updater(update_cfg)
-            self._start_auto_update_timer()
-            logger.info(
-                'Updater re-initialized (channel: %s, source: %s)', update_cfg.channel.name, update_cfg.repo_url
-            )
+            config.update_source = dialog.source
+            logger.info('Update source changed to: %s', dialog.source or '(default)')
+            self._reinitialize_updater(config)
 
     def _on_channel_changed(self, channel: UpdateChannel) -> None:
         """Handle channel selection change."""
-        config = resolve_config()
+        config = self._resolve_config()
         config.update_channel = 'dev' if channel == UpdateChannel.DEVELOPMENT else 'stable'
         logger.info('Update channel changed to: %s', config.update_channel)
-
-        update_cfg = update_and_resolve(config)
         self._sync_channel_checks()
+        self._reinitialize_updater(config)
+
+    def _reinitialize_updater(self, config: GlobalConfiguration) -> None:
+        """Re-derive update settings and restart the updater and auto-update timer."""
+        update_cfg = update_and_resolve(config)
         self._client.initialize_updater(update_cfg)
         self._start_auto_update_timer()
         logger.info('Updater re-initialized (channel: %s, source: %s)', update_cfg.channel.name, update_cfg.repo_url)
+
+    def _reset_update_action(self) -> None:
+        """Restore the 'Check for Updates' action to its idle state."""
+        self.update_action.setEnabled(True)
+        self.update_action.setText('Check for Updates...')
+
+    def _close_progress(self) -> None:
+        """Close and discard the download progress dialog, if open."""
+        if self._progress_dialog:
+            self._progress_dialog.close()
+            self._progress_dialog = None
 
     def _on_check_updates(self) -> None:
         """Handle check for updates action."""
@@ -272,31 +326,16 @@ class TrayScreen:
         self.update_action.setEnabled(False)
         self.update_action.setText('Checking for Updates...')
 
-        # Create worker and thread
-        self._update_thread = QThread()
-        self._update_worker = UpdateCheckWorker(self._client)
-        self._update_worker.moveToThread(self._update_thread)
+        worker = UpdateCheckWorker(self._client)
+        worker.finished.connect(self._on_update_check_finished)
+        worker.error.connect(self._on_update_check_error)
 
-        # Connect signals
-        self._update_thread.started.connect(self._update_worker.run)
-        self._update_worker.finished.connect(self._on_update_check_finished)
-        self._update_worker.error.connect(self._on_update_check_error)
-
-        # Clean up thread and worker when thread finishes
-        self._update_thread.finished.connect(self._update_thread.deleteLater)
-        self._update_thread.finished.connect(self._update_worker.deleteLater)
-
-        # Start the thread
-        self._update_thread.start()
+        self._runner = ThreadRunner(worker)
+        self._runner.start()
 
     def _on_update_check_finished(self, result: UpdateInfo | None) -> None:
         """Handle update check completion."""
-        if self._update_thread is not None:
-            self._update_thread.quit()
-            self._update_thread.wait()
-
-        self.update_action.setEnabled(True)
-        self.update_action.setText('Check for Updates...')
+        self._reset_update_action()
 
         if result is None:
             self.tray.showMessage(
@@ -332,12 +371,7 @@ class TrayScreen:
 
     def _on_update_check_error(self, error: str) -> None:
         """Handle update check error."""
-        if self._update_thread is not None:
-            self._update_thread.quit()
-            self._update_thread.wait()
-
-        self.update_action.setEnabled(True)
-        self.update_action.setText('Check for Updates...')
+        self._reset_update_action()
 
         self.tray.showMessage(
             'Update Check Error',
@@ -368,28 +402,18 @@ class TrayScreen:
         self._download_cancelled = False
         self._progress_dialog.show()
 
-        # Create worker and thread
-        self._update_thread = QThread()
-        self._update_worker = UpdateDownloadWorker(self._client)
-        self._update_worker.moveToThread(self._update_thread)
+        worker = UpdateDownloadWorker(self._client)
+        worker.finished.connect(self._on_download_finished)
+        worker.progress.connect(self._on_download_progress)
+        worker.error.connect(self._on_download_error)
 
-        # Connect signals
-        self._update_thread.started.connect(self._update_worker.run)
-        self._update_worker.finished.connect(self._on_download_finished)
-        self._update_worker.progress.connect(self._on_download_progress)
-        self._update_worker.error.connect(self._on_download_error)
-        self._update_worker.finished.connect(self._update_thread.quit)
-        self._update_worker.error.connect(self._update_thread.quit)
-
-        # Start the thread
-        self._update_thread.start()
+        self._runner = ThreadRunner(worker)
+        self._runner.start()
 
     def _on_download_cancelled(self) -> None:
         """Handle cancel button on the download progress dialog."""
         self._download_cancelled = True
-        if self._progress_dialog:
-            self._progress_dialog.close()
-            self._progress_dialog = None
+        self._close_progress()
         logger.info('Update download cancelled by user')
 
     def _on_download_progress(self, percentage: int) -> None:
@@ -400,9 +424,7 @@ class TrayScreen:
 
     def _on_download_finished(self, success: bool) -> None:
         """Handle download completion."""
-        if self._progress_dialog:
-            self._progress_dialog.close()
-            self._progress_dialog = None
+        self._close_progress()
 
         if self._download_cancelled:
             return
@@ -431,9 +453,7 @@ class TrayScreen:
 
     def _on_download_error(self, error: str) -> None:
         """Handle download error."""
-        if self._progress_dialog:
-            self._progress_dialog.close()
-            self._progress_dialog = None
+        self._close_progress()
 
         self.tray.showMessage(
             'Download Error',

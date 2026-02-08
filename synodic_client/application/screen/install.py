@@ -3,13 +3,6 @@
 Displays a dry-run preview of porringer setup actions and lets the user
 confirm execution.  Execution runs on a background ``QThread`` with a
 cancellable ``QProgressDialog``.
-
-.. note:: QThread worker pattern
-
-   Workers moved to a ``QThread`` via ``moveToThread()`` **must** be stored
-   as instance attributes (``self._worker``), never as local variables.
-   A local reference will be garbage-collected before the thread starts,
-   silently preventing execution.
 """
 
 from __future__ import annotations
@@ -34,7 +27,7 @@ from porringer.schema import (
     SetupParameters,
     SetupResults,
 )
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -55,6 +48,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from synodic_client.application.theme import (
+    COMMAND_HEADER_STYLE,
+    CONTENT_MARGINS,
+    COPY_BTN_SIZE,
+    COPY_BTN_STYLE,
+    COPY_FEEDBACK_MS,
+    COPY_ICON,
+    HEADER_STYLE,
+    INSTALL_PREVIEW_MIN_SIZE,
+    MONOSPACE_FAMILY,
+    MONOSPACE_SIZE,
+    MUTED_STYLE,
+    NO_MARGINS,
+)
+from synodic_client.application.threading import ThreadRunner
+
 if TYPE_CHECKING:
     from porringer.api import API
 
@@ -64,12 +73,6 @@ ACTION_TYPE_LABELS = {
     SetupActionType.PACKAGE: 'Package',
     SetupActionType.RUN_COMMAND: 'Run Command',
 }
-
-_COPY_ICON = '\U0001f4cb'
-_COPY_BTN_STYLE = (
-    'QToolButton { border: none; padding: 2px 4px; }'
-    'QToolButton:hover { background: palette(midlight); border-radius: 3px; }'
-)
 
 
 def format_cli_command(action: SetupAction) -> str:
@@ -143,6 +146,76 @@ class InstallWorker(QObject):
         )
 
 
+class CommandListWidget(QScrollArea):
+    """Scrollable list of per-action CLI commands with copy buttons."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialise the command list widget."""
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+
+    def populate(self, actions: list[SetupAction]) -> None:
+        """Build per-action command fields with descriptive labels above each."""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(*NO_MARGINS)
+
+        mono = QFont(MONOSPACE_FAMILY, MONOSPACE_SIZE)
+        for i, action in enumerate(actions, 1):
+            label_text = ACTION_TYPE_LABELS.get(action.action_type, 'Action')
+            desc = action.package_description or action.description
+            header = QLabel(f'{i}. [{label_text}] {desc}')
+            header.setStyleSheet(COMMAND_HEADER_STYLE)
+            layout.addWidget(header)
+
+            field = QLineEdit(format_cli_command(action))
+            field.setReadOnly(True)
+            field.setFont(mono)
+
+            row_layout = QHBoxLayout()
+            row_layout.setContentsMargins(*NO_MARGINS)
+            row_layout.setSpacing(4)
+            row_layout.addWidget(field)
+            row_layout.addWidget(_make_copy_button(field))
+
+            row_widget = QWidget()
+            row_widget.setLayout(row_layout)
+            layout.addWidget(row_widget)
+
+        layout.addStretch()
+        self.setWidget(container)
+
+
+def _make_copy_button(field: QLineEdit) -> QToolButton:
+    """Create a copy-to-clipboard button bound to *field*."""
+    btn = QToolButton()
+    btn.setText(COPY_ICON)
+    btn.setToolTip('Copy to clipboard')
+    btn.setFixedSize(*COPY_BTN_SIZE)
+    btn.setStyleSheet(COPY_BTN_STYLE)
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    btn.clicked.connect(lambda: _copy_command(field, btn))
+    return btn
+
+
+def _copy_command(field: QLineEdit, button: QToolButton) -> None:
+    """Copy the field text to the clipboard and briefly show a check mark."""
+    clipboard = QApplication.clipboard()
+    if clipboard:
+        clipboard.setText(field.text())
+    button.setText('\u2713')
+    button.setToolTip('Copied!')
+
+    def _restore() -> None:
+        try:
+            button.setText(COPY_ICON)
+            button.setToolTip('Copy to clipboard')
+        except RuntimeError:
+            pass
+
+    QTimer.singleShot(COPY_FEEDBACK_MS, _restore)
+
+
 class InstallPreviewWindow(QMainWindow):
     """Standalone window that previews and executes a URI-based manifest install."""
 
@@ -160,14 +233,16 @@ class InstallPreviewWindow(QMainWindow):
         self._preview: SetupResults | None = None
         self._manifest_path: Path | None = None
         self._temp_dir_path: str | None = None
-        self._thread: QThread | None = None
-        self._worker: InstallWorker | None = None
+        self._runner: ThreadRunner | None = None
         self._progress_dialog: QProgressDialog | None = None
         self._cancellation_token: CancellationToken | None = None
         self._completed_count = 0
 
+        # Data model: per-action status separate from widget state
+        self._action_statuses: list[str] = []
+
         self.setWindowTitle('Install Preview')
-        self.setMinimumSize(650, 400)
+        self.setMinimumSize(*INSTALL_PREVIEW_MIN_SIZE)
 
         self._init_ui()
 
@@ -176,7 +251,7 @@ class InstallPreviewWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(*CONTENT_MARGINS)
 
         # Header
         self._url_label = QLabel()
@@ -185,7 +260,7 @@ class InstallPreviewWindow(QMainWindow):
 
         # Metadata labels (populated after preview completes)
         self._name_label = QLabel()
-        self._name_label.setStyleSheet('font-size: 14px; font-weight: bold;')
+        self._name_label.setStyleSheet(HEADER_STYLE)
         self._name_label.hide()
         layout.addWidget(self._name_label)
 
@@ -195,7 +270,7 @@ class InstallPreviewWindow(QMainWindow):
         layout.addWidget(self._description_label)
 
         self._meta_label = QLabel()
-        self._meta_label.setStyleSheet('color: grey;')
+        self._meta_label.setStyleSheet(MUTED_STYLE)
         self._meta_label.hide()
         layout.addWidget(self._meta_label)
 
@@ -211,9 +286,8 @@ class InstallPreviewWindow(QMainWindow):
         self._view_stack.addWidget(self._table)
 
         # Page 1: Scrollable command cards
-        self._command_scroll = QScrollArea()
-        self._command_scroll.setWidgetResizable(True)
-        self._view_stack.addWidget(self._command_scroll)
+        self._command_list = CommandListWidget()
+        self._view_stack.addWidget(self._command_list)
 
         layout.addWidget(self._view_stack)
 
@@ -290,21 +364,15 @@ class InstallPreviewWindow(QMainWindow):
         self._install_btn.setEnabled(False)
 
         # Run download + preview on a background thread to keep UI responsive
-        self._thread = QThread()
-        self._preview_worker = PreviewWorker(self._porringer, self._manifest_url)
-        self._preview_worker.moveToThread(self._thread)
+        preview_worker = PreviewWorker(self._porringer, self._manifest_url)
 
-        self._thread.started.connect(self._preview_worker.run)
-        self._preview_worker.preview_ready.connect(self._on_preview_ready)
-        self._preview_worker.action_checked.connect(self._on_action_checked)
-        self._preview_worker.finished.connect(self._on_preview_complete)
-        self._preview_worker.error.connect(self._on_preview_error)
-        self._preview_worker.finished.connect(self._thread.quit)
-        self._preview_worker.error.connect(self._thread.quit)
-        self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.finished.connect(self._preview_worker.deleteLater)
+        preview_worker.preview_ready.connect(self._on_preview_ready)
+        preview_worker.action_checked.connect(self._on_action_checked)
+        preview_worker.finished.connect(self._on_preview_complete)
+        preview_worker.error.connect(self._on_preview_error)
 
-        self._thread.start()
+        self._runner = ThreadRunner(preview_worker)
+        self._runner.start()
 
     # --- Preview callbacks ---
 
@@ -328,6 +396,7 @@ class InstallPreviewWindow(QMainWindow):
             self._status_label.setText('No actions to perform — the manifest is empty.')
             return
 
+        self._action_statuses = ['Checking…'] * len(preview.actions)
         self._status_label.setText(f'{len(preview.actions)} action(s) — checking status…')
         self._populate_table(preview.actions)
         self._install_btn.setEnabled(True)
@@ -366,17 +435,22 @@ class InstallPreviewWindow(QMainWindow):
     # --- Dry-run callbacks ---
 
     def _on_action_checked(self, row: int, result: SetupActionResult) -> None:
-        """Update a single table row with the dry-run result."""
+        """Update the data model and table row with the dry-run result."""
+        label = (result.skip_reason or 'Satisfied') if result.skipped else 'Needed'
+
+        # Update the data model
+        if 0 <= row < len(self._action_statuses):
+            self._action_statuses[row] = label
+
+        # Update the table display
         item = self._table.item(row, 4)
         if item is None:
             return
 
+        item.setText(label)
         if result.skipped:
-            label = result.skip_reason or 'Satisfied'
-            item.setText(label)
             item.setForeground(self.palette().mid())
         else:
-            item.setText('Needed')
             item.setForeground(self.palette().text())
 
     def _on_preview_complete(self) -> None:
@@ -384,19 +458,18 @@ class InstallPreviewWindow(QMainWindow):
         if self._preview is None or not self._preview.actions:
             return
 
-        total = self._table.rowCount()
-        satisfied = 0
-        for row in range(total):
-            item = self._table.item(row, 4)
-            if item is None:
-                continue
-            # Rows still showing "Checking…" were not reported — assume needed
-            if item.text() == 'Checking…':
-                item.setText('Needed')
-                item.setForeground(self.palette().text())
-            if item.text() != 'Needed':
-                satisfied += 1
-        needed = total - satisfied
+        # Resolve any still-pending statuses as 'Needed'
+        for i, status in enumerate(self._action_statuses):
+            if status == 'Checking…':
+                self._action_statuses[i] = 'Needed'
+                item = self._table.item(i, 4)
+                if item is not None:
+                    item.setText('Needed')
+                    item.setForeground(self.palette().text())
+
+        total = len(self._action_statuses)
+        needed = sum(1 for s in self._action_statuses if s == 'Needed')
+        satisfied = total - needed
 
         if needed == 0:
             self._status_label.setText(f'{total} action(s) — all already satisfied.')
@@ -451,68 +524,8 @@ class InstallPreviewWindow(QMainWindow):
             status_item.setForeground(self.palette().placeholderText())
             self._table.setItem(row, 4, status_item)
 
-        self._populate_command_list(actions)
-
-    def _populate_command_list(self, actions: list[SetupAction]) -> None:
-        """Build per-action command fields with descriptive labels above each."""
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        mono = QFont('Consolas', 10)
-        for i, action in enumerate(actions, 1):
-            label_text = ACTION_TYPE_LABELS.get(action.action_type, 'Action')
-            desc = action.package_description or action.description
-            header = QLabel(f'{i}. [{label_text}] {desc}')
-            header.setStyleSheet('color: grey; margin-top: 6px;')
-            layout.addWidget(header)
-
-            field = QLineEdit(format_cli_command(action))
-            field.setReadOnly(True)
-            field.setFont(mono)
-
-            row_layout = QHBoxLayout()
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(4)
-            row_layout.addWidget(field)
-            row_layout.addWidget(self._make_copy_button(field))
-
-            row_widget = QWidget()
-            row_widget.setLayout(row_layout)
-            layout.addWidget(row_widget)
-
-        layout.addStretch()
-        self._command_scroll.setWidget(container)
+        self._command_list.populate(actions)
         self._toggle_btn.setEnabled(True)
-
-    def _make_copy_button(self, field: QLineEdit) -> QToolButton:
-        """Create a copy-to-clipboard button bound to *field*."""
-        btn = QToolButton()
-        btn.setText(_COPY_ICON)
-        btn.setToolTip('Copy to clipboard')
-        btn.setFixedSize(28, 28)
-        btn.setStyleSheet(_COPY_BTN_STYLE)
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.clicked.connect(lambda: self._copy_command(field, btn))
-        return btn
-
-    @staticmethod
-    def _copy_command(field: QLineEdit, button: QToolButton) -> None:
-        """Copy the field text to the clipboard and briefly show a check mark."""
-        clipboard = QApplication.clipboard()
-        if clipboard:
-            clipboard.setText(field.text())
-        button.setText('\u2713')
-        button.setToolTip('Copied!')
-
-        def _restore() -> None:
-            try:
-                button.setText(_COPY_ICON)
-                button.setToolTip('Copy to clipboard')
-            except RuntimeError:
-                pass
-
-        QTimer.singleShot(1200, _restore)
 
     # --- Install execution ---
 
@@ -542,24 +555,17 @@ class InstallPreviewWindow(QMainWindow):
         self._progress_dialog.show()
 
         # Worker thread
-        self._thread = QThread()
-        self._worker = InstallWorker(
+        worker = InstallWorker(
             self._porringer,
             self._preview,
             self._cancellation_token,
         )
-        self._worker.moveToThread(self._thread)
+        worker.progress.connect(self._on_action_progress)
+        worker.finished.connect(self._on_install_finished)
+        worker.error.connect(self._on_install_error)
 
-        self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self._on_action_progress)
-        self._worker.finished.connect(self._on_install_finished)
-        self._worker.error.connect(self._on_install_error)
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.error.connect(self._thread.quit)
-        self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.finished.connect(self._worker.deleteLater)
-
-        self._thread.start()
+        self._runner = ThreadRunner(worker)
+        self._runner.start()
 
     def _on_action_progress(self, action: SetupAction, result: SetupActionResult) -> None:
         """Handle a single action completion from the worker."""

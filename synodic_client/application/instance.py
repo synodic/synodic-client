@@ -10,6 +10,8 @@ import logging
 from PySide6.QtCore import QByteArray, QObject, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
+from synodic_client.application.theme import SOCKET_TIMEOUT_MS
+
 logger = logging.getLogger(__name__)
 
 _SERVER_NAME = 'synodic-client'
@@ -47,9 +49,9 @@ class SingleInstance(QObject):
         socket = QLocalSocket()
         socket.connectToServer(_SERVER_NAME)
 
-        if socket.waitForConnected(1000):
+        if socket.waitForConnected(SOCKET_TIMEOUT_MS):
             socket.write(QByteArray(message.encode('utf-8')))
-            socket.waitForBytesWritten(1000)
+            socket.waitForBytesWritten(SOCKET_TIMEOUT_MS)
             socket.disconnectFromServer()
             logger.info('Sent message to existing instance: %s', message)
             return True
@@ -87,7 +89,7 @@ class SingleInstance(QObject):
         if socket is None:
             return
 
-        if socket.waitForReadyRead(1000):
+        if socket.waitForReadyRead(SOCKET_TIMEOUT_MS):
             raw = socket.readAll().data()
             data = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else str(raw)
             if data:

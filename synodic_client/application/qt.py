@@ -18,6 +18,7 @@ from synodic_client.application.screen.install import InstallPreviewWindow
 from synodic_client.application.screen.screen import Screen
 from synodic_client.application.screen.tray import TrayScreen
 from synodic_client.client import Client
+from synodic_client.config import GlobalConfiguration
 from synodic_client.logging import configure_logging
 from synodic_client.protocol import register_protocol
 from synodic_client.resolution import resolve_config, resolve_update_config
@@ -62,11 +63,11 @@ def parse_uri(uri: str) -> dict[str, str | list[str]]:
     return result
 
 
-def _init_services(logger: logging.Logger) -> tuple[Client, API]:
+def _init_services(logger: logging.Logger) -> tuple[Client, API, GlobalConfiguration]:
     """Create and configure core services.
 
     Returns:
-        A (Client, porringer API) tuple.
+        A (Client, porringer API, resolved config) tuple.
     """
     config = resolve_config()
     client = Client()
@@ -87,7 +88,7 @@ def _init_services(logger: logging.Logger) -> tuple[Client, API]:
     list_params = ListPluginsParameters()
     porringer.plugin.list(list_params)
 
-    return client, porringer
+    return client, porringer, config
 
 
 def _process_uri(uri: str, handler: Callable[[str], None]) -> None:
@@ -122,21 +123,12 @@ def _suppress_subprocess_consoles() -> None:
     subprocess.Popen.__init__ = _patched_init  # type: ignore[assignment]
 
 
-def application() -> None:
-    """Application entry point."""
-    # Suppress console window flashes from subprocess calls (e.g. porringer
-    # running pip, pipx, uv) before any subprocesses are spawned.
-    _suppress_subprocess_consoles()
+def _install_exception_hook(logger: logging.Logger) -> None:
+    """Redirect unhandled exceptions to the log file.
 
-    # Initialize Velopack early, before any UI
-    initialize_velopack()
-    register_protocol(sys.executable)
-
-    configure_logging()
-    logger = logging.getLogger('synodic_client')
-
-    # Redirect unhandled exceptions to the log file so they are visible
-    # even in windowed (console=False) PyInstaller builds.
+    Ensures tracebacks are visible even in windowed (``console=False``)
+    PyInstaller builds.
+    """
     _original_excepthook = sys.excepthook
 
     def _exception_hook(
@@ -149,14 +141,38 @@ def application() -> None:
 
     sys.excepthook = _exception_hook
 
+
+def _init_app() -> QApplication:
+    """Create and configure the ``QApplication``."""
+    app = QApplication([])
+    app.setQuitOnLastWindowClosed(False)
+    with Client.resource(Client.icon) as icon_path:
+        app.setWindowIcon(QIcon(str(icon_path)))
+    app.setAttribute(Qt.ApplicationAttribute.AA_CompressHighFrequencyEvents)
+    return app
+
+
+def application() -> None:
+    """Application entry point."""
+    # Suppress console window flashes from subprocess calls (e.g. porringer
+    # running pip, pipx, uv) before any subprocesses are spawned.
+    _suppress_subprocess_consoles()
+
+    # Initialize Velopack early, before any UI
+    initialize_velopack()
+    register_protocol(sys.executable)
+
+    configure_logging()
+    logger = logging.getLogger('synodic_client')
+    _install_exception_hook(logger)
+
     uri = find_uri(sys.argv[1:])
     if uri:
         logger.info('Received URI: %s', uri)
 
-    client, porringer = _init_services(logger)
+    client, porringer, config = _init_services(logger)
 
-    app = QApplication([])
-    app.setQuitOnLastWindowClosed(False)
+    app = _init_app()
 
     instance = SingleInstance(app)
     if instance.try_send_to_existing(uri or ''):
@@ -164,12 +180,8 @@ def application() -> None:
         sys.exit(0)
     instance.start_server()
 
-    with Client.resource(Client.icon) as icon_path:
-        app.setWindowIcon(QIcon(str(icon_path)))
-    app.setAttribute(Qt.ApplicationAttribute.AA_CompressHighFrequencyEvents)
-
     _screen = Screen(porringer)
-    _tray = TrayScreen(app, client, Client.icon, _screen.window)
+    _tray = TrayScreen(app, client, Client.icon, _screen.window, config=config)
 
     # Keep install preview windows alive until the app exits
     _install_windows: list[InstallPreviewWindow] = []
