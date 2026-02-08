@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 from porringer.schema import (
@@ -89,22 +90,25 @@ class TestFormatCliCommand:
     """Tests for format_cli_command helper."""
 
     @staticmethod
-    def _make_action(
-        action_type: str = 'PACKAGE',
-        description: str = 'Install test',
-        installer: str = 'pip',
-        package: str = 'requests',
-        cli_command: list[str] | None = None,
-        command: list[str] | None = None,
-    ) -> MagicMock:
-        """Create a mock SetupAction."""
+    def _make_action(**overrides: Any) -> MagicMock:
+        """Create a mock SetupAction with optional attribute overrides."""
+        defaults: dict[str, Any] = {
+            'action_type': 'PACKAGE',
+            'description': 'Install test',
+            'installer': 'pip',
+            'package': 'requests',
+            'cli_command': None,
+            'command': None,
+        }
+        defaults.update(overrides)
         action = MagicMock()
-        action.action_type = getattr(SetupActionType, action_type)
-        action.description = description
-        action.installer = installer
-        action.package = package
-        action.command = command
-        action.cli_command = cli_command
+        action_type = defaults['action_type']
+        action.action_type = getattr(SetupActionType, action_type) if isinstance(action_type, str) else action_type
+        action.description = defaults['description']
+        action.installer = defaults['installer']
+        action.package = defaults['package']
+        action.command = defaults['command']
+        action.cli_command = defaults['cli_command']
         return action
 
     def test_prefers_cli_command(self) -> None:

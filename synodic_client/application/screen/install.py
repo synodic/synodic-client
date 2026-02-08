@@ -207,19 +207,7 @@ class InstallPreviewWindow(QMainWindow):
         self._view_stack = QStackedWidget()
 
         # Page 0: Actions table
-        self._table = QTableWidget()
-        self._table.setColumnCount(5)
-        self._table.setHorizontalHeaderLabels(['Type', 'Plugin', 'Package', 'Description', 'Status'])
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._table.setAlternatingRowColors(True)
-        header = self._table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        QShortcut(QKeySequence.StandardKey.Copy, self._table, self._copy_table_selection)
+        self._table = self._init_actions_table()
         self._view_stack.addWidget(self._table)
 
         # Page 1: Scrollable command cards
@@ -229,12 +217,32 @@ class InstallPreviewWindow(QMainWindow):
 
         layout.addWidget(self._view_stack)
 
-        # Toggle between views
+        # Button bar
+        layout.addLayout(self._init_button_bar())
+
+    def _init_actions_table(self) -> QTableWidget:
+        """Create and configure the actions table widget."""
+        table = QTableWidget()
+        table.setColumnCount(5)
+        table.setHorizontalHeaderLabels(['Type', 'Plugin', 'Package', 'Description', 'Status'])
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.setAlternatingRowColors(True)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        QShortcut(QKeySequence.StandardKey.Copy, table, self._copy_table_selection)
+        return table
+
+    def _init_button_bar(self) -> QHBoxLayout:
+        """Create the bottom button bar."""
         self._toggle_btn = QPushButton('Show Commands')
         self._toggle_btn.setEnabled(False)
         self._toggle_btn.clicked.connect(self._toggle_view)
 
-        # Button bar
         button_bar = QHBoxLayout()
         button_bar.addWidget(self._toggle_btn)
         button_bar.addStretch()
@@ -248,7 +256,7 @@ class InstallPreviewWindow(QMainWindow):
         self._close_btn.clicked.connect(self.close)
         button_bar.addWidget(self._close_btn)
 
-        layout.addLayout(button_bar)
+        return button_bar
 
     # --- Lifecycle ---
 
@@ -423,7 +431,9 @@ class InstallPreviewWindow(QMainWindow):
         if not rows:
             return
         cols = self._table.columnCount()
-        lines = ['\t'.join((self._table.item(r, c).text() if self._table.item(r, c) else '') for c in range(cols)) for r in rows]
+        lines = [
+            '\t'.join((item.text() if (item := self._table.item(r, c)) else '') for c in range(cols)) for r in rows
+        ]
         clipboard = QApplication.clipboard()
         if clipboard:
             clipboard.setText('\n'.join(lines))
