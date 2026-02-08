@@ -21,6 +21,7 @@ from synodic_client.application.screen.install import (
     ACTION_TYPE_LABELS,
     InstallWorker,
     PreviewWorker,
+    format_cli_command,
     resolve_local_path,
 )
 
@@ -82,6 +83,61 @@ class TestInstallPreviewWindow:
         """Verify action type label mapping covers all types."""
         for action_type in SetupActionType:
             assert action_type in ACTION_TYPE_LABELS
+
+
+class TestFormatCliCommand:
+    """Tests for format_cli_command helper."""
+
+    @staticmethod
+    def _make_action(
+        action_type: str = 'PACKAGE',
+        description: str = 'Install test',
+        installer: str = 'pip',
+        package: str = 'requests',
+        cli_command: list[str] | None = None,
+        command: list[str] | None = None,
+    ) -> MagicMock:
+        """Create a mock SetupAction."""
+        action = MagicMock()
+        action.action_type = getattr(SetupActionType, action_type)
+        action.description = description
+        action.installer = installer
+        action.package = package
+        action.command = command
+        action.cli_command = cli_command
+        return action
+
+    def test_prefers_cli_command(self) -> None:
+        """Verify cli_command takes precedence over command and fallback."""
+        action = self._make_action(cli_command=['uv', 'pip', 'install', 'requests'])
+        assert format_cli_command(action) == 'uv pip install requests'
+
+    def test_falls_back_to_command(self) -> None:
+        """Verify command is used when cli_command is absent."""
+        action = self._make_action(
+            action_type='RUN_COMMAND',
+            command=['echo', 'hello'],
+        )
+        assert format_cli_command(action) == 'echo hello'
+
+    def test_synthesises_package_command(self) -> None:
+        """Verify package actions synthesise installer + package."""
+        action = self._make_action(installer='pip', package='ruff')
+        assert format_cli_command(action) == 'pip install ruff'
+
+    def test_synthesises_default_installer(self) -> None:
+        """Verify pip is used as default installer for package actions."""
+        action = self._make_action(installer=None, package='ruff')
+        assert format_cli_command(action) == 'pip install ruff'
+
+    def test_description_fallback(self) -> None:
+        """Verify description is returned when nothing else is available."""
+        action = self._make_action(
+            action_type='RUN_COMMAND',
+            description='Custom step',
+            package=None,
+        )
+        assert format_cli_command(action) == 'Custom step'
 
 
 class TestInstallWorker:

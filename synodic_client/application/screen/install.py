@@ -34,17 +34,23 @@ from porringer.schema import (
     SetupParameters,
     SetupResults,
 )
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QScrollArea,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -58,6 +64,21 @@ ACTION_TYPE_LABELS = {
     SetupActionType.PACKAGE: 'Package',
     SetupActionType.RUN_COMMAND: 'Run Command',
 }
+
+_COPY_ICON = '\U0001f4cb'
+_COPY_BTN_STYLE = (
+    'QToolButton { border: none; padding: 2px 4px; }'
+    'QToolButton:hover { background: palette(midlight); border-radius: 3px; }'
+)
+
+
+def format_cli_command(action: SetupAction) -> str:
+    """Return a copyable CLI command string for *action*."""
+    if parts := (action.cli_command or action.command):
+        return ' '.join(parts)
+    if action.action_type == SetupActionType.PACKAGE and action.package:
+        return f'{action.installer or "pip"} install {action.package}'
+    return action.description
 
 
 class InstallWorker(QObject):
@@ -182,7 +203,10 @@ class InstallPreviewWindow(QMainWindow):
         self._status_label = QLabel()
         layout.addWidget(self._status_label)
 
-        # Actions table
+        # --- View stack (table / command list) ---
+        self._view_stack = QStackedWidget()
+
+        # Page 0: Actions table
         self._table = QTableWidget()
         self._table.setColumnCount(5)
         self._table.setHorizontalHeaderLabels(['Type', 'Plugin', 'Package', 'Description', 'Status'])
@@ -195,10 +219,23 @@ class InstallPreviewWindow(QMainWindow):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        layout.addWidget(self._table)
+        self._view_stack.addWidget(self._table)
+
+        # Page 1: Scrollable command cards
+        self._command_scroll = QScrollArea()
+        self._command_scroll.setWidgetResizable(True)
+        self._view_stack.addWidget(self._command_scroll)
+
+        layout.addWidget(self._view_stack)
+
+        # Toggle between views
+        self._toggle_btn = QPushButton('Show Commands')
+        self._toggle_btn.setEnabled(False)
+        self._toggle_btn.clicked.connect(self._toggle_view)
 
         # Button bar
         button_bar = QHBoxLayout()
+        button_bar.addWidget(self._toggle_btn)
         button_bar.addStretch()
 
         self._install_btn = QPushButton('Install')
@@ -366,7 +403,18 @@ class InstallPreviewWindow(QMainWindow):
             self.isVisible(),
         )
 
-    # --- Table ---
+    # --- View toggle ---
+
+    def _toggle_view(self) -> None:
+        """Switch between overview table and command list."""
+        if self._view_stack.currentIndex() == 0:
+            self._view_stack.setCurrentIndex(1)
+            self._toggle_btn.setText('Show Overview')
+        else:
+            self._view_stack.setCurrentIndex(0)
+            self._toggle_btn.setText('Show Commands')
+
+    # --- Table / command list ---
 
     def _populate_table(self, actions: list[SetupAction]) -> None:
         """Fill the actions table from a list of SetupAction objects."""
@@ -380,6 +428,69 @@ class InstallPreviewWindow(QMainWindow):
             status_item = QTableWidgetItem('Checking…')
             status_item.setForeground(self.palette().placeholderText())
             self._table.setItem(row, 4, status_item)
+
+        self._populate_command_list(actions)
+
+    def _populate_command_list(self, actions: list[SetupAction]) -> None:
+        """Build per-action command fields with descriptive labels above each."""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        mono = QFont('Consolas', 10)
+        for i, action in enumerate(actions, 1):
+            label_text = ACTION_TYPE_LABELS.get(action.action_type, 'Action')
+            desc = action.package_description or action.description
+            header = QLabel(f'{i}. [{label_text}] {desc}')
+            header.setStyleSheet('color: grey; margin-top: 6px;')
+            layout.addWidget(header)
+
+            field = QLineEdit(format_cli_command(action))
+            field.setReadOnly(True)
+            field.setFont(mono)
+
+            row_layout = QHBoxLayout()
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(4)
+            row_layout.addWidget(field)
+            row_layout.addWidget(self._make_copy_button(field))
+
+            row_widget = QWidget()
+            row_widget.setLayout(row_layout)
+            layout.addWidget(row_widget)
+
+        layout.addStretch()
+        self._command_scroll.setWidget(container)
+        self._toggle_btn.setEnabled(True)
+
+    def _make_copy_button(self, field: QLineEdit) -> QToolButton:
+        """Create a copy-to-clipboard button bound to *field*."""
+        btn = QToolButton()
+        btn.setText(_COPY_ICON)
+        btn.setToolTip('Copy to clipboard')
+        btn.setFixedSize(28, 28)
+        btn.setStyleSheet(_COPY_BTN_STYLE)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(lambda: self._copy_command(field, btn))
+        return btn
+
+    @staticmethod
+    def _copy_command(field: QLineEdit, button: QToolButton) -> None:
+        """Copy the field text to the clipboard and briefly show a check mark."""
+        clipboard = QApplication.clipboard()
+        if clipboard:
+            clipboard.setText(field.text())
+        button.setText('\u2713')
+        button.setToolTip('Copied!')
+
+        def _restore() -> None:
+            try:
+                button.setText(_COPY_ICON)
+                button.setToolTip('Copy to clipboard')
+            except RuntimeError:
+                pass
+
+        QTimer.singleShot(1200, _restore)
 
     # --- Install execution ---
 
