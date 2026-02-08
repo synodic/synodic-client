@@ -35,7 +35,7 @@ from porringer.schema import (
     SetupResults,
 )
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -219,6 +219,7 @@ class InstallPreviewWindow(QMainWindow):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        QShortcut(QKeySequence.StandardKey.Copy, self._table, self._copy_table_selection)
         self._view_stack.addWidget(self._table)
 
         # Page 1: Scrollable command cards
@@ -415,6 +416,17 @@ class InstallPreviewWindow(QMainWindow):
             self._toggle_btn.setText('Show Commands')
 
     # --- Table / command list ---
+
+    def _copy_table_selection(self) -> None:
+        """Copy selected table rows to the clipboard as tab-separated text."""
+        rows = sorted({idx.row() for idx in self._table.selectedIndexes()})
+        if not rows:
+            return
+        cols = self._table.columnCount()
+        lines = ['\t'.join((self._table.item(r, c).text() if self._table.item(r, c) else '') for c in range(cols)) for r in rows]
+        clipboard = QApplication.clipboard()
+        if clipboard:
+            clipboard.setText('\n'.join(lines))
 
     def _populate_table(self, actions: list[SetupAction]) -> None:
         """Fill the actions table from a list of SetupAction objects."""
