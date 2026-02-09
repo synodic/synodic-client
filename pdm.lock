@@ -261,7 +261,7 @@ files = [
 
 [[package]]
 name = "porringer"
-version = "0.2.1.dev1"
+version = "0.2.1.dev7"
 requires_python = ">=3.14"
 summary = ""
 groups = ["default"]
@@ -274,8 +274,8 @@ dependencies = [
     "userpath>=1.9.2",
 ]
 files = [
-    {file = "porringer-0.2.1.dev1-py3-none-any.whl", hash = "sha256:b3c5181c1ee5d04661ebc463bc836cfa50a41867828fff9b2dd831537a139cc2"},
-    {file = "porringer-0.2.1.dev1.tar.gz", hash = "sha256:7d2647ed312e161b0ba35f195c00ff876a99bd58565dfdd30a89df5966c4c519"},
+    {file = "porringer-0.2.1.dev7-py3-none-any.whl", hash = "sha256:7606fdfd1d039be9be80040cbec51429c911f4cc77e89cc88de0c79599a7da92"},
+    {file = "porringer-0.2.1.dev7.tar.gz", hash = "sha256:48779426305620cb08c2748404755357b911e9a4b783a08257e2e44d98540a11"},
 ]
 
 [[package]]
@@ -396,20 +396,20 @@ files = [
 
 [[package]]
 name = "pyrefly"
-version = "0.51.2"
+version = "0.52.0"
 requires_python = ">=3.8"
 summary = "A fast type checker and language server for Python with powerful IDE features"
 groups = ["lint"]
 files = [
-    {file = "pyrefly-0.51.2-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:573cd017082737822cd43ac276772ab75708d423d2947ac8cf92e66d919dc86c"},
-    {file = "pyrefly-0.51.2-py3-none-macosx_11_0_arm64.whl", hash = "sha256:7f0d60ed594204c46562a3ef94fe1f1678cd280469db8778ba0427781e7313b4"},
-    {file = "pyrefly-0.51.2-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:5e5aaf395339279525932e4cc35a91e3b58def35a684bba1beeaaacfb857ff67"},
-    {file = "pyrefly-0.51.2-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:3d5359d68bfda3ac01f866fe149cee5274a409c3f8c5b647b986b1d34249dee2"},
-    {file = "pyrefly-0.51.2-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:16f893f08430cf1336c4fd7ed885039cff1b0afccd81f35c5f1d5a149f7d9dcf"},
-    {file = "pyrefly-0.51.2-py3-none-win32.whl", hash = "sha256:a582a799816f8d3ace3339dcc557e02de53ba6ee09d122464124c0fb68ff6922"},
-    {file = "pyrefly-0.51.2-py3-none-win_amd64.whl", hash = "sha256:4bff9ff0bba6e2e072c6ffb489723eadb6d91a745e3b62704b1aac92651eae00"},
-    {file = "pyrefly-0.51.2-py3-none-win_arm64.whl", hash = "sha256:24d02f15adc05c4b90fdb261b77ff1d5632924fd3717890a5e870bbe18ce0b6f"},
-    {file = "pyrefly-0.51.2.tar.gz", hash = "sha256:b931a2d168b8aebc425da0dacea91b94684092ffd2c739fa1a48fac70f9218fb"},
+    {file = "pyrefly-0.52.0-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:90d7bf2fb812ee3a920a962da2aa2387e2f4109c62604e5be1a736046a3260c7"},
+    {file = "pyrefly-0.52.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:848764fdbc474fd36412d7ccf230d13a12ab3b2c28968124d9e9d51df79b7b8e"},
+    {file = "pyrefly-0.52.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:43b712830df1247798fb79f478a236b0ffbe5983bdde5eb2f5b99a9411e09f35"},
+    {file = "pyrefly-0.52.0-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:baa4130c460ad7c8d7efcff9017b7bc74c71736c5959ebfc2b7e405c2ce07d5d"},
+    {file = "pyrefly-0.52.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3297751b1b13ecb582af48c8798e0b652c41c33a7e4ed72676164b29561655f6"},
+    {file = "pyrefly-0.52.0-py3-none-win32.whl", hash = "sha256:d24ed11ef5eab93625df0bb4e67f7f946208b2b0ed4359b78f69cabbc6f78e3d"},
+    {file = "pyrefly-0.52.0-py3-none-win_amd64.whl", hash = "sha256:0e5bee368fbdce6430b7672304bc4e36f11bc3b72ad067cbfde934d380701a3b"},
+    {file = "pyrefly-0.52.0-py3-none-win_arm64.whl", hash = "sha256:8cabc07740e90c0baea12a1e7c48d6422130a19331033e8d9a16dd63e7e90db0"},
+    {file = "pyrefly-0.52.0.tar.gz", hash = "sha256:abe022b68e67a2fd9adad4f8fe2deced2a786df32601b0eecbb00b40ea1f3b93"},
 ]
 
 [[package]]

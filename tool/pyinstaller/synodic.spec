@@ -13,12 +13,23 @@ datas += copy_metadata('porringer')
 hiddenimports += [
     'porringer.plugin.apt.plugin',
     'porringer.plugin.brew.plugin',
+    'porringer.plugin.bun.plugin',
+    'porringer.plugin.bun_project.plugin',
+    'porringer.plugin.deno.plugin',
+    'porringer.plugin.deno_project.plugin',
     'porringer.plugin.npm.plugin',
+    'porringer.plugin.npm_project.plugin',
+    'porringer.plugin.pdm.plugin',
     'porringer.plugin.pim.plugin',
     'porringer.plugin.pip.plugin',
     'porringer.plugin.pipx.plugin',
+    'porringer.plugin.pnpm_project.plugin',
+    'porringer.plugin.poetry.plugin',
+    'porringer.plugin.pyenv.plugin',
     'porringer.plugin.uv.plugin',
+    'porringer.plugin.uv_project.plugin',
     'porringer.plugin.winget.plugin',
+    'porringer.plugin.yarn_project.plugin',
 ]
 
 a = Analysis(

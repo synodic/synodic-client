@@ -47,8 +47,8 @@ class PluginsView(QWidget):
         layout.setContentsMargins(*COMPACT_MARGINS)
 
         self._table = QTableWidget()
-        self._table.setColumnCount(3)
-        self._table.setHorizontalHeaderLabels(['Name', 'Version', 'Status'])
+        self._table.setColumnCount(2)
+        self._table.setHorizontalHeaderLabels(['Name', 'Version'])
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setAlternatingRowColors(True)
@@ -56,7 +56,6 @@ class PluginsView(QWidget):
         header = self._table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
 
         layout.addWidget(self._table)
 
@@ -70,16 +69,11 @@ class PluginsView(QWidget):
         self._table.setRowCount(len(plugins))
         for row, plugin in enumerate(plugins):
             name_item = QTableWidgetItem(plugin.name)
-
-            version_item = QTableWidgetItem('-')
-            status_item = QTableWidgetItem('Installed' if plugin.installed else 'Not Installed')
-
+            version_item = QTableWidgetItem(str(plugin.tool_version) if plugin.tool_version else 'Not found')
             version_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
             self._table.setItem(row, 0, name_item)
             self._table.setItem(row, 1, version_item)
-            self._table.setItem(row, 2, status_item)
 
 
 class DirectoriesView(QWidget):

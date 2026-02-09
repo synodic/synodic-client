@@ -31,6 +31,7 @@ from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -50,6 +51,7 @@ from PySide6.QtWidgets import (
 
 from synodic_client.application.theme import (
     COMMAND_HEADER_STYLE,
+    COMPACT_MARGINS,
     CONTENT_MARGINS,
     COPY_BTN_SIZE,
     COPY_BTN_STYLE,
@@ -71,6 +73,7 @@ logger = logging.getLogger(__name__)
 
 ACTION_TYPE_LABELS = {
     SetupActionType.PACKAGE: 'Package',
+    SetupActionType.PROJECT_SYNC: 'Project Sync',
     SetupActionType.RUN_COMMAND: 'Run Command',
 }
 
@@ -100,6 +103,8 @@ class InstallWorker(QObject):
         porringer: API,
         preview: SetupResults,
         cancellation_token: CancellationToken,
+        *,
+        project_directory: Path | None = None,
     ) -> None:
         """Initialize the worker.
 
@@ -107,11 +112,13 @@ class InstallWorker(QObject):
             porringer: The porringer API instance.
             preview: The preview results containing actions and manifest_path.
             cancellation_token: Token for cooperative cancellation.
+            project_directory: Working directory for project sync actions.
         """
         super().__init__()
         self._porringer = porringer
         self._preview = preview
         self._cancellation_token = cancellation_token
+        self._project_directory = project_directory
 
     def run(self) -> None:
         """Execute the setup actions on this thread's event loop."""
@@ -127,7 +134,7 @@ class InstallWorker(QObject):
     async def _execute(self) -> SetupResults:
         """Stream execution events and collect results."""
         previews = BatchSetupResults(manifest_results=[self._preview], failed_paths=[])
-        params = SetupParameters()
+        params = SetupParameters(project_directory=self._project_directory)
         collected: list[SetupActionResult] = []
 
         async for event in self._porringer.sync.execute_stream(previews, params):
@@ -241,6 +248,9 @@ class InstallPreviewWindow(QMainWindow):
         # Data model: per-action status separate from widget state
         self._action_statuses: list[str] = []
 
+        # Default project directory to the current working directory
+        self._project_directory: Path = Path.cwd()
+
         self.setWindowTitle('Install Preview')
         self.setMinimumSize(*INSTALL_PREVIEW_MIN_SIZE)
 
@@ -273,6 +283,9 @@ class InstallPreviewWindow(QMainWindow):
         self._meta_label.setStyleSheet(MUTED_STYLE)
         self._meta_label.hide()
         layout.addWidget(self._meta_label)
+
+        # Project directory input
+        layout.addLayout(self._init_project_dir_row())
 
         # Status label (shown during download/preview)
         self._status_label = QLabel()
@@ -310,6 +323,40 @@ class InstallPreviewWindow(QMainWindow):
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         QShortcut(QKeySequence.StandardKey.Copy, table, self._copy_table_selection)
         return table
+
+    def _init_project_dir_row(self) -> QHBoxLayout:
+        """Create the project directory input row."""
+        row = QHBoxLayout()
+        row.setContentsMargins(*COMPACT_MARGINS)
+
+        label = QLabel('Project path:')
+        row.addWidget(label)
+
+        self._project_dir_field = QLineEdit(str(self._project_directory))
+        self._project_dir_field.setToolTip('Working directory for project sync and post-sync commands')
+        self._project_dir_field.textChanged.connect(self._on_project_dir_changed)
+        row.addWidget(self._project_dir_field)
+
+        browse_btn = QPushButton('Browse…')
+        browse_btn.clicked.connect(self._on_browse_project_dir)
+        row.addWidget(browse_btn)
+
+        return row
+
+    def _on_project_dir_changed(self, text: str) -> None:
+        """Update the project directory from the text field."""
+        self._project_directory = Path(text)
+
+    def _on_browse_project_dir(self) -> None:
+        """Open a directory picker for the project path."""
+        chosen = QFileDialog.getExistingDirectory(
+            self,
+            'Select Project Directory',
+            str(self._project_directory),
+        )
+        if chosen:
+            self._project_directory = Path(chosen)
+            self._project_dir_field.setText(chosen)
 
     def _init_button_bar(self) -> QHBoxLayout:
         """Create the bottom button bar."""
@@ -364,7 +411,7 @@ class InstallPreviewWindow(QMainWindow):
         self._install_btn.setEnabled(False)
 
         # Run download + preview on a background thread to keep UI responsive
-        preview_worker = PreviewWorker(self._porringer, self._manifest_url)
+        preview_worker = PreviewWorker(self._porringer, self._manifest_url, project_directory=self._project_directory)
 
         preview_worker.preview_ready.connect(self._on_preview_ready)
         preview_worker.action_checked.connect(self._on_action_checked)
@@ -559,6 +606,7 @@ class InstallPreviewWindow(QMainWindow):
             self._porringer,
             self._preview,
             self._cancellation_token,
+            project_directory=self._project_directory,
         )
         worker.progress.connect(self._on_action_progress)
         worker.finished.connect(self._on_install_finished)
@@ -638,11 +686,12 @@ class PreviewWorker(QObject):
     finished = Signal()
     error = Signal(str)
 
-    def __init__(self, porringer: API, url: str) -> None:
+    def __init__(self, porringer: API, url: str, *, project_directory: Path | None = None) -> None:
         """Initialize the preview worker."""
         super().__init__()
         self._porringer = porringer
         self._url = url
+        self._project_directory = project_directory
 
     def run(self) -> None:
         """Download the manifest, preview actions, and check status via dry-run."""
@@ -696,7 +745,7 @@ class PreviewWorker(QObject):
     async def _check(self, preview: SetupResults) -> None:
         """Stream dry-run events and emit per-action results."""
         previews = BatchSetupResults(manifest_results=[preview], failed_paths=[])
-        params = SetupParameters(dry_run=True)
+        params = SetupParameters(dry_run=True, project_directory=self._project_directory)
         action_indices: dict[int, int] = {id(a): i for i, a in enumerate(preview.actions)}
 
         async for event in self._porringer.sync.execute_stream(previews, params):
