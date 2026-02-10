@@ -17,15 +17,15 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 from porringer.schema import (
-    BatchSetupResults,
     CancellationToken,
     DownloadParameters,
+    PluginKind,
     ProgressEventKind,
     SetupAction,
     SetupActionResult,
-    SetupActionType,
     SetupParameters,
     SetupResults,
+    SkipReason,
 )
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
@@ -71,18 +71,33 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ACTION_TYPE_LABELS = {
-    SetupActionType.PACKAGE: 'Package',
-    SetupActionType.PROJECT_SYNC: 'Project Sync',
-    SetupActionType.RUN_COMMAND: 'Run Command',
+ACTION_KIND_LABELS: dict[PluginKind | None, str] = {
+    PluginKind.PACKAGE: 'Package',
+    PluginKind.TOOL: 'Tool',
+    PluginKind.PROJECT: 'Project',
+    PluginKind.RUNTIME: 'Runtime',
+    PluginKind.SCM: 'SCM',
+    None: 'Command',
 }
+
+SKIP_REASON_LABELS: dict[SkipReason, str] = {
+    SkipReason.ALREADY_INSTALLED: 'Already installed',
+    SkipReason.NO_PROJECT_DIRECTORY: 'No project directory',
+}
+
+
+def skip_reason_label(reason: SkipReason | None) -> str:
+    """Return a human-readable label for a skip reason."""
+    if reason is None:
+        return 'Skipped'
+    return SKIP_REASON_LABELS.get(reason, reason.name.replace('_', ' ').capitalize())
 
 
 def format_cli_command(action: SetupAction) -> str:
     """Return a copyable CLI command string for *action*."""
     if parts := (action.cli_command or action.command):
         return ' '.join(parts)
-    if action.action_type == SetupActionType.PACKAGE and action.package:
+    if action.kind == PluginKind.PACKAGE and action.package:
         return f'{action.installer or "pip"} install {action.package}'
     return action.description
 
@@ -95,13 +110,13 @@ class InstallWorker(QObject):
     """
 
     finished = Signal(object)  # SetupResults
-    progress = Signal(object, object)  # (SetupAction, SetupActionResult | None)
+    progress = Signal(object, object)  # (SetupAction, SetupActionResult)
     error = Signal(str)
 
     def __init__(
         self,
         porringer: API,
-        preview: SetupResults,
+        manifest_path: Path,
         cancellation_token: CancellationToken,
         *,
         project_directory: Path | None = None,
@@ -110,13 +125,13 @@ class InstallWorker(QObject):
 
         Args:
             porringer: The porringer API instance.
-            preview: The preview results containing actions and manifest_path.
+            manifest_path: Path to the manifest file to execute.
             cancellation_token: Token for cooperative cancellation.
             project_directory: Working directory for project sync actions.
         """
         super().__init__()
         self._porringer = porringer
-        self._preview = preview
+        self._manifest_path = manifest_path
         self._cancellation_token = cancellation_token
         self._project_directory = project_directory
 
@@ -126,30 +141,38 @@ class InstallWorker(QObject):
             results = asyncio.run(self._execute())
             self.finished.emit(results)
         except asyncio.CancelledError:
-            self.finished.emit(SetupResults(actions=self._preview.actions))
+            self.finished.emit(SetupResults(actions=[]))
         except Exception as exc:
             logger.exception('Install execution failed')
             self.error.emit(str(exc))
 
     async def _execute(self) -> SetupResults:
         """Stream execution events and collect results."""
-        previews = BatchSetupResults(manifest_results=[self._preview], failed_paths=[])
-        params = SetupParameters(project_directory=self._project_directory)
+        params = SetupParameters(
+            paths=[self._manifest_path],
+            project_directory=self._project_directory,
+        )
+        actions: list[SetupAction] = []
         collected: list[SetupActionResult] = []
+        manifest_result: SetupResults | None = None
 
-        async for event in self._porringer.sync.execute_stream(previews, params):
+        async for event in self._porringer.sync.execute_stream(params):
             if self._cancellation_token.is_cancelled:
                 raise asyncio.CancelledError
+
+            if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
+                manifest_result = event.manifest
+                actions = list(event.manifest.actions)
 
             if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
                 collected.append(event.result)
                 self.progress.emit(event.action, event.result)
 
         return SetupResults(
-            actions=self._preview.actions,
+            actions=actions,
             results=collected,
-            manifest_path=self._preview.manifest_path,
-            metadata=self._preview.metadata,
+            manifest_path=manifest_result.manifest_path if manifest_result else None,
+            metadata=manifest_result.metadata if manifest_result else None,
         )
 
 
@@ -169,7 +192,7 @@ class CommandListWidget(QScrollArea):
 
         mono = QFont(MONOSPACE_FAMILY, MONOSPACE_SIZE)
         for i, action in enumerate(actions, 1):
-            label_text = ACTION_TYPE_LABELS.get(action.action_type, 'Action')
+            label_text = ACTION_KIND_LABELS.get(action.kind, 'Action')
             desc = action.package_description or action.description
             header = QLabel(f'{i}. [{label_text}] {desc}')
             header.setStyleSheet(COMMAND_HEADER_STYLE)
@@ -245,11 +268,11 @@ class InstallPreviewWindow(QMainWindow):
         self._cancellation_token: CancellationToken | None = None
         self._completed_count = 0
 
-        # Data model: per-action status separate from widget state
-        self._action_statuses: list[str] = []
-
         # Default project directory to the current working directory
         self._project_directory: Path = Path.cwd()
+
+        # Per-action status labels (updated by dry-run and install callbacks)
+        self._action_statuses: list[str] = []
 
         self.setWindowTitle('Install Preview')
         self.setMinimumSize(*INSTALL_PREVIEW_MIN_SIZE)
@@ -415,7 +438,7 @@ class InstallPreviewWindow(QMainWindow):
 
         preview_worker.preview_ready.connect(self._on_preview_ready)
         preview_worker.action_checked.connect(self._on_action_checked)
-        preview_worker.finished.connect(self._on_preview_complete)
+        preview_worker.finished.connect(self._on_preview_finished)
         preview_worker.error.connect(self._on_preview_error)
 
         self._runner = ThreadRunner(preview_worker)
@@ -448,6 +471,49 @@ class InstallPreviewWindow(QMainWindow):
         self._populate_table(preview.actions)
         self._install_btn.setEnabled(True)
 
+    def _on_action_checked(self, row: int, result: SetupActionResult) -> None:
+        """Update the data model and table row with the dry-run result."""
+        label = skip_reason_label(result.skip_reason) if result.skipped else 'Needed'
+
+        if 0 <= row < len(self._action_statuses):
+            self._action_statuses[row] = label
+
+        item = self._table.item(row, 4)
+        if item is None:
+            return
+
+        item.setText(label)
+        if result.skipped:
+            item.setForeground(self.palette().placeholderText())
+        else:
+            item.setForeground(self.palette().text())
+
+    def _on_preview_finished(self) -> None:
+        """Finalize the preview after the dry-run check completes."""
+        if not self._action_statuses:
+            return
+
+        # Resolve any still-pending statuses as 'Needed'
+        for i, status in enumerate(self._action_statuses):
+            if status == 'Checking…':
+                self._action_statuses[i] = 'Needed'
+                item = self._table.item(i, 4)
+                if item is not None:
+                    item.setText('Needed')
+                    item.setForeground(self.palette().text())
+
+        total = len(self._action_statuses)
+        needed = sum(1 for s in self._action_statuses if s == 'Needed')
+        satisfied = total - needed
+
+        if needed == 0:
+            self._status_label.setText(f'{total} action(s) — all already satisfied.')
+            self._install_btn.setEnabled(False)
+        else:
+            self._status_label.setText(f'{total} action(s): {needed} needed, {satisfied} already satisfied.')
+
+        logger.info('Preview complete: %d total, %d needed, %d satisfied', total, needed, satisfied)
+
     def _on_preview_error(self, message: str) -> None:
         """Handle a preview error."""
         logger.error('Preview failed: %s', message)
@@ -479,59 +545,6 @@ class InstallPreviewWindow(QMainWindow):
             self._meta_label.setText('  |  '.join(meta_parts))
             self._meta_label.show()
 
-    # --- Dry-run callbacks ---
-
-    def _on_action_checked(self, row: int, result: SetupActionResult) -> None:
-        """Update the data model and table row with the dry-run result."""
-        label = (result.skip_reason or 'Satisfied') if result.skipped else 'Needed'
-
-        # Update the data model
-        if 0 <= row < len(self._action_statuses):
-            self._action_statuses[row] = label
-
-        # Update the table display
-        item = self._table.item(row, 4)
-        if item is None:
-            return
-
-        item.setText(label)
-        if result.skipped:
-            item.setForeground(self.palette().mid())
-        else:
-            item.setForeground(self.palette().text())
-
-    def _on_preview_complete(self) -> None:
-        """Finalize the preview after the dry-run check completes."""
-        if self._preview is None or not self._preview.actions:
-            return
-
-        # Resolve any still-pending statuses as 'Needed'
-        for i, status in enumerate(self._action_statuses):
-            if status == 'Checking…':
-                self._action_statuses[i] = 'Needed'
-                item = self._table.item(i, 4)
-                if item is not None:
-                    item.setText('Needed')
-                    item.setForeground(self.palette().text())
-
-        total = len(self._action_statuses)
-        needed = sum(1 for s in self._action_statuses if s == 'Needed')
-        satisfied = total - needed
-
-        if needed == 0:
-            self._status_label.setText(f'{total} action(s) — all already satisfied.')
-            self._install_btn.setEnabled(False)
-        else:
-            self._status_label.setText(f'{total} action(s): {needed} needed, {satisfied} already satisfied.')
-
-        logger.info(
-            'Preview complete: %d total, %d needed, %d satisfied (window visible=%s)',
-            total,
-            needed,
-            satisfied,
-            self.isVisible(),
-        )
-
     # --- View toggle ---
 
     def _toggle_view(self) -> None:
@@ -562,7 +575,7 @@ class InstallPreviewWindow(QMainWindow):
         """Fill the actions table from a list of SetupAction objects."""
         self._table.setRowCount(len(actions))
         for row, action in enumerate(actions):
-            self._table.setItem(row, 0, QTableWidgetItem(ACTION_TYPE_LABELS.get(action.action_type, '?')))
+            self._table.setItem(row, 0, QTableWidgetItem(ACTION_KIND_LABELS.get(action.kind, 'Action')))
             self._table.setItem(row, 1, QTableWidgetItem(action.installer or ''))
             self._table.setItem(row, 2, QTableWidgetItem(str(action.package) if action.package else ''))
             self._table.setItem(row, 3, QTableWidgetItem(action.package_description or action.description))
@@ -578,13 +591,13 @@ class InstallPreviewWindow(QMainWindow):
 
     def _on_install(self) -> None:
         """Handle the Install button click."""
-        if self._preview is None or self._manifest_path is None:
+        if self._manifest_path is None:
             return
 
         self._install_btn.setEnabled(False)
         self._completed_count = 0
 
-        total = len(self._preview.actions)
+        total = len(self._preview.actions) if self._preview else 0
         self._cancellation_token = CancellationToken()
 
         # Progress dialog
@@ -604,7 +617,7 @@ class InstallPreviewWindow(QMainWindow):
         # Worker thread
         worker = InstallWorker(
             self._porringer,
-            self._preview,
+            self._manifest_path,
             self._cancellation_token,
             project_directory=self._project_directory,
         )
@@ -617,16 +630,36 @@ class InstallPreviewWindow(QMainWindow):
 
     def _on_action_progress(self, action: SetupAction, result: SetupActionResult) -> None:
         """Handle a single action completion from the worker."""
+        row = self._completed_count
         self._completed_count += 1
         label = action.description
         if result.skipped:
-            label += f' (skipped: {result.skip_reason})'
+            label += f' (skipped: {skip_reason_label(result.skip_reason)})'
         elif not result.success:
             label += f' (FAILED: {result.message})'
 
         if self._progress_dialog:
             self._progress_dialog.setValue(self._completed_count)
             self._progress_dialog.setLabelText(label)
+
+        # Update the table status column
+        self._update_table_status(row, result)
+
+    def _update_table_status(self, row: int, result: SetupActionResult) -> None:
+        """Update the status cell for a table row from an action result."""
+        item = self._table.item(row, 4)
+        if item is None:
+            return
+
+        if result.skipped:
+            item.setText(skip_reason_label(result.skip_reason))
+            item.setForeground(self.palette().placeholderText())
+        elif result.success:
+            item.setText('Done')
+            item.setForeground(self.palette().text())
+        else:
+            item.setText(f'Failed: {result.message}' if result.message else 'Failed')
+            item.setForeground(self.palette().text())
 
     def _on_cancel(self) -> None:
         """Handle cancel button on the progress dialog."""
@@ -672,13 +705,12 @@ class InstallPreviewWindow(QMainWindow):
 
 
 class PreviewWorker(QObject):
-    """Background worker that downloads a manifest, previews actions, and checks status.
+    """Background worker that downloads a manifest and performs a dry-run.
 
-    Combines three stages into a single background pipeline:
+    Combines two stages into a single background pipeline:
 
     1. Download the manifest (if remote).
-    2. Run ``preview_single`` to list intended actions.
-    3. Perform a ``dry_run`` to determine which actions are already satisfied.
+    2. Run ``execute_stream`` with ``dry_run=True`` to list actions and check status.
     """
 
     preview_ready = Signal(object, str, str)  # (SetupResults, manifest_path, temp_dir_path)
@@ -694,21 +726,18 @@ class PreviewWorker(QObject):
         self._project_directory = project_directory
 
     def run(self) -> None:
-        """Download the manifest, preview actions, and check status via dry-run."""
+        """Download the manifest and perform a dry-run to check status."""
         logger.info('PreviewWorker starting for: %s', self._url)
         temp_dir = None
         try:
             local_path = resolve_local_path(self._url)
 
             if local_path is not None:
-                # Local file — skip the download entirely
                 if not local_path.exists():
                     self.error.emit(f'Manifest not found:\n{local_path}')
                     return
-                preview = self._porringer.sync.preview_single(local_path)
-                self.preview_ready.emit(preview, str(local_path), '')
+                manifest_path = local_path
             else:
-                # Remote URL — download to a temp directory
                 temp_dir = tempfile.mkdtemp(prefix='synodic_install_')
                 dest = Path(temp_dir) / 'porringer.json'
 
@@ -720,12 +749,10 @@ class PreviewWorker(QObject):
                     self.error.emit(f'Failed to download manifest:\n{result.message}')
                     return
 
-                preview = self._porringer.sync.preview_single(dest)
-                self.preview_ready.emit(preview, str(dest), temp_dir)
+                manifest_path = dest
 
-            # Dry-run to check which actions are already satisfied
-            if preview.actions:
-                self._run_dry_check(preview)
+            # Dry-run: parses manifest, resolves actions, and checks status
+            asyncio.run(self._dry_run(manifest_path, temp_dir or ''))
 
             self.finished.emit()
 
@@ -735,22 +762,22 @@ class PreviewWorker(QObject):
             logger.exception('Preview failed')
             self.error.emit(str(exc))
 
-    def _run_dry_check(self, preview: SetupResults) -> None:
-        """Perform a dry-run and emit per-action status signals."""
-        try:
-            asyncio.run(self._check(preview))
-        except Exception as exc:
-            logger.warning('Dry-run check failed: %s', exc)
+    async def _dry_run(self, manifest_path: Path, temp_dir: str) -> None:
+        """Stream dry-run events, emitting preview_ready and action_checked signals."""
+        params = SetupParameters(
+            paths=[manifest_path],
+            dry_run=True,
+            project_directory=self._project_directory,
+        )
+        action_index: dict[int, int] = {}
 
-    async def _check(self, preview: SetupResults) -> None:
-        """Stream dry-run events and emit per-action results."""
-        previews = BatchSetupResults(manifest_results=[preview], failed_paths=[])
-        params = SetupParameters(dry_run=True, project_directory=self._project_directory)
-        action_indices: dict[int, int] = {id(a): i for i, a in enumerate(preview.actions)}
+        async for event in self._porringer.sync.execute_stream(params):
+            if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
+                action_index = {id(a): i for i, a in enumerate(event.manifest.actions)}
+                self.preview_ready.emit(event.manifest, str(manifest_path), temp_dir)
 
-        async for event in self._porringer.sync.execute_stream(previews, params):
-            if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result and event.action:
-                row = action_indices.get(id(event.action))
+            elif event.kind == ProgressEventKind.ACTION_COMPLETED and event.result and event.action:
+                row = action_index.get(id(event.action))
                 if row is not None:
                     self.action_checked.emit(row, event.result)
 

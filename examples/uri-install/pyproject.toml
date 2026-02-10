@@ -1,2 +1,0 @@
-[tool.synodic]
-uri = "synodic://install?manifest=https://raw.githubusercontent.com/synodic/porringer/development/examples/python-dev/porringer.json"

@@ -13,7 +13,7 @@ from tool.scripts.common import MAIN_EXE, PACK_DIR, REPO_ROOT, build
 
 _DEFAULT_URI = (
     'synodic://install?manifest=https://raw.githubusercontent.com/synodic'
-    '/porringer/development/examples/python-dev/porringer.json'
+    '/porringer/development/examples/python-bootstrap/porringer.json'
 )
 
 
