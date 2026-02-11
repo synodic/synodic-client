@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 from porringer.api import API
 from porringer.schema import ListPluginsParameters, LocalConfiguration
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import QApplication
 
 from synodic_client.application.instance import SingleInstance
@@ -130,7 +130,9 @@ def _init_app() -> QApplication:
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
     with Client.resource(Client.icon) as icon_path:
-        app.setWindowIcon(QIcon(str(icon_path)))
+        # Load pixel data eagerly via QPixmap so the icon survives
+        # context-manager cleanup (QIcon uses lazy file-based loading).
+        app.setWindowIcon(QIcon(QPixmap(str(icon_path))))
     app.setAttribute(Qt.ApplicationAttribute.AA_CompressHighFrequencyEvents)
     return app
 
@@ -191,5 +193,8 @@ def application(*, uri: str | None = None) -> None:
     sys.exit(app.exec())
 
 
+_PROTOCOL_SCHEME = 'synodic'
+
 if __name__ == '__main__':
-    application()
+    _uri = next((a for a in sys.argv[1:] if a.lower().startswith(f'{_PROTOCOL_SCHEME}://')), None)
+    application(uri=_uri)

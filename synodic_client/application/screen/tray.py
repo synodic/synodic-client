@@ -4,7 +4,7 @@ import logging
 from typing import LiteralString
 
 from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtGui import QAction, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -165,7 +165,9 @@ class TrayScreen:
         self._download_cancelled = False
 
         with client.resource(icon_name) as icon_path:
-            self.tray_icon = QIcon(str(icon_path))
+            # Load pixel data eagerly via QPixmap so the icon survives
+            # context-manager cleanup (QIcon uses lazy file-based loading).
+            self.tray_icon = QIcon(QPixmap(str(icon_path)))
 
         self.tray = QSystemTrayIcon()
         self.tray.setIcon(self.tray_icon)

@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # Paths relative to the repository root
@@ -37,13 +38,16 @@ def kill_running_instances() -> None:
         return
 
     result = subprocess.run(
-        ['taskkill', '/F', '/IM', MAIN_EXE],
+        ['taskkill', '/F', '/T', '/IM', MAIN_EXE],
         capture_output=True,
         text=True,
         check=False,
     )
     if result.returncode == 0:
         print(f'Terminated running {MAIN_EXE} process(es)')
+        # Brief delay so the OS fully releases file handles before PyInstaller
+        # starts overwriting the same directory.
+        time.sleep(1)
     elif 'not found' not in result.stderr.lower():
         print(f'Note: taskkill returned {result.returncode}: {result.stderr.strip()}')
 

@@ -1,8 +1,11 @@
-"""Install preview window for URI-based manifest installs.
+"""Install preview widgets and workers.
 
-Displays a dry-run preview of porringer setup actions and lets the user
-confirm execution.  Execution runs on a background ``QThread`` with a
-cancellable ``QProgressDialog``.
+Provides a reusable :class:`SetupPreviewWidget` for displaying dry-run
+previews and executing porringer setup actions, along with the standalone
+:class:`InstallPreviewWindow` used for URI-based manifest installs.
+
+Execution runs on a background ``QThread`` with a real-time
+:class:`~synodic_client.application.screen.log_panel.ExecutionLogPanel`.
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ from porringer.schema import (
     SetupActionResult,
     SetupParameters,
     SetupResults,
-    SkipReason,
+    SubActionProgress,
 )
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
@@ -38,7 +41,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
-    QProgressDialog,
     QPushButton,
     QScrollArea,
     QStackedWidget,
@@ -49,6 +51,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from synodic_client.application.screen import ACTION_KIND_LABELS, skip_reason_label
 from synodic_client.application.theme import (
     COMMAND_HEADER_STYLE,
     COMPACT_MARGINS,
@@ -71,27 +74,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ACTION_KIND_LABELS: dict[PluginKind | None, str] = {
-    PluginKind.PACKAGE: 'Package',
-    PluginKind.TOOL: 'Tool',
-    PluginKind.PROJECT: 'Project',
-    PluginKind.RUNTIME: 'Runtime',
-    PluginKind.SCM: 'SCM',
-    None: 'Command',
-}
-
-SKIP_REASON_LABELS: dict[SkipReason, str] = {
-    SkipReason.ALREADY_INSTALLED: 'Already installed',
-    SkipReason.NO_PROJECT_DIRECTORY: 'No project directory',
-}
-
-
-def skip_reason_label(reason: SkipReason | None) -> str:
-    """Return a human-readable label for a skip reason."""
-    if reason is None:
-        return 'Skipped'
-    return SKIP_REASON_LABELS.get(reason, reason.name.replace('_', ' ').capitalize())
-
 
 def format_cli_command(action: SetupAction) -> str:
     """Return a copyable CLI command string for *action*."""
@@ -111,6 +93,8 @@ class InstallWorker(QObject):
 
     finished = Signal(object)  # SetupResults
     progress = Signal(object, object)  # (SetupAction, SetupActionResult)
+    action_started = Signal(object)  # SetupAction
+    sub_progress = Signal(object, object)  # (SetupAction, SubActionProgress)
     error = Signal(str)
 
     def __init__(
@@ -163,6 +147,12 @@ class InstallWorker(QObject):
             if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
                 manifest_result = event.manifest
                 actions = list(event.manifest.actions)
+
+            if event.kind == ProgressEventKind.ACTION_STARTED and event.action:
+                self.action_started.emit(event.action)
+
+            if event.kind == ProgressEventKind.SUB_ACTION_PROGRESS and event.action and event.sub_action:
+                self.sub_progress.emit(event.action, event.sub_action)
 
             if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
                 collected.append(event.result)
@@ -246,50 +236,59 @@ def _copy_command(field: QLineEdit, button: QToolButton) -> None:
     QTimer.singleShot(COPY_FEEDBACK_MS, _restore)
 
 
-class InstallPreviewWindow(QMainWindow):
-    """Standalone window that previews and executes a URI-based manifest install."""
+# ---------------------------------------------------------------------------
+# SetupPreviewWidget — reusable preview + install widget
+# ---------------------------------------------------------------------------
 
-    def __init__(self, porringer: API, manifest_url: str, parent: QWidget | None = None) -> None:
-        """Initialize the install preview window.
+
+class SetupPreviewWidget(QWidget):
+    """Reusable widget that displays a dry-run preview and executes installs.
+
+    This widget is embedded by both :class:`InstallPreviewWindow` (for
+    URI-based installs) and ``ProjectsView`` (for cached-directory
+    projects).  It owns the actions table, command list, metadata display,
+    status label, and install execution pipeline.
+
+    The caller is responsible for providing a manifest path and project
+    directory.  Preview data is fed in via
+    :meth:`on_preview_ready` / :meth:`on_action_checked` /
+    :meth:`on_preview_finished` / :meth:`on_preview_error` signal slots.
+    """
+
+    #: Emitted when the user clicks Close (or after a fatal preview error).
+    close_requested = Signal()
+
+    #: Emitted after a successful install completes.
+    install_finished = Signal(object)  # SetupResults
+
+    def __init__(self, porringer: API, parent: QWidget | None = None, *, show_close: bool = True) -> None:
+        """Initialize the preview widget.
 
         Args:
             porringer: The porringer API instance.
-            manifest_url: The URL of the manifest to install.
             parent: Optional parent widget.
+            show_close: Whether to show the Close button.  Set ``False``
+                when embedding inside a persistent view (e.g. a tab).
         """
         super().__init__(parent)
         self._porringer = porringer
-        self._manifest_url = manifest_url
+        self._show_close = show_close
         self._preview: SetupResults | None = None
         self._manifest_path: Path | None = None
-        self._temp_dir_path: str | None = None
+        self._project_directory: Path | None = None
         self._runner: ThreadRunner | None = None
-        self._progress_dialog: QProgressDialog | None = None
         self._cancellation_token: CancellationToken | None = None
         self._completed_count = 0
-
-        # Default project directory to the current working directory
-        self._project_directory: Path = Path.cwd()
-
-        # Per-action status labels (updated by dry-run and install callbacks)
         self._action_statuses: list[str] = []
-
-        self.setWindowTitle('Install Preview')
-        self.setMinimumSize(*INSTALL_PREVIEW_MIN_SIZE)
 
         self._init_ui()
 
-    def _init_ui(self) -> None:
-        """Build the UI layout."""
-        central = QWidget()
-        self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(*CONTENT_MARGINS)
+    # --- UI construction ---
 
-        # Header
-        self._url_label = QLabel()
-        self._url_label.setWordWrap(True)
-        layout.addWidget(self._url_label)
+    def _init_ui(self) -> None:
+        """Build the widget layout."""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(*NO_MARGINS)
 
         # Metadata labels (populated after preview completes)
         self._name_label = QLabel()
@@ -307,23 +306,23 @@ class InstallPreviewWindow(QMainWindow):
         self._meta_label.hide()
         layout.addWidget(self._meta_label)
 
-        # Project directory input
-        layout.addLayout(self._init_project_dir_row())
-
-        # Status label (shown during download/preview)
+        # Status label
         self._status_label = QLabel()
         layout.addWidget(self._status_label)
 
-        # --- View stack (table / command list) ---
+        # --- View stack (table / command list / execution log) ---
         self._view_stack = QStackedWidget()
 
-        # Page 0: Actions table
         self._table = self._init_actions_table()
-        self._view_stack.addWidget(self._table)
+        self._view_stack.addWidget(self._table)  # page 0
 
-        # Page 1: Scrollable command cards
         self._command_list = CommandListWidget()
-        self._view_stack.addWidget(self._command_list)
+        self._view_stack.addWidget(self._command_list)  # page 1
+
+        from synodic_client.application.screen.log_panel import ExecutionLogPanel
+
+        self._log_panel = ExecutionLogPanel()
+        self._view_stack.addWidget(self._log_panel)  # page 2
 
         layout.addWidget(self._view_stack)
 
@@ -347,40 +346,6 @@ class InstallPreviewWindow(QMainWindow):
         QShortcut(QKeySequence.StandardKey.Copy, table, self._copy_table_selection)
         return table
 
-    def _init_project_dir_row(self) -> QHBoxLayout:
-        """Create the project directory input row."""
-        row = QHBoxLayout()
-        row.setContentsMargins(*COMPACT_MARGINS)
-
-        label = QLabel('Project path:')
-        row.addWidget(label)
-
-        self._project_dir_field = QLineEdit(str(self._project_directory))
-        self._project_dir_field.setToolTip('Working directory for project sync and post-sync commands')
-        self._project_dir_field.textChanged.connect(self._on_project_dir_changed)
-        row.addWidget(self._project_dir_field)
-
-        browse_btn = QPushButton('Browse…')
-        browse_btn.clicked.connect(self._on_browse_project_dir)
-        row.addWidget(browse_btn)
-
-        return row
-
-    def _on_project_dir_changed(self, text: str) -> None:
-        """Update the project directory from the text field."""
-        self._project_directory = Path(text)
-
-    def _on_browse_project_dir(self) -> None:
-        """Open a directory picker for the project path."""
-        chosen = QFileDialog.getExistingDirectory(
-            self,
-            'Select Project Directory',
-            str(self._project_directory),
-        )
-        if chosen:
-            self._project_directory = Path(chosen)
-            self._project_dir_field.setText(chosen)
-
     def _init_button_bar(self) -> QHBoxLayout:
         """Create the bottom button bar."""
         self._toggle_btn = QPushButton('Show Commands')
@@ -397,68 +362,69 @@ class InstallPreviewWindow(QMainWindow):
         button_bar.addWidget(self._install_btn)
 
         self._close_btn = QPushButton('Close')
-        self._close_btn.clicked.connect(self.close)
+        self._close_btn.clicked.connect(self.close_requested.emit)
+        if not self._show_close:
+            self._close_btn.hide()
         button_bar.addWidget(self._close_btn)
 
         return button_bar
 
-    # --- Lifecycle ---
-
-    def showEvent(self, event: Any) -> None:
-        """Log when the window becomes visible."""
-        super().showEvent(event)
-        logger.info('Install preview window shown (visible=%s)', self.isVisible())
-
-    def closeEvent(self, event: Any) -> None:
-        """Clean up the temp directory when the window is closed."""
-        logger.info('Install preview window closing')
-        self._cleanup_temp_dir()
-        super().closeEvent(event)
-
-    def _cleanup_temp_dir(self) -> None:
-        """Remove the temporary download directory if it exists."""
-        if self._temp_dir_path:
-            _safe_rmtree(self._temp_dir_path)
-            self._temp_dir_path = None
-
     # --- Public API ---
 
-    def start(self) -> None:
-        """Download the manifest and populate the preview.
+    def set_project_directory(self, path: Path) -> None:
+        """Set the project directory used for install execution.
 
-        Call this after ``show()`` to begin the download → preview flow.
+        Args:
+            path: Working directory for project sync actions.
         """
-        logger.info('Starting install preview for: %s', self._manifest_url)
-        self._url_label.setText(f'<b>Manifest:</b> {self._manifest_url}')
-        self._status_label.setText('Loading manifest…')
+        self._project_directory = path
+
+    def reset(self) -> None:
+        """Clear all state and UI for a fresh preview."""
+        self._preview = None
+        self._manifest_path = None
+        self._runner = None
+        self._cancellation_token = None
+        self._completed_count = 0
+        self._action_statuses = []
+
+        self._table.setRowCount(0)
+        self._log_panel.clear()
+        self._name_label.hide()
+        self._description_label.hide()
+        self._meta_label.hide()
+        self._status_label.setText('')
+        self._status_label.setStyleSheet('')
         self._install_btn.setEnabled(False)
+        self._toggle_btn.setEnabled(False)
+        self._view_stack.setCurrentIndex(0)
 
-        # Run download + preview on a background thread to keep UI responsive
-        preview_worker = PreviewWorker(self._porringer, self._manifest_url, project_directory=self._project_directory)
+    def show_not_found(self, message: str) -> None:
+        """Display a muted 'not found' message in the status label.
 
-        preview_worker.preview_ready.connect(self._on_preview_ready)
-        preview_worker.action_checked.connect(self._on_action_checked)
-        preview_worker.finished.connect(self._on_preview_finished)
-        preview_worker.error.connect(self._on_preview_error)
+        Used by callers that want to report a missing directory or manifest
+        without popping a modal dialog.
 
-        self._runner = ThreadRunner(preview_worker)
-        self._runner.start()
+        Args:
+            message: The human-readable error or not-found description.
+        """
+        self._status_label.setText(message)
+        self._status_label.setStyleSheet(MUTED_STYLE)
 
-    # --- Preview callbacks ---
+    # --- Preview callbacks (connect to PreviewWorker signals) ---
 
-    def _on_preview_ready(self, preview: SetupResults, manifest_path: str, temp_dir_path: str) -> None:
+    def on_preview_ready(self, preview: SetupResults, manifest_path: str, temp_dir_path: str) -> None:
         """Handle a successful preview.
 
         Args:
             preview: The setup preview results.
-            manifest_path: Path to the downloaded manifest file.
+            manifest_path: Path to the manifest file.
             temp_dir_path: Path to the temp directory (kept alive for execution).
         """
         logger.info('Preview ready: %d action(s) from %s', len(preview.actions), manifest_path)
         self._preview = preview
         self._manifest_path = Path(manifest_path)
-        # Keep the temp directory alive until the window closes
-        self._temp_dir_path = temp_dir_path
+        self._status_label.setStyleSheet('')
 
         self._show_metadata(preview)
 
@@ -471,7 +437,7 @@ class InstallPreviewWindow(QMainWindow):
         self._populate_table(preview.actions)
         self._install_btn.setEnabled(True)
 
-    def _on_action_checked(self, row: int, result: SetupActionResult) -> None:
+    def on_action_checked(self, row: int, result: SetupActionResult) -> None:
         """Update the data model and table row with the dry-run result."""
         label = skip_reason_label(result.skip_reason) if result.skipped else 'Needed'
 
@@ -488,7 +454,7 @@ class InstallPreviewWindow(QMainWindow):
         else:
             item.setForeground(self.palette().text())
 
-    def _on_preview_finished(self) -> None:
+    def on_preview_finished(self) -> None:
         """Finalize the preview after the dry-run check completes."""
         if not self._action_statuses:
             return
@@ -514,13 +480,14 @@ class InstallPreviewWindow(QMainWindow):
 
         logger.info('Preview complete: %d total, %d needed, %d satisfied', total, needed, satisfied)
 
-    def _on_preview_error(self, message: str) -> None:
+    def on_preview_error(self, message: str) -> None:
         """Handle a preview error."""
         logger.error('Preview failed: %s', message)
         self._status_label.setText('')
         QMessageBox.critical(self, 'Preview Failed', message)
-        logger.info('Closing window due to preview error')
-        self.close()
+        self.close_requested.emit()
+
+    # --- Metadata ---
 
     def _show_metadata(self, preview: SetupResults) -> None:
         """Display manifest metadata labels if available."""
@@ -531,7 +498,6 @@ class InstallPreviewWindow(QMainWindow):
         if metadata.name:
             self._name_label.setText(metadata.name)
             self._name_label.show()
-            self.setWindowTitle(f'Install Preview — {metadata.name}')
         if metadata.description:
             self._description_label.setText(metadata.description)
             self._description_label.show()
@@ -548,9 +514,13 @@ class InstallPreviewWindow(QMainWindow):
     # --- View toggle ---
 
     def _toggle_view(self) -> None:
-        """Switch between overview table and command list."""
-        if self._view_stack.currentIndex() == 0:
+        """Cycle between overview table, command list, and execution log."""
+        current = self._view_stack.currentIndex()
+        if current == 0:
             self._view_stack.setCurrentIndex(1)
+            self._toggle_btn.setText('Show Log')
+        elif current == 1:
+            self._view_stack.setCurrentIndex(2)
             self._toggle_btn.setText('Show Overview')
         else:
             self._view_stack.setCurrentIndex(0)
@@ -595,24 +565,16 @@ class InstallPreviewWindow(QMainWindow):
             return
 
         self._install_btn.setEnabled(False)
+        self._close_btn.setEnabled(False)
+        self._toggle_btn.setEnabled(False)
         self._completed_count = 0
 
-        total = len(self._preview.actions) if self._preview else 0
         self._cancellation_token = CancellationToken()
 
-        # Progress dialog
-        self._progress_dialog = QProgressDialog(
-            'Starting install…',
-            'Cancel',
-            0,
-            total,
-            self,
-        )
-        self._progress_dialog.setWindowTitle('Installing')
-        self._progress_dialog.setAutoClose(False)
-        self._progress_dialog.setAutoReset(False)
-        self._progress_dialog.canceled.connect(self._on_cancel)
-        self._progress_dialog.show()
+        # Switch to the execution log panel view
+        self._log_panel.clear()
+        self._view_stack.setCurrentIndex(2)
+        self._status_label.setText('Installing…')
 
         # Worker thread
         worker = InstallWorker(
@@ -621,6 +583,8 @@ class InstallPreviewWindow(QMainWindow):
             self._cancellation_token,
             project_directory=self._project_directory,
         )
+        worker.action_started.connect(self._on_action_started)
+        worker.sub_progress.connect(self._on_sub_progress)
         worker.progress.connect(self._on_action_progress)
         worker.finished.connect(self._on_install_finished)
         worker.error.connect(self._on_install_error)
@@ -628,22 +592,28 @@ class InstallPreviewWindow(QMainWindow):
         self._runner = ThreadRunner(worker)
         self._runner.start()
 
+    def _on_action_started(self, action: SetupAction) -> None:
+        """Handle an action starting execution — create a log section."""
+        self._log_panel.add_section(action)
+
+    def _on_sub_progress(self, action: SetupAction, progress: SubActionProgress) -> None:
+        """Handle a sub-action progress event — route to the log panel."""
+        self._log_panel.on_sub_progress(action, progress)
+
     def _on_action_progress(self, action: SetupAction, result: SetupActionResult) -> None:
         """Handle a single action completion from the worker."""
         row = self._completed_count
         self._completed_count += 1
-        label = action.description
-        if result.skipped:
-            label += f' (skipped: {skip_reason_label(result.skip_reason)})'
-        elif not result.success:
-            label += f' (FAILED: {result.message})'
 
-        if self._progress_dialog:
-            self._progress_dialog.setValue(self._completed_count)
-            self._progress_dialog.setLabelText(label)
+        # Update the execution log panel
+        self._log_panel.on_action_completed(action, result)
 
-        # Update the table status column
+        # Update the table status too (for when user switches back to table view)
         self._update_table_status(row, result)
+
+        # Update status label
+        total = len(self._preview.actions) if self._preview else 0
+        self._status_label.setText(f'Installing… ({self._completed_count}/{total})')
 
     def _update_table_status(self, row: int, result: SetupActionResult) -> None:
         """Update the status cell for a table row from an action result."""
@@ -662,14 +632,12 @@ class InstallPreviewWindow(QMainWindow):
             item.setForeground(self.palette().text())
 
     def _on_cancel(self) -> None:
-        """Handle cancel button on the progress dialog."""
+        """Handle cancel request."""
         if self._cancellation_token:
             self._cancellation_token.cancel()
 
     def _on_install_finished(self, results: SetupResults) -> None:
         """Handle install completion."""
-        self._cleanup_progress()
-
         succeeded = sum(1 for r in results.results if r.success and not r.skipped)
         skipped = sum(1 for r in results.results if r.skipped)
         failed = sum(1 for r in results.results if not r.success)
@@ -683,25 +651,160 @@ class InstallPreviewWindow(QMainWindow):
             parts.append(f'{failed} failed')
 
         summary = ', '.join(parts) if parts else 'No actions executed.'
-        if failed:
-            QMessageBox.warning(self, 'Install Complete', summary)
-        else:
-            QMessageBox.information(self, 'Install Complete', summary)
-
         self._status_label.setText(f'Done — {summary}')
         self._install_btn.setEnabled(False)
+        self._close_btn.setEnabled(True)
+        self._toggle_btn.setEnabled(True)
+        self.install_finished.emit(results)
 
     def _on_install_error(self, message: str) -> None:
         """Handle install error."""
-        self._cleanup_progress()
-        QMessageBox.critical(self, 'Install Failed', message)
+        self._status_label.setText(f'Install failed: {message}')
         self._install_btn.setEnabled(True)
+        self._close_btn.setEnabled(True)
+        self._toggle_btn.setEnabled(True)
 
-    def _cleanup_progress(self) -> None:
-        """Close the progress dialog."""
-        if self._progress_dialog:
-            self._progress_dialog.close()
-            self._progress_dialog = None
+
+# ---------------------------------------------------------------------------
+# InstallPreviewWindow — standalone URI-based install window
+# ---------------------------------------------------------------------------
+
+
+class InstallPreviewWindow(QMainWindow):
+    """Standalone window that previews and executes a URI-based manifest install.
+
+    Wraps :class:`SetupPreviewWidget` and owns the download lifecycle
+    (temp directory, ``PreviewWorker``).
+    """
+
+    def __init__(self, porringer: API, manifest_url: str, parent: QWidget | None = None) -> None:
+        """Initialize the install preview window.
+
+        Args:
+            porringer: The porringer API instance.
+            manifest_url: The URL of the manifest to install.
+            parent: Optional parent widget.
+        """
+        super().__init__(parent)
+        self._porringer = porringer
+        self._manifest_url = manifest_url
+        self._temp_dir_path: str | None = None
+        self._runner: ThreadRunner | None = None
+
+        # Default project directory to the current working directory
+        self._project_directory: Path = Path.cwd()
+
+        self.setWindowTitle('Install Preview')
+        self.setMinimumSize(*INSTALL_PREVIEW_MIN_SIZE)
+
+        self._init_ui()
+
+    def _init_ui(self) -> None:
+        """Build the UI layout."""
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(*CONTENT_MARGINS)
+
+        # URL header
+        self._url_label = QLabel()
+        self._url_label.setWordWrap(True)
+        layout.addWidget(self._url_label)
+
+        # Project directory input
+        layout.addLayout(self._init_project_dir_row())
+
+        # Shared preview widget
+        self._preview_widget = SetupPreviewWidget(self._porringer, self)
+        self._preview_widget.close_requested.connect(self.close)
+        self._preview_widget.set_project_directory(self._project_directory)
+        layout.addWidget(self._preview_widget)
+
+    def _init_project_dir_row(self) -> QHBoxLayout:
+        """Create the project directory input row."""
+        row = QHBoxLayout()
+        row.setContentsMargins(*COMPACT_MARGINS)
+
+        label = QLabel('Project path:')
+        row.addWidget(label)
+
+        self._project_dir_field = QLineEdit(str(self._project_directory))
+        self._project_dir_field.setToolTip('Working directory for project sync and post-sync commands')
+        self._project_dir_field.textChanged.connect(self._on_project_dir_changed)
+        row.addWidget(self._project_dir_field)
+
+        browse_btn = QPushButton('Browse…')
+        browse_btn.clicked.connect(self._on_browse_project_dir)
+        row.addWidget(browse_btn)
+
+        return row
+
+    def _on_project_dir_changed(self, text: str) -> None:
+        """Update the project directory from the text field."""
+        self._project_directory = Path(text)
+        self._preview_widget.set_project_directory(self._project_directory)
+
+    def _on_browse_project_dir(self) -> None:
+        """Open a directory picker for the project path."""
+        chosen = QFileDialog.getExistingDirectory(
+            self,
+            'Select Project Directory',
+            str(self._project_directory),
+        )
+        if chosen:
+            self._project_directory = Path(chosen)
+            self._project_dir_field.setText(chosen)
+
+    # --- Lifecycle ---
+
+    def showEvent(self, event: Any) -> None:
+        """Log when the window becomes visible."""
+        super().showEvent(event)
+        logger.info('Install preview window shown (visible=%s)', self.isVisible())
+
+    def closeEvent(self, event: Any) -> None:
+        """Clean up the temp directory when the window is closed."""
+        logger.info('Install preview window closing')
+        self._cleanup_temp_dir()
+        super().closeEvent(event)
+
+    def _cleanup_temp_dir(self) -> None:
+        """Remove the temporary download directory if it exists."""
+        if self._temp_dir_path:
+            _safe_rmtree(self._temp_dir_path)
+            self._temp_dir_path = None
+
+    # --- Public API ---
+
+    def start(self) -> None:
+        """Download the manifest and populate the preview.
+
+        Call this after ``show()`` to begin the download → preview flow.
+        """
+        logger.info('Starting install preview for: %s', self._manifest_url)
+        self._url_label.setText(f'<b>Manifest:</b> {self._manifest_url}')
+
+        preview_worker = PreviewWorker(self._porringer, self._manifest_url, project_directory=self._project_directory)
+
+        preview_worker.preview_ready.connect(self._on_preview_ready)
+        preview_worker.action_checked.connect(self._preview_widget.on_action_checked)
+        preview_worker.finished.connect(self._preview_widget.on_preview_finished)
+        preview_worker.error.connect(self._preview_widget.on_preview_error)
+
+        self._runner = ThreadRunner(preview_worker)
+        self._runner.start()
+
+    # --- Preview callback (intercepts to capture temp dir) ---
+
+    def _on_preview_ready(self, preview: SetupResults, manifest_path: str, temp_dir_path: str) -> None:
+        """Capture the temp dir path and forward to the preview widget."""
+        self._temp_dir_path = temp_dir_path
+
+        # Update window title from metadata
+        if preview.metadata and preview.metadata.name:
+            self.setWindowTitle(f'Install Preview — {preview.metadata.name}')
+
+        self._preview_widget.on_preview_ready(preview, manifest_path, temp_dir_path)
 
 
 class PreviewWorker(QObject):

@@ -51,3 +51,60 @@ COPY_BTN_STYLE = (
 HEADER_STYLE = 'font-size: 14px; font-weight: bold;'
 MUTED_STYLE = 'color: grey;'
 COMMAND_HEADER_STYLE = 'color: grey; margin-top: 6px;'
+
+# ---------------------------------------------------------------------------
+# Execution log panel
+# ---------------------------------------------------------------------------
+
+# Section header styles
+LOG_SECTION_HEADER_STYLE = (
+    'QWidget#sectionHeader {'
+    '  background: palette(midlight);'
+    '  border: 1px solid palette(mid);'
+    '  border-radius: 3px;'
+    '  padding: 4px 8px;'
+    '}'
+)
+LOG_CHEVRON_STYLE = 'font-size: 10px; color: palette(text);'
+LOG_SECTION_TITLE_STYLE = 'font-weight: bold; font-size: 12px;'
+
+# Status badge colours
+LOG_STATUS_RUNNING = 'color: #3794ff;'
+"""Blue — action is currently executing."""
+
+LOG_STATUS_SUCCESS = 'color: #89d185;'
+"""Green — action completed successfully."""
+
+LOG_STATUS_FAILED = 'color: #f48771;'
+"""Red-orange — action failed."""
+
+LOG_STATUS_SKIPPED = 'color: grey;'
+"""Grey — action was skipped."""
+
+# Output text colours (used in HTML spans inside QTextEdit)
+LOG_COLOR_STDOUT = '#d4d4d4'
+"""Default text — stdout lines."""
+
+LOG_COLOR_STDERR = '#d7ba7d'
+"""Amber — stderr lines."""
+
+LOG_COLOR_PHASE = '#808080'
+"""Grey — phase/status messages."""
+
+LOG_COLOR_ERROR = '#f48771'
+"""Red-orange — error messages."""
+
+LOG_COLOR_SUCCESS = '#89d185'
+"""Green — success messages."""
+
+# Output area style
+LOG_OUTPUT_STYLE = (
+    'QTextEdit {'
+    '  background: #1e1e1e;'
+    '  border: 1px solid palette(mid);'
+    '  border-top: none;'
+    '  border-bottom-left-radius: 3px;'
+    '  border-bottom-right-radius: 3px;'
+    '  padding: 6px;'
+    '}'
+)

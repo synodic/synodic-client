@@ -18,14 +18,16 @@ from porringer.schema import (
 )
 
 from synodic_client.application.qt import parse_uri
-from synodic_client.application.screen.install import (
+from synodic_client.application.screen import (
     ACTION_KIND_LABELS,
     SKIP_REASON_LABELS,
+    skip_reason_label,
+)
+from synodic_client.application.screen.install import (
     InstallWorker,
     PreviewWorker,
     format_cli_command,
     resolve_local_path,
-    skip_reason_label,
 )
 
 
