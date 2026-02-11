@@ -6,7 +6,7 @@ These validate client-level invariants — not porringer manifest semantics.
 import re
 from pathlib import Path
 
-from synodic_client.application.qt import find_uri, parse_uri
+from synodic_client.application.qt import parse_uri
 
 _URI_PATTERN = re.compile(r'synodic://\S+')
 
@@ -47,11 +47,3 @@ class TestExampleUris:
             parsed = parse_uri(uri)
             assert 'action' in parsed, f'URI missing action: {uri}'
             assert parsed['action'], f'URI has empty action: {uri}'
-
-    @staticmethod
-    def test_find_uri_detects_embedded(example_dir: Path) -> None:
-        """Embedded URIs should be discoverable by find_uri."""
-        uris = _collect_uris(example_dir)
-
-        for uri in uris:
-            assert find_uri([uri]) == uri, f'find_uri failed to detect: {uri}'

@@ -3,13 +3,18 @@
 Builds the application with PyInstaller and launches the resulting EXE.
 Skips Velopack packaging entirely for fast iteration.
 
-Invoked via ``pdm run dev`` or ``pdm run dev-uri``.
+Invoked via ``pdm run dev`` or ``pdm run dev -- --uri <URI>``.
 """
 
 import subprocess
 import sys
+from typing import Annotated
+
+import typer
 
 from tool.scripts.common import MAIN_EXE, PACK_DIR, REPO_ROOT, build
+
+app = typer.Typer(help='Build and launch Synodic Client for development.')
 
 _DEFAULT_URI = (
     'synodic://install?manifest=https://raw.githubusercontent.com/synodic'
@@ -17,7 +22,14 @@ _DEFAULT_URI = (
 )
 
 
-def main(*, uri: str | None = None) -> None:
+@app.command()
+def main(
+    *,
+    uri: Annotated[
+        str | None,
+        typer.Option(help='A synodic:// URI to pass as a command-line argument.'),
+    ] = None,
+) -> None:
     """Build with PyInstaller and launch the EXE.
 
     Args:
@@ -40,10 +52,5 @@ def main(*, uri: str | None = None) -> None:
     subprocess.Popen(cmd, cwd=str(REPO_ROOT))
 
 
-def main_uri() -> None:
-    """Build and launch with the default install URI."""
-    main(uri=_DEFAULT_URI)
-
-
 if __name__ == '__main__':
-    main()
+    app()

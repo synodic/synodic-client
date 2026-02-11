@@ -26,7 +26,19 @@ pdm add synodic-client
 Launch the application:
 
 ```bash
-synodic-client
+synodic-c
+```
+
+Or with a `synodic://` URI:
+
+```bash
+synodic-c "synodic://install?manifest=https://example.com/porringer.json"
+```
+
+Show the version:
+
+```bash
+synodic-c --version
 ```
 
 The application runs in the system tray. Right-click the tray icon to access:

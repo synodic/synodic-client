@@ -24,23 +24,6 @@ from synodic_client.protocol import register_protocol
 from synodic_client.resolution import resolve_config, resolve_update_config
 from synodic_client.updater import initialize_velopack
 
-_PROTOCOL_SCHEME = 'synodic'
-
-
-def find_uri(args: list[str]) -> str | None:
-    """Find a ``synodic://`` URI in the command-line arguments.
-
-    Args:
-        args: Command-line arguments (typically ``sys.argv[1:]``).
-
-    Returns:
-        The first ``synodic://`` URI found, or None.
-    """
-    for arg in args:
-        if arg.lower().startswith(f'{_PROTOCOL_SCHEME}://'):
-            return arg
-    return None
-
 
 def parse_uri(uri: str) -> dict[str, str | list[str]]:
     """Parse a ``synodic://`` URI into its components.
@@ -152,8 +135,12 @@ def _init_app() -> QApplication:
     return app
 
 
-def application() -> None:
-    """Application entry point."""
+def application(*, uri: str | None = None) -> None:
+    """Application entry point.
+
+    Args:
+        uri: Optional ``synodic://`` URI to process on launch.
+    """
     # Suppress console window flashes from subprocess calls (e.g. porringer
     # running pip, pipx, uv) before any subprocesses are spawned.
     _suppress_subprocess_consoles()
@@ -166,7 +153,6 @@ def application() -> None:
     logger = logging.getLogger('synodic_client')
     _install_exception_hook(logger)
 
-    uri = find_uri(sys.argv[1:])
     if uri:
         logger.info('Received URI: %s', uri)
 
