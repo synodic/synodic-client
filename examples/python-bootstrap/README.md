@@ -1,5 +1,7 @@
 # Python Bootstrap Example
 
+[![Install with Porringer](https://img.shields.io/badge/Install_with-Porringer-blue)](synodic://install?manifest=https://raw.githubusercontent.com/synodic/porringer/development/examples/python-bootstrap/porringer.json)
+
 This example demonstrates using Porringer to bootstrap a complete Python
 development environment from scratch — the same chain a developer would
 follow manually.

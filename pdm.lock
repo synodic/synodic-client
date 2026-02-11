@@ -272,7 +272,7 @@ files = [
 
 [[package]]
 name = "porringer"
-version = "0.2.1.dev12"
+version = "0.2.1.dev14"
 requires_python = ">=3.14"
 summary = ""
 groups = ["default"]
@@ -285,8 +285,8 @@ dependencies = [
     "userpath>=1.9.2",
 ]
 files = [
-    {file = "porringer-0.2.1.dev12-py3-none-any.whl", hash = "sha256:275c6ae2cad332409ae4d11d9acdd4acb919e4def00f9306133c13ca21599461"},
-    {file = "porringer-0.2.1.dev12.tar.gz", hash = "sha256:6ab314ab7792c5779d8e3355e31c1028971e58d1db5a33763c67a2fe9a01efb3"},
+    {file = "porringer-0.2.1.dev14-py3-none-any.whl", hash = "sha256:9592526f3e72b6065c7ab3987d8230087caf459a6cd9315c322f45f2c10df686"},
+    {file = "porringer-0.2.1.dev14.tar.gz", hash = "sha256:1ef430893bbfbf32c26b36d0e644fee0605457b43b5e74a79688c5caec1e1b15"},
 ]
 
 [[package]]
