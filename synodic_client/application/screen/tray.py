@@ -1,8 +1,12 @@
 """Tray screen for the application."""
 
+import asyncio
 import logging
+from pathlib import Path
 from typing import LiteralString
 
+from porringer.api import API
+from porringer.schema import SetupParameters, SyncStrategy
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QPixmap
 from PySide6.QtWidgets import (
@@ -78,6 +82,49 @@ class UpdateDownloadWorker(QObject):
         except Exception as e:
             logger.exception('Update download failed')
             self.error.emit(str(e))
+
+
+class ToolUpdateWorker(QObject):
+    """Worker for re-syncing manifest-declared tools in a background thread."""
+
+    finished = Signal(int)  # number of manifests processed
+    error = Signal(str)
+
+    def __init__(self, porringer: API) -> None:
+        """Initialize the worker.
+
+        Args:
+            porringer: The porringer API instance.
+        """
+        super().__init__()
+        self._porringer = porringer
+
+    def run(self) -> None:
+        """Re-sync all cached project manifests."""
+        try:
+            directories = self._porringer.cache.list_directories()
+            count = 0
+            for directory in directories:
+                manifest = Path(directory.path) / 'porringer.json'
+                if not manifest.exists():
+                    logger.debug('Skipping missing manifest: %s', manifest)
+                    continue
+                params = SetupParameters(
+                    paths=[manifest],
+                    project_directory=Path(directory.path),
+                    strategy=SyncStrategy.LATEST,
+                )
+                asyncio.run(self._sync(params))
+                count += 1
+            self.finished.emit(count)
+        except Exception as e:
+            logger.exception('Tool update failed')
+            self.error.emit(str(e))
+
+    async def _sync(self, params: SetupParameters) -> None:
+        """Execute a sync stream for the given parameters."""
+        async for _event in self._porringer.sync.execute_stream(params):
+            pass  # consume events to completion
 
 
 class UpdateSourceDialog(QDialog):
@@ -160,6 +207,7 @@ class TrayScreen:
         self._window = window
         self._config = config
         self._runner: ThreadRunner | None = None
+        self._tool_runner: ThreadRunner | None = None
         self._progress_dialog: QProgressDialog | None = None
         self._pending_update_info: UpdateInfo | None = None
         self._download_cancelled = False
@@ -180,6 +228,10 @@ class TrayScreen:
         # Periodic auto-update checking
         self._auto_update_timer: QTimer | None = None
         self._start_auto_update_timer()
+
+        # Periodic tool update checking
+        self._tool_update_timer: QTimer | None = None
+        self._start_tool_update_timer()
 
     def _build_menu(self, app: QApplication, window: MainWindow) -> None:
         """Build the tray context menu."""
@@ -250,17 +302,36 @@ class TrayScreen:
             self._auto_update_timer = None
 
         config = resolve_update_config(self._resolve_config())
-        interval_hours = config.auto_update_interval_hours
-        if interval_hours <= 0:
+        interval_minutes = config.auto_update_interval_minutes
+        if interval_minutes <= 0:
             logger.info('Automatic update checking is disabled')
             return
 
-        interval_ms = interval_hours * 60 * 60 * 1000
+        interval_ms = interval_minutes * 60 * 1000
         self._auto_update_timer = QTimer()
         self._auto_update_timer.setInterval(interval_ms)
         self._auto_update_timer.timeout.connect(self._on_check_updates)
         self._auto_update_timer.start()
-        logger.info('Automatic update checking enabled (every %d hour(s))', interval_hours)
+        logger.info('Automatic update checking enabled (every %d minute(s))', interval_minutes)
+
+    def _start_tool_update_timer(self) -> None:
+        """Start (or restart) the periodic tool update timer from config."""
+        if self._tool_update_timer is not None:
+            self._tool_update_timer.stop()
+            self._tool_update_timer = None
+
+        config = resolve_update_config(self._resolve_config())
+        interval_minutes = config.tool_update_interval_minutes
+        if interval_minutes <= 0:
+            logger.info('Automatic tool updating is disabled')
+            return
+
+        interval_ms = interval_minutes * 60 * 1000
+        self._tool_update_timer = QTimer()
+        self._tool_update_timer.setInterval(interval_ms)
+        self._tool_update_timer.timeout.connect(self._on_tool_update)
+        self._tool_update_timer.start()
+        logger.info('Automatic tool updating enabled (every %d minute(s))', interval_minutes)
 
     def _sync_channel_checks(self) -> None:
         """Synchronize channel checkmarks with the current config."""
@@ -297,10 +368,11 @@ class TrayScreen:
         self._reinitialize_updater(config)
 
     def _reinitialize_updater(self, config: GlobalConfiguration) -> None:
-        """Re-derive update settings and restart the updater and auto-update timer."""
+        """Re-derive update settings and restart the updater and timers."""
         update_cfg = update_and_resolve(config)
         self._client.initialize_updater(update_cfg)
         self._start_auto_update_timer()
+        self._start_tool_update_timer()
         logger.info('Updater re-initialized (channel: %s, source: %s)', update_cfg.channel.name, update_cfg.repo_url)
 
     def _reset_update_action(self) -> None:
@@ -379,6 +451,38 @@ class TrayScreen:
             'Update Check Error',
             f'An error occurred: {error}',
             QSystemTrayIcon.MessageIcon.Critical,
+        )
+
+    # -- Tool update helpers --
+
+    def _on_tool_update(self) -> None:
+        """Trigger a background re-sync of manifest-declared tools."""
+        porringer = self._window.porringer
+        if porringer is None:
+            logger.warning('Tool update skipped: porringer not available')
+            return
+
+        logger.info('Starting periodic tool update check')
+
+        worker = ToolUpdateWorker(porringer)
+        worker.finished.connect(self._on_tool_update_finished)
+        worker.error.connect(self._on_tool_update_error)
+
+        self._tool_runner = ThreadRunner(worker)
+        self._tool_runner.start()
+
+    def _on_tool_update_finished(self, count: int) -> None:
+        """Handle tool update completion."""
+        logger.info('Tool update completed: %d manifest(s) processed', count)
+        self._window.show()
+
+    def _on_tool_update_error(self, error: str) -> None:
+        """Handle tool update error."""
+        logger.error('Tool update failed: %s', error)
+        self.tray.showMessage(
+            'Tool Update Error',
+            f'An error occurred during tool update: {error}',
+            QSystemTrayIcon.MessageIcon.Warning,
         )
 
     def _on_notification_clicked(self) -> None:

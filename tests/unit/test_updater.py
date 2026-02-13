@@ -6,6 +6,8 @@ import pytest
 from packaging.version import Version
 
 from synodic_client.updater import (
+    DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
+    DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
     GITHUB_REPO_URL,
     UpdateChannel,
     UpdateConfig,
@@ -101,16 +103,24 @@ class TestUpdateConfig:
         config = UpdateConfig()
         assert config.repo_url == GITHUB_REPO_URL
         assert config.channel == UpdateChannel.STABLE
+        assert config.auto_update_interval_minutes == DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES
+        assert config.tool_update_interval_minutes == DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
 
     @staticmethod
     def test_custom_values() -> None:
         """Verify custom configuration values are applied."""
+        auto = DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES * 2
+        tool = DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES // 2
         config = UpdateConfig(
             repo_url='https://github.com/custom/repo',
             channel=UpdateChannel.DEVELOPMENT,
+            auto_update_interval_minutes=auto,
+            tool_update_interval_minutes=tool,
         )
         assert config.repo_url == 'https://github.com/custom/repo'
         assert config.channel == UpdateChannel.DEVELOPMENT
+        assert config.auto_update_interval_minutes == auto
+        assert config.tool_update_interval_minutes == tool
 
     @staticmethod
     def test_channel_name_stable() -> None:

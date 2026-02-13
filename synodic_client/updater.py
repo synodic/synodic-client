@@ -58,8 +58,11 @@ class UpdateInfo:
     _velopack_info: Any = field(default=None, repr=False)
 
 
-# Default interval for automatic update checks (hours)
-DEFAULT_AUTO_UPDATE_INTERVAL_HOURS = 24
+# Default interval for automatic update checks (minutes)
+DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES = 30
+
+# Default interval for tool update checks (minutes)
+DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES = 20
 
 
 @dataclass
@@ -72,8 +75,11 @@ class UpdateConfig:
     # Channel determines whether to use dev or stable releases
     channel: UpdateChannel = UpdateChannel.STABLE
 
-    # Interval in hours between automatic update checks (0 = disabled)
-    auto_update_interval_hours: int = DEFAULT_AUTO_UPDATE_INTERVAL_HOURS
+    # Interval in minutes between automatic update checks (0 = disabled)
+    auto_update_interval_minutes: int = DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES
+
+    # Interval in minutes between tool update checks (0 = disabled)
+    tool_update_interval_minutes: int = DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
 
     @property
     def channel_name(self) -> str:

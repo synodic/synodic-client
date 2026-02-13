@@ -63,9 +63,13 @@ class _ConfigBase(BaseModel):
     # None means auto-detect from sys.frozen.
     update_channel: str | None = None
 
-    # Interval in hours between automatic update checks.
-    # 0 disables automatic checking.  None uses the default (24 hours).
-    auto_update_interval_hours: int | None = None
+    # Interval in minutes between automatic update checks.
+    # 0 disables automatic checking.  None uses the default (30 minutes).
+    auto_update_interval_minutes: int | None = None
+
+    # Interval in minutes between tool update checks.
+    # 0 disables automatic checking.  None uses the default (20 minutes).
+    tool_update_interval_minutes: int | None = None
 
 
 class LocalConfiguration(_ConfigBase):

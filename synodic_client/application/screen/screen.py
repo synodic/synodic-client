@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+from porringer.api import API
 from porringer.schema import ListPluginsParameters
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QStandardItem
@@ -26,9 +26,6 @@ from PySide6.QtWidgets import (
 from synodic_client.application.screen.install import PreviewWorker, SetupPreviewWidget
 from synodic_client.application.theme import COMPACT_MARGINS, MAIN_WINDOW_MIN_SIZE
 from synodic_client.application.threading import ThreadRunner
-
-if TYPE_CHECKING:
-    from porringer.api import API
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +283,11 @@ class MainWindow(QMainWindow):
         self._porringer = porringer
         self.setWindowTitle('Synodic Client')
         self.setMinimumSize(*MAIN_WINDOW_MIN_SIZE)
+
+    @property
+    def porringer(self) -> API | None:
+        """Return the porringer API instance, if available."""
+        return self._porringer
 
     def show(self) -> None:
         """Show the window, initializing UI lazily on first show."""

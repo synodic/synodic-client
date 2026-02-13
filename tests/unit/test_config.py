@@ -24,6 +24,8 @@ class TestLocalConfiguration:
         config = LocalConfiguration()
         assert config.update_source is None
         assert config.update_channel is None
+        assert config.auto_update_interval_minutes is None
+        assert config.tool_update_interval_minutes is None
 
     @staticmethod
     def test_with_values() -> None:
@@ -42,6 +44,8 @@ class TestGlobalConfiguration:
         config = GlobalConfiguration()
         assert config.update_source is None
         assert config.update_channel is None
+        assert config.auto_update_interval_minutes is None
+        assert config.tool_update_interval_minutes is None
 
     @staticmethod
     def test_with_values() -> None:

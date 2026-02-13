@@ -6,7 +6,12 @@ from unittest.mock import patch
 
 from synodic_client.config import GlobalConfiguration, LocalConfiguration
 from synodic_client.resolution import merge_config, resolve_config, resolve_update_config, update_and_resolve
-from synodic_client.updater import GITHUB_REPO_URL, UpdateChannel
+from synodic_client.updater import (
+    DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
+    DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
+    GITHUB_REPO_URL,
+    UpdateChannel,
+)
 
 
 class TestMergeConfig:
@@ -208,6 +213,44 @@ class TestResolveUpdateConfig:
         config = GlobalConfiguration()
         result = resolve_update_config(config)
         assert result.repo_url == GITHUB_REPO_URL
+
+    @staticmethod
+    def test_default_auto_update_interval() -> None:
+        """Verify default auto-update interval in minutes."""
+        config = GlobalConfiguration()
+        result = resolve_update_config(config)
+        assert result.auto_update_interval_minutes == DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES
+
+    @staticmethod
+    def test_custom_auto_update_interval() -> None:
+        """Verify custom auto-update interval is passed through."""
+        custom = DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES * 2
+        config = GlobalConfiguration(auto_update_interval_minutes=custom)
+        result = resolve_update_config(config)
+        assert result.auto_update_interval_minutes == custom
+
+    @staticmethod
+    def test_default_tool_update_interval() -> None:
+        """Verify default tool update interval in minutes."""
+        config = GlobalConfiguration()
+        result = resolve_update_config(config)
+        assert result.tool_update_interval_minutes == DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
+
+    @staticmethod
+    def test_custom_tool_update_interval() -> None:
+        """Verify custom tool update interval is passed through."""
+        custom = DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES * 2
+        config = GlobalConfiguration(tool_update_interval_minutes=custom)
+        result = resolve_update_config(config)
+        assert result.tool_update_interval_minutes == custom
+
+    @staticmethod
+    def test_disabled_intervals() -> None:
+        """Verify zero disables both intervals."""
+        config = GlobalConfiguration(auto_update_interval_minutes=0, tool_update_interval_minutes=0)
+        result = resolve_update_config(config)
+        assert result.auto_update_interval_minutes == 0
+        assert result.tool_update_interval_minutes == 0
 
 
 class TestUpdateAndResolve:

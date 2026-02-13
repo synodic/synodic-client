@@ -15,10 +15,11 @@ import logging
 import shutil
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
+from porringer.api import API
 from porringer.schema import (
     CancellationToken,
     DownloadParameters,
@@ -68,9 +69,6 @@ from synodic_client.application.theme import (
     NO_MARGINS,
 )
 from synodic_client.application.threading import ThreadRunner
-
-if TYPE_CHECKING:
-    from porringer.api import API
 
 logger = logging.getLogger(__name__)
 
