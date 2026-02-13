@@ -18,7 +18,7 @@ from synodic_client.application.screen.install import InstallPreviewWindow
 from synodic_client.application.screen.screen import Screen
 from synodic_client.application.screen.tray import TrayScreen
 from synodic_client.client import Client
-from synodic_client.config import GlobalConfiguration
+from synodic_client.config import GlobalConfiguration, set_dev_mode
 from synodic_client.logging import configure_logging
 from synodic_client.protocol import register_protocol
 from synodic_client.resolution import resolve_config, resolve_update_config
@@ -137,19 +137,28 @@ def _init_app() -> QApplication:
     return app
 
 
-def application(*, uri: str | None = None) -> None:
+def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
     """Application entry point.
 
     Args:
         uri: Optional ``synodic://`` URI to process on launch.
+        dev_mode: When ``True``, activate dev-mode isolation so that
+            the development instance does not share configuration,
+            log files, or single-instance locks with the user-installed
+            application.  Velopack initialisation and protocol
+            registration are skipped.
     """
-    # Suppress console window flashes from subprocess calls (e.g. porringer
-    # running pip, pipx, uv) before any subprocesses are spawned.
-    _suppress_subprocess_consoles()
+    # Activate dev-mode namespacing before anything reads config paths.
+    set_dev_mode(dev_mode)
 
-    # Initialize Velopack early, before any UI
-    initialize_velopack()
-    register_protocol(sys.executable)
+    # Suppress console window flashes from subprocess calls (e.g. porringer
+    # running pip, pipx, uv) before any subprocesses are spawned.  Skipped
+    # in dev mode because the source-run process already has a console.
+    if not dev_mode:
+        _suppress_subprocess_consoles()
+        # Initialize Velopack early, before any UI
+        initialize_velopack()
+        register_protocol(sys.executable)
 
     configure_logging()
     logger = logging.getLogger('synodic_client')

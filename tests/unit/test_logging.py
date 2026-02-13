@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+from synodic_client.config import set_dev_mode
 from synodic_client.logging import (
     EagerRotatingFileHandler,
     configure_logging,
@@ -26,6 +27,15 @@ class TestLogPath:
     def test_filename() -> None:
         """log_path() should use the expected filename."""
         assert log_path().name == 'synodic.log'
+
+    @staticmethod
+    def test_dev_mode_filename() -> None:
+        """log_path() should use a dev-specific filename in dev mode."""
+        set_dev_mode(True)
+        try:
+            assert log_path().name == 'synodic-dev.log'
+        finally:
+            set_dev_mode(False)
 
 
 class TestEagerRotatingFileHandler:

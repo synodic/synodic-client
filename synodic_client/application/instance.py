@@ -11,10 +11,17 @@ from PySide6.QtCore import QByteArray, QObject, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from synodic_client.application.theme import SOCKET_TIMEOUT_MS
+from synodic_client.config import is_dev_mode
 
 logger = logging.getLogger(__name__)
 
 _SERVER_NAME = 'synodic-client'
+_SERVER_NAME_DEV = 'synodic-client-dev'
+
+
+def _server_name() -> str:
+    """Return the server name, namespaced for dev mode."""
+    return _SERVER_NAME_DEV if is_dev_mode() else _SERVER_NAME
 
 
 class SingleInstance(QObject):
@@ -47,7 +54,7 @@ class SingleInstance(QObject):
             False if no other instance was found.
         """
         socket = QLocalSocket()
-        socket.connectToServer(_SERVER_NAME)
+        socket.connectToServer(_server_name())
 
         if socket.waitForConnected(SOCKET_TIMEOUT_MS):
             socket.write(QByteArray(message.encode('utf-8')))
@@ -70,14 +77,14 @@ class SingleInstance(QObject):
         self._server = QLocalServer(self)
         self._server.newConnection.connect(self._on_new_connection)
 
-        if not self._server.listen(_SERVER_NAME):
+        if not self._server.listen(_server_name()):
             # Clean up stale socket from a previous crash
-            QLocalServer.removeServer(_SERVER_NAME)
-            if not self._server.listen(_SERVER_NAME):
+            QLocalServer.removeServer(_server_name())
+            if not self._server.listen(_server_name()):
                 logger.error('Failed to start single-instance server: %s', self._server.errorString())
                 return False
 
-        logger.debug('Single-instance server listening as "%s"', _SERVER_NAME)
+        logger.debug('Single-instance server listening as "%s"', _server_name())
         return True
 
     def _on_new_connection(self) -> None:

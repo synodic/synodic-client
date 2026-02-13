@@ -1,25 +1,20 @@
-"""Dev build-and-run script for Synodic Client.
+"""Dev launch script for Synodic Client.
 
-Builds the application with PyInstaller and launches the resulting EXE.
-Skips Velopack packaging entirely for fast iteration.
+Runs the application directly from source with ``--dev`` mode enabled,
+skipping the PyInstaller build for fast iteration.  Dev mode isolates
+configuration, logs, and the single-instance lock from the user-installed
+application.
 
 Invoked via ``pdm run dev`` or ``pdm run dev -- --uri <URI>``.
 """
 
-import subprocess
-import sys
 from typing import Annotated
 
 import typer
 
-from tool.scripts.common import MAIN_EXE, PACK_DIR, REPO_ROOT, build
+from synodic_client.application.qt import application
 
-app = typer.Typer(help='Build and launch Synodic Client for development.')
-
-_DEFAULT_URI = (
-    'synodic://install?manifest=https://raw.githubusercontent.com/synodic'
-    '/porringer/development/examples/python-bootstrap/porringer.json'
-)
+app = typer.Typer(help='Launch Synodic Client from source in dev mode.')
 
 
 @app.command()
@@ -30,26 +25,12 @@ def main(
         typer.Option(help='A synodic:// URI to pass as a command-line argument.'),
     ] = None,
 ) -> None:
-    """Build with PyInstaller and launch the EXE.
+    """Launch the application from source with dev-mode isolation.
 
     Args:
         uri: Optional ``synodic://`` URI to pass as a command-line argument.
     """
-    build()
-
-    exe_path = PACK_DIR / MAIN_EXE
-    if not exe_path.exists():
-        print(f'ERROR: EXE not found: {exe_path}', file=sys.stderr)
-        sys.exit(1)
-
-    cmd = [str(exe_path)]
-    if uri:
-        cmd.append(uri)
-        print(f'\nLaunching {exe_path} with URI:\n  {uri}\n')
-    else:
-        print(f'\nLaunching {exe_path} ...\n')
-
-    subprocess.Popen(cmd, cwd=str(REPO_ROOT))
+    application(uri=uri, dev_mode=True)
 
 
 if __name__ == '__main__':

@@ -28,11 +28,11 @@ class TestCli:
 
     @staticmethod
     def test_launches_application_without_uri() -> None:
-        """Verify invoking with no args calls application(uri=None)."""
+        """Verify invoking with no args calls application(uri=None, dev_mode=False)."""
         with patch('synodic_client.cli.application') as mock_app:
             result = runner.invoke(app, [])
             assert result.exit_code == 0
-            mock_app.assert_called_once_with(uri=None)
+            mock_app.assert_called_once_with(uri=None, dev_mode=False)
 
     @staticmethod
     def test_launches_application_with_uri() -> None:
@@ -41,4 +41,12 @@ class TestCli:
         with patch('synodic_client.cli.application') as mock_app:
             result = runner.invoke(app, [test_uri])
             assert result.exit_code == 0
-            mock_app.assert_called_once_with(uri=test_uri)
+            mock_app.assert_called_once_with(uri=test_uri, dev_mode=False)
+
+    @staticmethod
+    def test_launches_application_with_dev_flag() -> None:
+        """Verify --dev flag sets dev_mode=True."""
+        with patch('synodic_client.cli.application') as mock_app:
+            result = runner.invoke(app, ['--dev'])
+            assert result.exit_code == 0
+            mock_app.assert_called_once_with(uri=None, dev_mode=True)

@@ -11,6 +11,7 @@ from synodic_client.config import (
     LocalConfiguration,
     config_dir,
     save_config,
+    set_dev_mode,
 )
 
 
@@ -93,6 +94,18 @@ class TestConfigDir:
             result = config_dir()
         # Should still produce a path ending in Synodic
         assert result.name == 'Synodic'
+
+    @staticmethod
+    @pytest.mark.skipif(__import__('sys').platform != 'win32', reason='Windows only')
+    def test_dev_mode_uses_separate_dir() -> None:
+        """Verify config dir is namespaced when dev mode is active."""
+        set_dev_mode(True)
+        try:
+            with patch.dict('os.environ', {'LOCALAPPDATA': 'C:\\Users\\Test\\AppData\\Local'}):
+                result = config_dir()
+            assert result == Path('C:\\Users\\Test\\AppData\\Local\\Synodic-Dev')
+        finally:
+            set_dev_mode(False)
 
 
 class TestSaveConfig:

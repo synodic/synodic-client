@@ -25,7 +25,31 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 _APP_NAME = 'Synodic'
+_APP_NAME_DEV = 'Synodic-Dev'
 _CONFIG_FILENAME = 'config.json'
+
+_dev_mode: bool = False
+
+
+def set_dev_mode(enabled: bool) -> None:
+    """Enable or disable dev-mode path namespacing.
+
+    When enabled, :func:`config_dir` returns a separate directory so that
+    the development build does not share state with the user-installed
+    application.
+
+    Must be called **before** any configuration is loaded.
+
+    Args:
+        enabled: ``True`` to activate dev-mode namespacing.
+    """
+    global _dev_mode  # noqa: PLW0603
+    _dev_mode = enabled
+
+
+def is_dev_mode() -> bool:
+    """Return whether dev-mode namespacing is active."""
+    return _dev_mode
 
 
 class _ConfigBase(BaseModel):
@@ -100,17 +124,23 @@ def _load_local_config() -> LocalConfiguration | None:
 def config_dir() -> Path:
     """Return the platform-appropriate global configuration directory.
 
+    When dev-mode is active (see :func:`set_dev_mode`) the returned path
+    is namespaced (e.g. ``Synodic-Dev``) so that development and
+    user-installed builds maintain independent configuration.
+
     Returns:
         Path to the configuration directory.
     """
+    app_name = _APP_NAME_DEV if _dev_mode else _APP_NAME
+
     if sys.platform == 'win32':
         base = os.environ.get('LOCALAPPDATA', '')
         if not base:
             base = str(Path.home() / 'AppData' / 'Local')
-        return Path(base) / _APP_NAME
+        return Path(base) / app_name
     # Stub for non-Windows platforms
     logger.warning('Config directory is not fully supported on %s', sys.platform)
-    return Path.home() / f'.{_APP_NAME.lower()}'
+    return Path.home() / f'.{app_name.lower()}'
 
 
 def _load_global_config() -> GlobalConfiguration:

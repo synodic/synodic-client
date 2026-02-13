@@ -32,6 +32,10 @@ def main(
         bool | None,
         typer.Option('--version', callback=_version_callback, is_eager=True, help='Show version and exit.'),
     ] = None,
+    dev: Annotated[
+        bool,
+        typer.Option('--dev', help='Run in dev mode with isolated config, logs, and instance lock.'),
+    ] = False,
 ) -> None:
     """Launch the Synodic Client GUI application."""
-    application(uri=uri)
+    application(uri=uri, dev_mode=dev)

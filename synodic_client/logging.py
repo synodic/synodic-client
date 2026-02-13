@@ -12,7 +12,10 @@ from pathlib import Path
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 
+from synodic_client.config import is_dev_mode
+
 _LOG_FILENAME = 'synodic.log'
+_LOG_FILENAME_DEV = 'synodic-dev.log'
 _MAX_BYTES = 5_242_880  # 5 MB
 _BACKUP_COUNT = 3
 _FORMAT = '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
@@ -27,7 +30,7 @@ def log_path() -> Path:
     Returns:
         Path to the log file.
     """
-    return Path(tempfile.gettempdir()) / _LOG_FILENAME
+    return Path(tempfile.gettempdir()) / (_LOG_FILENAME_DEV if is_dev_mode() else _LOG_FILENAME)
 
 
 class EagerRotatingFileHandler(RotatingFileHandler):
