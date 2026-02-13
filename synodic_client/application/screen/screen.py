@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from porringer.api import API
-from porringer.schema import ListPluginsParameters
-from PySide6.QtCore import Qt
+from porringer.schema import PluginKind
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -23,60 +26,324 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.install import PreviewWorker, SetupPreviewWidget
-from synodic_client.application.theme import COMPACT_MARGINS, MAIN_WINDOW_MIN_SIZE
+from synodic_client.application.theme import (
+    COMPACT_MARGINS,
+    LOG_CHEVRON_STYLE,
+    LOG_SECTION_TITLE_STYLE,
+    MAIN_WINDOW_MIN_SIZE,
+    PLUGIN_SECTION_HEADER_STYLE,
+    PLUGIN_SECTION_SPACING,
+    PLUGIN_TOGGLE_STYLE,
+    PLUGIN_UPDATE_STYLE,
+)
 from synodic_client.application.threading import ThreadRunner
+from synodic_client.config import GlobalConfiguration, save_config
 
 logger = logging.getLogger(__name__)
 
+# Plugin kinds that support auto-update and per-plugin upgrade.
+_UPDATABLE_KINDS = frozenset({PluginKind.TOOL, PluginKind.PACKAGE})
+
+# Unicode chevrons
+_CHEVRON_DOWN = '\u25bc'
+_CHEVRON_RIGHT = '\u25b6'
+
+
+@dataclass
+class PluginSectionData:
+    """Data needed to construct a :class:`PluginSection`."""
+
+    name: str
+    version: str
+    packages: list[tuple[str, str]] = field(default_factory=list)
+    auto_update: bool = True
+    show_controls: bool = False
+    found: bool = True
+
+
+class PluginSection(QWidget):
+    """Collapsible section displaying a single plugin and its managed packages."""
+
+    auto_update_toggled = Signal(str, bool)
+    """Emitted with ``(plugin_name, enabled)`` when the auto-update toggle changes."""
+
+    update_requested = Signal(str)
+    """Emitted with the plugin name when the per-plugin Update button is clicked."""
+
+    def __init__(self, data: PluginSectionData, parent: QWidget | None = None) -> None:
+        """Initialise the section.
+
+        Args:
+            data: Plugin metadata and package list.
+            parent: Optional parent widget.
+        """
+        super().__init__(parent)
+        self._plugin_name = data.name
+        self._expanded = False
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._header = self._build_header(
+            data.name,
+            data.version,
+            data.auto_update,
+            data.show_controls,
+            found=data.found,
+        )
+        layout.addWidget(self._header)
+
+        self._body = self._build_body(data.packages)
+        self._body.setVisible(False)
+        layout.addWidget(self._body)
+
+    # --- Header / body builders ---
+
+    def _build_header(
+        self,
+        plugin_name: str,
+        version: str,
+        auto_update: bool,
+        show_controls: bool,
+        *,
+        found: bool = True,
+    ) -> QWidget:
+        """Construct the clickable header row."""
+        header = QWidget()
+        header.setObjectName('pluginHeader')
+        header.setStyleSheet(PLUGIN_SECTION_HEADER_STYLE)
+        header.setCursor(Qt.CursorShape.PointingHandCursor)
+        header.mousePressEvent = lambda _event: self._toggle()
+
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(6)
+
+        self._chevron = QLabel(_CHEVRON_RIGHT)
+        self._chevron.setStyleSheet(LOG_CHEVRON_STYLE)
+        self._chevron.setFixedWidth(14)
+        header_layout.addWidget(self._chevron)
+
+        title = QLabel(plugin_name)
+        title.setStyleSheet(LOG_SECTION_TITLE_STYLE)
+        header_layout.addWidget(title)
+
+        version_label = QLabel(version)
+        version_label.setStyleSheet('color: grey;')
+        header_layout.addWidget(version_label)
+
+        header_layout.addStretch()
+
+        if show_controls:
+            self._toggle_btn = QPushButton('Auto')
+            self._toggle_btn.setCheckable(True)
+            self._toggle_btn.setChecked(auto_update)
+            self._toggle_btn.setStyleSheet(PLUGIN_TOGGLE_STYLE)
+            self._toggle_btn.setToolTip('Enable automatic updates for this plugin')
+            self._toggle_btn.clicked.connect(self._on_toggle_clicked)
+            header_layout.addWidget(self._toggle_btn)
+
+            update_btn = QPushButton('Update')
+            update_btn.setStyleSheet(PLUGIN_UPDATE_STYLE)
+            update_btn.setToolTip(f'Upgrade packages via {plugin_name} now')
+            update_btn.clicked.connect(
+                lambda: self.update_requested.emit(self._plugin_name),
+            )
+            header_layout.addWidget(update_btn)
+
+            if not found:
+                self._toggle_btn.setEnabled(False)
+                self._toggle_btn.setChecked(False)
+                self._toggle_btn.setToolTip('Plugin not found \u2014 cannot auto-update')
+                update_btn.setEnabled(False)
+                update_btn.setToolTip('Plugin not found \u2014 cannot update')
+
+        return header
+
+    @staticmethod
+    def _build_body(packages: list[tuple[str, str]]) -> QWidget:
+        """Construct the collapsible body with a package table."""
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(20, 4, 0, 4)
+        body_layout.setSpacing(2)
+
+        if packages:
+            table = QTableWidget(len(packages), 2)
+            table.setHorizontalHeaderLabels(['Package', 'Project'])
+            table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+            table.setAlternatingRowColors(True)
+            table.verticalHeader().setVisible(False)
+            h = table.horizontalHeader()
+            h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            h.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            for row, (pkg, proj) in enumerate(packages):
+                table.setItem(row, 0, QTableWidgetItem(pkg))
+                table.setItem(row, 1, QTableWidgetItem(proj))
+            body_layout.addWidget(table)
+        else:
+            body_layout.addWidget(QLabel('No packages found'))
+
+        return body
+
+    # --- Collapse / expand ---
+
+    def _toggle(self) -> None:
+        """Toggle the body visibility."""
+        self._expanded = not self._expanded
+        self._body.setVisible(self._expanded)
+        self._chevron.setText(_CHEVRON_DOWN if self._expanded else _CHEVRON_RIGHT)
+
+    # --- Callbacks ---
+
+    def _on_toggle_clicked(self, checked: bool) -> None:
+        """Forward auto-update toggle state change."""
+        self.auto_update_toggled.emit(self._plugin_name, checked)
+
 
 class PluginsView(QWidget):
-    """Widget displaying cached plugin manifests."""
+    """Scrollable list of collapsible plugin sections with auto-update controls."""
 
-    def __init__(self, porringer: API, parent: QWidget | None = None) -> None:
+    update_all_requested = Signal()
+    """Emitted when the global *Update All* button is clicked."""
+
+    plugin_update_requested = Signal(str)
+    """Emitted with a plugin name when its per-plugin *Update* button is clicked."""
+
+    def __init__(
+        self,
+        porringer: API,
+        config: GlobalConfiguration,
+        parent: QWidget | None = None,
+    ) -> None:
         """Initialize the plugins view.
 
         Args:
             porringer: The porringer API instance.
+            config: Resolved global configuration (for auto-update toggles).
             parent: Optional parent widget.
         """
         super().__init__(parent)
         self._porringer = porringer
+        self._config = config
+        self._sections: list[PluginSection] = []
         self._init_ui()
 
     def _init_ui(self) -> None:
         """Initialize the UI components."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(*COMPACT_MARGINS)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(*COMPACT_MARGINS)
 
-        self._table = QTableWidget()
-        self._table.setColumnCount(2)
-        self._table.setHorizontalHeaderLabels(['Name', 'Version'])
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._table.setAlternatingRowColors(True)
+        # Toolbar
+        toolbar = QHBoxLayout()
+        toolbar.addStretch()
+        update_all_btn = QPushButton('Update All')
+        update_all_btn.setToolTip('Upgrade all auto-update-enabled plugins now')
+        update_all_btn.clicked.connect(self.update_all_requested.emit)
+        toolbar.addWidget(update_all_btn)
+        outer.addLayout(toolbar)
 
-        header = self._table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        # Scroll area
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        layout.addWidget(self._table)
+        self._container = QWidget()
+        self._container_layout = QVBoxLayout(self._container)
+        self._container_layout.setSpacing(PLUGIN_SECTION_SPACING)
+        self._container_layout.setContentsMargins(0, 0, 0, 0)
+        self._container_layout.addStretch()
+
+        self._scroll.setWidget(self._container)
+        outer.addWidget(self._scroll)
+
+    # --- Public API ---
 
     def refresh(self) -> None:
-        """Refresh the plugin data from porringer."""
-        self._table.setRowCount(0)
+        """Rebuild the plugin sections from porringer data."""
+        # Clear existing sections
+        for section in self._sections:
+            self._container_layout.removeWidget(section)
+            section.deleteLater()
+        self._sections.clear()
 
-        params = ListPluginsParameters()
-        plugins = self._porringer.plugin.list(params)
+        plugins = self._porringer.plugin.list()
+        directories = self._porringer.cache.list_directories()
+        auto_update_map = self._config.plugin_auto_update or {}
 
-        self._table.setRowCount(len(plugins))
-        for row, plugin in enumerate(plugins):
-            name_item = QTableWidgetItem(plugin.name)
-            version_item = QTableWidgetItem(str(plugin.tool_version) if plugin.tool_version else 'Not found')
-            version_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        for plugin in plugins:
+            found = plugin.tool_version is not None
+            version = str(plugin.tool_version) if found else 'Not found'
+            show_controls = plugin.kind in _UPDATABLE_KINDS
+            auto_update = auto_update_map.get(plugin.name, True)
 
-            self._table.setItem(row, 0, name_item)
-            self._table.setItem(row, 1, version_item)
+            # Gather packages managed by this plugin across cached projects
+            packages: list[tuple[str, str]] = []
+            if show_controls:
+                for directory in directories:
+                    try:
+                        pkgs = self._porringer.plugin.list_packages(
+                            plugin.name,
+                            Path(directory.path),
+                        )
+                        for pkg in pkgs:
+                            packages.append(
+                                (
+                                    str(pkg.name),
+                                    directory.name or str(directory.path),
+                                )
+                            )
+                    except Exception:
+                        logger.debug(
+                            'Could not list packages for %s in %s',
+                            plugin.name,
+                            directory.path,
+                            exc_info=True,
+                        )
+
+            section = PluginSection(
+                PluginSectionData(
+                    name=plugin.name,
+                    version=version,
+                    packages=packages,
+                    auto_update=auto_update,
+                    show_controls=show_controls,
+                    found=found,
+                ),
+                parent=self._container,
+            )
+            section.auto_update_toggled.connect(self._on_auto_update_toggled)
+            section.update_requested.connect(self.plugin_update_requested.emit)
+
+            # Insert before the trailing stretch
+            idx = self._container_layout.count() - 1
+            self._container_layout.insertWidget(idx, section)
+            self._sections.append(section)
+
+    # --- Callbacks ---
+
+    def _on_auto_update_toggled(self, plugin_name: str, enabled: bool) -> None:
+        """Persist the auto-update toggle change to config."""
+        mapping = self._config.plugin_auto_update
+        if mapping is None:
+            mapping = {}
+            self._config.plugin_auto_update = mapping
+
+        if enabled:
+            mapping.pop(plugin_name, None)
+        else:
+            mapping[plugin_name] = False
+
+        # Clean up the dict if all plugins are enabled
+        if not mapping:
+            self._config.plugin_auto_update = None
+
+        save_config(self._config)
+        logger.info('Auto-update for %s set to %s', plugin_name, enabled)
 
 
 class ProjectsView(QWidget):
@@ -273,21 +540,33 @@ class MainWindow(QMainWindow):
     _plugins_view: PluginsView | None = None
     _projects_view: ProjectsView | None = None
 
-    def __init__(self, porringer: API | None = None) -> None:
+    def __init__(
+        self,
+        porringer: API | None = None,
+        config: GlobalConfiguration | None = None,
+    ) -> None:
         """Initialize the main window.
 
         Args:
             porringer: Optional porringer API instance for manifest display.
+            config: Resolved global configuration for plugin auto-update state.
         """
         super().__init__()
         self._porringer = porringer
+        self._config = config or GlobalConfiguration()
         self.setWindowTitle('Synodic Client')
         self.setMinimumSize(*MAIN_WINDOW_MIN_SIZE)
+        self.setWindowIcon(app_icon())
 
     @property
     def porringer(self) -> API | None:
         """Return the porringer API instance, if available."""
         return self._porringer
+
+    @property
+    def plugins_view(self) -> PluginsView | None:
+        """Return the plugins view, if initialised."""
+        return self._plugins_view
 
     def show(self) -> None:
         """Show the window, initializing UI lazily on first show."""
@@ -297,7 +576,7 @@ class MainWindow(QMainWindow):
             self._projects_view = ProjectsView(self._porringer, self)
             self._tabs.addTab(self._projects_view, 'Projects')
 
-            self._plugins_view = PluginsView(self._porringer, self)
+            self._plugins_view = PluginsView(self._porringer, self._config, self)
             self._tabs.addTab(self._plugins_view, 'Plugins')
 
             self.setCentralWidget(self._tabs)
@@ -316,13 +595,19 @@ class Screen:
 
     _window: MainWindow | None = None
 
-    def __init__(self, porringer: API | None = None) -> None:
+    def __init__(
+        self,
+        porringer: API | None = None,
+        config: GlobalConfiguration | None = None,
+    ) -> None:
         """Initialize the screen.
 
         Args:
             porringer: Optional porringer API instance.
+            config: Resolved global configuration.
         """
         self._porringer = porringer
+        self._config = config
 
     @property
     def window(self) -> MainWindow:
@@ -332,5 +617,5 @@ class Screen:
             The MainWindow instance.
         """
         if self._window is None:
-            self._window = MainWindow(self._porringer)
+            self._window = MainWindow(self._porringer, self._config)
         return self._window

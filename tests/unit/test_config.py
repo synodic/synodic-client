@@ -26,6 +26,7 @@ class TestLocalConfiguration:
         assert config.update_channel is None
         assert config.auto_update_interval_minutes is None
         assert config.tool_update_interval_minutes is None
+        assert config.plugin_auto_update is None
 
     @staticmethod
     def test_with_values() -> None:
@@ -46,6 +47,7 @@ class TestGlobalConfiguration:
         assert config.update_channel is None
         assert config.auto_update_interval_minutes is None
         assert config.tool_update_interval_minutes is None
+        assert config.plugin_auto_update is None
 
     @staticmethod
     def test_with_values() -> None:
@@ -53,6 +55,15 @@ class TestGlobalConfiguration:
         config = GlobalConfiguration(update_source='/path/to/releases', update_channel='dev')
         assert config.update_source == '/path/to/releases'
         assert config.update_channel == 'dev'
+
+    @staticmethod
+    def test_plugin_auto_update_round_trip() -> None:
+        """Verify plugin_auto_update survives JSON round-trip."""
+        mapping = {'pipx': False, 'pip': True}
+        original = GlobalConfiguration(plugin_auto_update=mapping)
+        data = json.loads(original.model_dump_json())
+        restored = GlobalConfiguration.model_validate(data)
+        assert restored.plugin_auto_update == mapping
 
     @staticmethod
     def test_json_round_trip() -> None:

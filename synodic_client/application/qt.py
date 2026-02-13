@@ -1,6 +1,8 @@
 """GUI entry point for the Synodic Client application."""
 
+import ctypes
 import logging
+import signal
 import subprocess
 import sys
 import types
@@ -8,11 +10,11 @@ from collections.abc import Callable
 from urllib.parse import parse_qs, urlparse
 
 from porringer.api import API
-from porringer.schema import ListPluginsParameters, LocalConfiguration
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon, QPixmap
+from porringer.schema import LocalConfiguration
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication
 
+from synodic_client.application.icon import app_icon
 from synodic_client.application.instance import SingleInstance
 from synodic_client.application.screen.install import InstallPreviewWindow
 from synodic_client.application.screen.screen import Screen
@@ -68,8 +70,7 @@ def _init_services(logger: logging.Logger) -> tuple[Client, API, GlobalConfigura
         update_config.repo_url,
     )
 
-    list_params = ListPluginsParameters()
-    porringer.plugin.list(list_params)
+    porringer.plugin.list()
 
     return client, porringer, config
 
@@ -127,13 +128,25 @@ def _install_exception_hook(logger: logging.Logger) -> None:
 
 def _init_app() -> QApplication:
     """Create and configure the ``QApplication``."""
+    # Set the App User Model ID so Windows uses our icon on the taskbar
+    # instead of the generic python.exe icon.
+    if sys.platform == 'win32':
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('synodic.client')  # type: ignore[union-attr]
+
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
-    with Client.resource(Client.icon) as icon_path:
-        # Load pixel data eagerly via QPixmap so the icon survives
-        # context-manager cleanup (QIcon uses lazy file-based loading).
-        app.setWindowIcon(QIcon(QPixmap(str(icon_path))))
+    app.setWindowIcon(app_icon())
     app.setAttribute(Qt.ApplicationAttribute.AA_CompressHighFrequencyEvents)
+
+    # Allow Ctrl+C in the terminal to terminate the application.
+    # Qt's event loop blocks Python's default SIGINT handling, so we
+    # install our own handler and use a short timer to let Python
+    # process it between Qt events.
+    signal.signal(signal.SIGINT, lambda *_args: app.quit())
+    _signal_timer = QTimer(app)
+    _signal_timer.start(500)
+    _signal_timer.timeout.connect(lambda: None)
+
     return app
 
 
@@ -177,8 +190,8 @@ def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
         sys.exit(0)
     instance.start_server()
 
-    _screen = Screen(porringer)
-    _tray = TrayScreen(app, client, Client.icon, _screen.window, config=config)
+    _screen = Screen(porringer, config)
+    _tray = TrayScreen(app, client, _screen.window, config=config)
 
     # Keep install preview windows alive until the app exits
     _install_windows: list[InstallPreviewWindow] = []

@@ -3,12 +3,11 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import LiteralString
 
 from porringer.api import API
 from porringer.schema import SetupParameters, SyncStrategy
 from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtGui import QAction, QIcon, QPixmap
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -25,13 +24,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.screen import MainWindow
 from synodic_client.application.theme import UPDATE_SOURCE_DIALOG_MIN_WIDTH
 from synodic_client.application.threading import ThreadRunner
 from synodic_client.client import Client
 from synodic_client.config import GlobalConfiguration
 from synodic_client.logging import open_log
-from synodic_client.resolution import resolve_config, resolve_update_config, update_and_resolve
+from synodic_client.resolution import resolve_config, resolve_enabled_plugins, resolve_update_config, update_and_resolve
 from synodic_client.updater import GITHUB_REPO_URL, UpdateChannel, UpdateInfo
 
 logger = logging.getLogger(__name__)
@@ -90,14 +90,18 @@ class ToolUpdateWorker(QObject):
     finished = Signal(int)  # number of manifests processed
     error = Signal(str)
 
-    def __init__(self, porringer: API) -> None:
+    def __init__(self, porringer: API, plugins: list[str] | None = None) -> None:
         """Initialize the worker.
 
         Args:
             porringer: The porringer API instance.
+            plugins: Optional include-list of plugin names.  When set, only
+                actions handled by these plugins are executed.  ``None``
+                means all plugins.
         """
         super().__init__()
         self._porringer = porringer
+        self._plugins = plugins
 
     def run(self) -> None:
         """Re-sync all cached project manifests."""
@@ -113,6 +117,7 @@ class ToolUpdateWorker(QObject):
                     paths=[manifest],
                     project_directory=Path(directory.path),
                     strategy=SyncStrategy.LATEST,
+                    plugins=self._plugins,
                 )
                 asyncio.run(self._sync(params))
                 count += 1
@@ -188,7 +193,6 @@ class TrayScreen:
         self,
         app: QApplication,
         client: Client,
-        icon_name: LiteralString,
         window: MainWindow,
         config: GlobalConfiguration | None = None,
     ) -> None:
@@ -197,7 +201,6 @@ class TrayScreen:
         Args:
             app: The running ``QApplication``.
             client: The Synodic Client service.
-            icon_name: Resource name for the tray icon.
             window: The main application window.
             config: Optional pre-resolved configuration.  When ``None``,
                 the configuration is resolved from disk on demand.
@@ -212,10 +215,7 @@ class TrayScreen:
         self._pending_update_info: UpdateInfo | None = None
         self._download_cancelled = False
 
-        with client.resource(icon_name) as icon_path:
-            # Load pixel data eagerly via QPixmap so the icon survives
-            # context-manager cleanup (QIcon uses lazy file-based loading).
-            self.tray_icon = QIcon(QPixmap(str(icon_path)))
+        self.tray_icon = app_icon()
 
         self.tray = QSystemTrayIcon()
         self.tray.setIcon(self.tray_icon)
@@ -232,6 +232,12 @@ class TrayScreen:
         # Periodic tool update checking
         self._tool_update_timer: QTimer | None = None
         self._start_tool_update_timer()
+
+        # Connect PluginsView signals when available
+        plugins_view = window.plugins_view
+        if plugins_view is not None:
+            plugins_view.update_all_requested.connect(self._on_tool_update)
+            plugins_view.plugin_update_requested.connect(self._on_single_plugin_update)
 
     def _build_menu(self, app: QApplication, window: MainWindow) -> None:
         """Build the tray context menu."""
@@ -464,7 +470,27 @@ class TrayScreen:
 
         logger.info('Starting periodic tool update check')
 
-        worker = ToolUpdateWorker(porringer)
+        config = self._resolve_config()
+        all_names = [p.name for p in porringer.plugin.list() if p.tool_version is not None]
+        enabled = resolve_enabled_plugins(config, all_names)
+
+        worker = ToolUpdateWorker(porringer, plugins=enabled)
+        worker.finished.connect(self._on_tool_update_finished)
+        worker.error.connect(self._on_tool_update_error)
+
+        self._tool_runner = ThreadRunner(worker)
+        self._tool_runner.start()
+
+    def _on_single_plugin_update(self, plugin_name: str) -> None:
+        """Upgrade a single plugin across all cached projects."""
+        porringer = self._window.porringer
+        if porringer is None:
+            logger.warning('Single plugin update skipped: porringer not available')
+            return
+
+        logger.info('Starting update for plugin: %s', plugin_name)
+
+        worker = ToolUpdateWorker(porringer, plugins=[plugin_name])
         worker.finished.connect(self._on_tool_update_finished)
         worker.error.connect(self._on_tool_update_error)
 

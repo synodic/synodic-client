@@ -71,6 +71,11 @@ class _ConfigBase(BaseModel):
     # 0 disables automatic checking.  None uses the default (20 minutes).
     tool_update_interval_minutes: int | None = None
 
+    # Per-plugin auto-update toggle.  Maps plugin name to enabled state.
+    # None or absent means all plugins auto-update.  Explicitly False
+    # entries disable auto-update for that plugin.
+    plugin_auto_update: dict[str, bool] | None = None
+
 
 class LocalConfiguration(_ConfigBase):
     """Portable configuration embedded next to the executable.

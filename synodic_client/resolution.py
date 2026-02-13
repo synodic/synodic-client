@@ -96,6 +96,34 @@ def resolve_update_config(config: GlobalConfiguration) -> UpdateConfig:
     )
 
 
+def resolve_enabled_plugins(
+    config: GlobalConfiguration,
+    all_plugin_names: list[str],
+) -> list[str] | None:
+    """Derive the include-list of plugins that should auto-update.
+
+    Returns the list of plugin names whose auto-update is **not** disabled.
+    If all plugins are enabled (the common case), returns ``None`` to
+    indicate "no filtering".
+
+    Args:
+        config: A resolved global configuration.
+        all_plugin_names: Every known plugin name.
+
+    Returns:
+        A list of enabled plugin names, or ``None`` when all are enabled.
+    """
+    mapping = config.plugin_auto_update
+    if not mapping:
+        return None
+
+    disabled = {name for name, enabled in mapping.items() if not enabled}
+    if not disabled:
+        return None
+
+    return [n for n in all_plugin_names if n not in disabled]
+
+
 def update_and_resolve(config: GlobalConfiguration) -> UpdateConfig:
     """Save a modified global config and resolve it into an UpdateConfig.
 

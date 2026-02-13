@@ -108,3 +108,30 @@ LOG_OUTPUT_STYLE = (
     '  padding: 6px;'
     '}'
 )
+
+# ---------------------------------------------------------------------------
+# Plugin section panel
+# ---------------------------------------------------------------------------
+PLUGIN_SECTION_HEADER_STYLE = (
+    'QWidget#pluginHeader {'
+    '  background: palette(midlight);'
+    '  border: 1px solid palette(mid);'
+    '  border-radius: 3px;'
+    '  padding: 4px 8px;'
+    '}'
+)
+PLUGIN_TOGGLE_STYLE = (
+    'QPushButton { padding: 2px 8px; border: 1px solid palette(mid); border-radius: 3px;'
+    '  min-width: 60px; max-width: 60px; }'
+    'QPushButton:checked { background: #89d185; color: black; }'
+    'QPushButton:disabled { color: palette(mid); border-color: palette(mid); background: transparent; }'
+    'QPushButton:checked:disabled { background: transparent; color: palette(mid); }'
+)
+
+PLUGIN_UPDATE_STYLE = (
+    'QPushButton { padding: 2px 8px; border: 1px solid palette(mid); border-radius: 3px;'
+    '  min-width: 60px; max-width: 60px; }'
+    'QPushButton:disabled { color: palette(mid); border-color: palette(mid); background: transparent; }'
+)
+PLUGIN_SECTION_SPACING = 4
+"""Pixels between plugin sections in the scroll area."""
