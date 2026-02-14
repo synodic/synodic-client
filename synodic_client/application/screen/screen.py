@@ -383,7 +383,10 @@ class PluginsView(QWidget):
 
             for plugin in bucket:
                 section = self._build_plugin_section(
-                    plugin, directories, auto_update_map, parent=group,
+                    plugin,
+                    directories,
+                    auto_update_map,
+                    parent=group,
                 )
                 section.auto_update_toggled.connect(self._on_auto_update_toggled)
                 section.update_requested.connect(self.plugin_update_requested.emit)
@@ -404,11 +407,7 @@ class PluginsView(QWidget):
     ) -> PluginSection:
         """Create a :class:`PluginSection` for a single plugin."""
         found = plugin.installed
-        version = (
-            str(plugin.tool_version)
-            if plugin.tool_version is not None
-            else 'Installed' if found else 'Not found'
-        )
+        version = str(plugin.tool_version) if plugin.tool_version is not None else 'Installed' if found else 'Not found'
         show_controls = plugin.kind in _UPDATABLE_KINDS
         auto_update = auto_update_map.get(plugin.name, True)
 

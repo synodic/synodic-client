@@ -112,11 +112,7 @@ LOG_OUTPUT_STYLE = (
 # ---------------------------------------------------------------------------
 # Plugin section panel
 # ---------------------------------------------------------------------------
-PLUGIN_GROUP_HEADER_STYLE = (
-    'QWidget#pluginGroupHeader {'
-    '  padding: 6px 4px 2px 0px;'
-    '}'
-)
+PLUGIN_GROUP_HEADER_STYLE = 'QWidget#pluginGroupHeader {  padding: 6px 4px 2px 0px;}'
 """Style for the collapsible group header in the plugins view."""
 
 PLUGIN_GROUP_TITLE_STYLE = 'font-weight: bold; font-size: 13px;'
