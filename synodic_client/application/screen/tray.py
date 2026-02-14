@@ -316,7 +316,7 @@ class TrayScreen:
         interval_ms = interval_minutes * 60 * 1000
         self._auto_update_timer = QTimer()
         self._auto_update_timer.setInterval(interval_ms)
-        self._auto_update_timer.timeout.connect(self._on_check_updates)
+        self._auto_update_timer.timeout.connect(self._on_auto_check_updates)
         self._auto_update_timer.start()
         logger.info('Automatic update checking enabled (every %d minute(s))', interval_minutes)
 
@@ -393,13 +393,32 @@ class TrayScreen:
             self._progress_dialog = None
 
     def _on_check_updates(self) -> None:
-        """Handle check for updates action."""
+        """Handle manual check for updates action."""
+        self._do_check_updates(silent=False)
+
+    def _on_auto_check_updates(self) -> None:
+        """Handle automatic (periodic) check for updates.
+
+        Failures and no-update results are logged silently without
+        showing Windows notifications.
+        """
+        self._do_check_updates(silent=True)
+
+    def _do_check_updates(self, *, silent: bool) -> None:
+        """Run an update check.
+
+        Args:
+            silent: When ``True``, suppress notifications for failures
+                and no-update results.  Notifications are still shown
+                when an update *is* available.
+        """
         if self._client.updater is None:
-            self.tray.showMessage(
-                'Update Error',
-                'Updater is not initialized.',
-                QSystemTrayIcon.MessageIcon.Warning,
-            )
+            if not silent:
+                self.tray.showMessage(
+                    'Update Error',
+                    'Updater is not initialized.',
+                    QSystemTrayIcon.MessageIcon.Warning,
+                )
             return
 
         # Disable the action while checking
@@ -407,41 +426,50 @@ class TrayScreen:
         self.update_action.setText('Checking for Updates...')
 
         worker = UpdateCheckWorker(self._client)
-        worker.finished.connect(self._on_update_check_finished)
-        worker.error.connect(self._on_update_check_error)
+        worker.finished.connect(lambda result: self._on_update_check_finished(result, silent=silent))
+        worker.error.connect(lambda error: self._on_update_check_error(error, silent=silent))
 
         self._runner = ThreadRunner(worker)
         self._runner.start()
 
-    def _on_update_check_finished(self, result: UpdateInfo | None) -> None:
+    def _on_update_check_finished(self, result: UpdateInfo | None, *, silent: bool = False) -> None:
         """Handle update check completion."""
         self._reset_update_action()
 
         if result is None:
-            self.tray.showMessage(
-                'Update Check Failed',
-                'Failed to check for updates. Please try again later.',
-                QSystemTrayIcon.MessageIcon.Warning,
-            )
+            if not silent:
+                self.tray.showMessage(
+                    'Update Check Failed',
+                    'Failed to check for updates. Please try again later.',
+                    QSystemTrayIcon.MessageIcon.Warning,
+                )
+            else:
+                logger.warning('Automatic update check failed (no result)')
             return
 
         if result.error:
-            self.tray.showMessage(
-                'Update Check Failed',
-                f'Failed to check for updates: {result.error}',
-                QSystemTrayIcon.MessageIcon.Warning,
-            )
+            if not silent:
+                self.tray.showMessage(
+                    'Update Check Failed',
+                    f'Failed to check for updates: {result.error}',
+                    QSystemTrayIcon.MessageIcon.Warning,
+                )
+            else:
+                logger.warning('Automatic update check failed: %s', result.error)
             return
 
         if not result.available:
-            self.tray.showMessage(
-                'No Updates Available',
-                f'You are running the latest version ({result.current_version}).',
-                QSystemTrayIcon.MessageIcon.Information,
-            )
+            if not silent:
+                self.tray.showMessage(
+                    'No Updates Available',
+                    f'You are running the latest version ({result.current_version}).',
+                    QSystemTrayIcon.MessageIcon.Information,
+                )
+            else:
+                logger.debug('Automatic update check: no update available')
             return
 
-        # Update available - show notification, clicking it starts download
+        # Update available - always show notification, clicking it starts download
         self._pending_update_info = result
         self.tray.showMessage(
             'Update Available',
@@ -449,15 +477,18 @@ class TrayScreen:
             QSystemTrayIcon.MessageIcon.Information,
         )
 
-    def _on_update_check_error(self, error: str) -> None:
+    def _on_update_check_error(self, error: str, *, silent: bool = False) -> None:
         """Handle update check error."""
         self._reset_update_action()
 
-        self.tray.showMessage(
-            'Update Check Error',
-            f'An error occurred: {error}',
-            QSystemTrayIcon.MessageIcon.Critical,
-        )
+        if not silent:
+            self.tray.showMessage(
+                'Update Check Error',
+                f'An error occurred: {error}',
+                QSystemTrayIcon.MessageIcon.Critical,
+            )
+        else:
+            logger.warning('Automatic update check error: %s', error)
 
     # -- Tool update helpers --
 
