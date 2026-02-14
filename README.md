@@ -13,3 +13,7 @@ We use [pdm](https://pdm-project.org/en/latest/) as our build system and package
 See [Development](https://synodic.github.io/porringer/development) for additional build, test, and installation instructions.
 
 For contribution guidelines, see [CONTRIBUTING.md](https://github.com/synodic/.github/blob/stable/CONTRIBUTING.md).
+
+## License
+
+This project is licensed under the [GNU Lesser General Public License v3.0 or later](LICENSE.md) (LGPL-3.0-or-later).

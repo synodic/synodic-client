@@ -1,7 +1,7 @@
 
 [project]
 description = ""
-license = { text = "LGPLv2" }
+license = { text = "LGPL-3.0-or-later" }
 name = "synodic_client"
 
 authors = [{ name = "Synodic Software", email = "contact@synodic.software" }]
