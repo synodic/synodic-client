@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from porringer.api import API
-from porringer.schema import PluginKind
+from porringer.schema import PluginInfo, PluginKind
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import (
@@ -27,12 +29,16 @@ from PySide6.QtWidgets import (
 )
 
 from synodic_client.application.icon import app_icon
+from synodic_client.application.screen import plugin_kind_group_label
 from synodic_client.application.screen.install import PreviewWorker, SetupPreviewWidget
 from synodic_client.application.theme import (
     COMPACT_MARGINS,
     LOG_CHEVRON_STYLE,
     LOG_SECTION_TITLE_STYLE,
     MAIN_WINDOW_MIN_SIZE,
+    PLUGIN_GROUP_HEADER_STYLE,
+    PLUGIN_GROUP_SECTION_SPACING,
+    PLUGIN_GROUP_TITLE_STYLE,
     PLUGIN_SECTION_HEADER_STYLE,
     PLUGIN_SECTION_SPACING,
     PLUGIN_TOGGLE_STYLE,
@@ -40,6 +46,9 @@ from synodic_client.application.theme import (
 )
 from synodic_client.application.threading import ThreadRunner
 from synodic_client.config import GlobalConfiguration, save_config
+
+if TYPE_CHECKING:
+    from porringer.schema import ManifestDirectory
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +214,95 @@ class PluginSection(QWidget):
         self.auto_update_toggled.emit(self._plugin_name, checked)
 
 
+class PluginGroupSection(QWidget):
+    """Collapsible group of :class:`PluginSection` widgets sharing the same kind.
+
+    The group header displays a human-readable label derived from the
+    :class:`~porringer.schema.PluginKind`.  New kinds are handled
+    automatically via :func:`plugin_kind_group_label`.
+    """
+
+    def __init__(
+        self,
+        kind: PluginKind,
+        parent: QWidget | None = None,
+    ) -> None:
+        """Initialise the group section.
+
+        Args:
+            kind: The plugin kind this group represents.
+            parent: Optional parent widget.
+        """
+        super().__init__(parent)
+        self._kind = kind
+        self._expanded = True
+        self._sections: list[PluginSection] = []
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._header = self._build_header(kind)
+        layout.addWidget(self._header)
+
+        self._body = QWidget()
+        self._body_layout = QVBoxLayout(self._body)
+        self._body_layout.setContentsMargins(8, 0, 0, 0)
+        self._body_layout.setSpacing(PLUGIN_GROUP_SECTION_SPACING)
+        layout.addWidget(self._body)
+
+    # --- Header builder ---
+
+    def _build_header(self, kind: PluginKind) -> QWidget:
+        """Construct the clickable group header row."""
+        header = QWidget()
+        header.setObjectName('pluginGroupHeader')
+        header.setStyleSheet(PLUGIN_GROUP_HEADER_STYLE)
+        header.setCursor(Qt.CursorShape.PointingHandCursor)
+        header.mousePressEvent = lambda _event: self._toggle()
+
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(6)
+
+        self._chevron = QLabel(_CHEVRON_DOWN)
+        self._chevron.setStyleSheet(LOG_CHEVRON_STYLE)
+        self._chevron.setFixedWidth(14)
+        header_layout.addWidget(self._chevron)
+
+        title = QLabel(plugin_kind_group_label(kind))
+        title.setStyleSheet(PLUGIN_GROUP_TITLE_STYLE)
+        header_layout.addWidget(title)
+
+        header_layout.addStretch()
+        return header
+
+    # --- Public helpers ---
+
+    @property
+    def kind(self) -> PluginKind:
+        """Return the plugin kind for this group."""
+        return self._kind
+
+    @property
+    def sections(self) -> list[PluginSection]:
+        """Return the child plugin sections."""
+        return list(self._sections)
+
+    def add_section(self, section: PluginSection) -> None:
+        """Append a :class:`PluginSection` to this group."""
+        self._body_layout.addWidget(section)
+        self._sections.append(section)
+
+    # --- Collapse / expand ---
+
+    def _toggle(self) -> None:
+        """Toggle the body visibility."""
+        self._expanded = not self._expanded
+        self._body.setVisible(self._expanded)
+        self._chevron.setText(_CHEVRON_DOWN if self._expanded else _CHEVRON_RIGHT)
+
+
 class PluginsView(QWidget):
     """Scrollable list of collapsible plugin sections with auto-update controls."""
 
@@ -230,7 +328,7 @@ class PluginsView(QWidget):
         super().__init__(parent)
         self._porringer = porringer
         self._config = config
-        self._sections: list[PluginSection] = []
+        self._groups: list[PluginGroupSection] = []
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -264,65 +362,95 @@ class PluginsView(QWidget):
     # --- Public API ---
 
     def refresh(self) -> None:
-        """Rebuild the plugin sections from porringer data."""
-        # Clear existing sections
-        for section in self._sections:
-            self._container_layout.removeWidget(section)
-            section.deleteLater()
-        self._sections.clear()
+        """Rebuild the plugin sections from porringer data, grouped by kind."""
+        # Clear existing groups
+        for group in self._groups:
+            self._container_layout.removeWidget(group)
+            group.deleteLater()
+        self._groups.clear()
 
         plugins = self._porringer.plugin.list()
         directories = self._porringer.cache.list_directories()
         auto_update_map = self._config.plugin_auto_update or {}
 
+        # Bucket plugins by kind, preserving discovery order within each bucket
+        kind_buckets: OrderedDict[PluginKind, list[PluginInfo]] = OrderedDict()
         for plugin in plugins:
-            found = plugin.tool_version is not None
-            version = str(plugin.tool_version) if found else 'Not found'
-            show_controls = plugin.kind in _UPDATABLE_KINDS
-            auto_update = auto_update_map.get(plugin.name, True)
+            kind_buckets.setdefault(plugin.kind, []).append(plugin)
 
-            # Gather packages managed by this plugin across cached projects
-            packages: list[tuple[str, str]] = []
-            if show_controls:
-                for directory in directories:
-                    try:
-                        pkgs = self._porringer.plugin.list_packages(
-                            plugin.name,
-                            Path(directory.path),
-                        )
-                        for pkg in pkgs:
-                            packages.append(
-                                (
-                                    str(pkg.name),
-                                    directory.name or str(directory.path),
-                                )
-                            )
-                    except Exception:
-                        logger.debug(
-                            'Could not list packages for %s in %s',
-                            plugin.name,
-                            directory.path,
-                            exc_info=True,
-                        )
+        for kind, bucket in kind_buckets.items():
+            group = PluginGroupSection(kind, parent=self._container)
 
-            section = PluginSection(
-                PluginSectionData(
-                    name=plugin.name,
-                    version=version,
-                    packages=packages,
-                    auto_update=auto_update,
-                    show_controls=show_controls,
-                    found=found,
-                ),
-                parent=self._container,
-            )
-            section.auto_update_toggled.connect(self._on_auto_update_toggled)
-            section.update_requested.connect(self.plugin_update_requested.emit)
+            for plugin in bucket:
+                section = self._build_plugin_section(
+                    plugin, directories, auto_update_map, parent=group,
+                )
+                section.auto_update_toggled.connect(self._on_auto_update_toggled)
+                section.update_requested.connect(self.plugin_update_requested.emit)
+                group.add_section(section)
 
             # Insert before the trailing stretch
             idx = self._container_layout.count() - 1
-            self._container_layout.insertWidget(idx, section)
-            self._sections.append(section)
+            self._container_layout.insertWidget(idx, group)
+            self._groups.append(group)
+
+    def _build_plugin_section(
+        self,
+        plugin: PluginInfo,
+        directories: list[ManifestDirectory],
+        auto_update_map: dict[str, bool],
+        *,
+        parent: QWidget | None = None,
+    ) -> PluginSection:
+        """Create a :class:`PluginSection` for a single plugin."""
+        found = plugin.installed
+        version = (
+            str(plugin.tool_version)
+            if plugin.tool_version is not None
+            else 'Installed' if found else 'Not found'
+        )
+        show_controls = plugin.kind in _UPDATABLE_KINDS
+        auto_update = auto_update_map.get(plugin.name, True)
+
+        packages = self._gather_packages(plugin.name, directories) if show_controls else []
+
+        return PluginSection(
+            PluginSectionData(
+                name=plugin.name,
+                version=version,
+                packages=packages,
+                auto_update=auto_update,
+                show_controls=show_controls,
+                found=found,
+            ),
+            parent=parent,
+        )
+
+    def _gather_packages(
+        self,
+        plugin_name: str,
+        directories: list[ManifestDirectory],
+    ) -> list[tuple[str, str]]:
+        """Collect packages managed by *plugin_name* across cached projects."""
+        packages: list[tuple[str, str]] = []
+        for directory in directories:
+            try:
+                pkgs = self._porringer.plugin.list_packages(
+                    plugin_name,
+                    Path(directory.path),
+                )
+                for pkg in pkgs:
+                    packages.append(
+                        (str(pkg.name), directory.name or str(directory.path)),
+                    )
+            except Exception:
+                logger.debug(
+                    'Could not list packages for %s in %s',
+                    plugin_name,
+                    directory.path,
+                    exc_info=True,
+                )
+        return packages
 
     # --- Callbacks ---
 

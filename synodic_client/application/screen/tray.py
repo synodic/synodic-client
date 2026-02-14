@@ -471,7 +471,7 @@ class TrayScreen:
         logger.info('Starting periodic tool update check')
 
         config = self._resolve_config()
-        all_names = [p.name for p in porringer.plugin.list() if p.tool_version is not None]
+        all_names = [p.name for p in porringer.plugin.list() if p.installed]
         enabled = resolve_enabled_plugins(config, all_names)
 
         worker = ToolUpdateWorker(porringer, plugins=enabled)
