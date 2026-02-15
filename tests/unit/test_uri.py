@@ -1,6 +1,6 @@
 """Tests for URI parsing in the qt application module."""
 
-from synodic_client.application.qt import parse_uri
+from synodic_client.application.uri import parse_uri
 
 
 class TestParseUri:

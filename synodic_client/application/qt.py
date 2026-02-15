@@ -7,7 +7,6 @@ import subprocess
 import sys
 import types
 from collections.abc import Callable
-from urllib.parse import parse_qs, urlparse
 
 from porringer.api import API
 from porringer.schema import LocalConfiguration
@@ -19,33 +18,13 @@ from synodic_client.application.instance import SingleInstance
 from synodic_client.application.screen.install import InstallPreviewWindow
 from synodic_client.application.screen.screen import Screen
 from synodic_client.application.screen.tray import TrayScreen
+from synodic_client.application.uri import parse_uri
 from synodic_client.client import Client
 from synodic_client.config import GlobalConfiguration, set_dev_mode
 from synodic_client.logging import configure_logging
 from synodic_client.protocol import register_protocol
 from synodic_client.resolution import resolve_config, resolve_update_config
 from synodic_client.updater import initialize_velopack
-
-
-def parse_uri(uri: str) -> dict[str, str | list[str]]:
-    """Parse a ``synodic://`` URI into its components.
-
-    Example:
-        ``synodic://install?manifest=https://example.com/foo.toml``
-        returns ``{'action': 'install', 'manifest': ['https://example.com/foo.toml']}``.
-
-    Args:
-        uri: A ``synodic://`` URI string.
-
-    Returns:
-        A dict with ``'action'`` (the host/path) and any query parameters.
-    """
-    parsed = urlparse(uri)
-    result: dict[str, str | list[str]] = {
-        'action': parsed.netloc or parsed.path.strip('/'),
-    }
-    result.update(parse_qs(parsed.query))
-    return result
 
 
 def _init_services(logger: logging.Logger) -> tuple[Client, API, GlobalConfiguration]:
