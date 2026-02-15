@@ -6,7 +6,7 @@ from pathlib import Path
 
 from porringer.api import API
 from porringer.schema import SetupParameters, SyncStrategy
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.screen import MainWindow
 from synodic_client.application.theme import UPDATE_SOURCE_DIALOG_MIN_WIDTH
-from synodic_client.application.threading import ThreadRunner
 from synodic_client.client import Client
 from synodic_client.config import GlobalConfiguration
 from synodic_client.logging import open_log
@@ -37,7 +36,7 @@ from synodic_client.updater import GITHUB_REPO_URL, UpdateChannel, UpdateInfo
 logger = logging.getLogger(__name__)
 
 
-class UpdateCheckWorker(QObject):
+class UpdateCheckWorker(QThread):
     """Worker for checking updates in a background thread."""
 
     finished = Signal(object)  # UpdateInfo
@@ -58,7 +57,7 @@ class UpdateCheckWorker(QObject):
             self.error.emit(str(e))
 
 
-class UpdateDownloadWorker(QObject):
+class UpdateDownloadWorker(QThread):
     """Worker for downloading updates in a background thread."""
 
     finished = Signal(bool)  # success status
@@ -84,7 +83,7 @@ class UpdateDownloadWorker(QObject):
             self.error.emit(str(e))
 
 
-class ToolUpdateWorker(QObject):
+class ToolUpdateWorker(QThread):
     """Worker for re-syncing manifest-declared tools in a background thread."""
 
     finished = Signal(int)  # number of manifests processed
@@ -209,8 +208,8 @@ class TrayScreen:
         self._client = client
         self._window = window
         self._config = config
-        self._runner: ThreadRunner | None = None
-        self._tool_runner: ThreadRunner | None = None
+        self._runner: QThread | None = None
+        self._tool_runner: QThread | None = None
         self._progress_dialog: QProgressDialog | None = None
         self._pending_update_info: UpdateInfo | None = None
         self._download_cancelled = False
@@ -429,7 +428,7 @@ class TrayScreen:
         worker.finished.connect(lambda result: self._on_update_check_finished(result, silent=silent))
         worker.error.connect(lambda error: self._on_update_check_error(error, silent=silent))
 
-        self._runner = ThreadRunner(worker)
+        self._runner = worker
         self._runner.start()
 
     def _on_update_check_finished(self, result: UpdateInfo | None, *, silent: bool = False) -> None:
@@ -509,7 +508,7 @@ class TrayScreen:
         worker.finished.connect(self._on_tool_update_finished)
         worker.error.connect(self._on_tool_update_error)
 
-        self._tool_runner = ThreadRunner(worker)
+        self._tool_runner = worker
         self._tool_runner.start()
 
     def _on_single_plugin_update(self, plugin_name: str) -> None:
@@ -525,7 +524,7 @@ class TrayScreen:
         worker.finished.connect(self._on_tool_update_finished)
         worker.error.connect(self._on_tool_update_error)
 
-        self._tool_runner = ThreadRunner(worker)
+        self._tool_runner = worker
         self._tool_runner.start()
 
     def _on_tool_update_finished(self, count: int) -> None:
@@ -570,7 +569,7 @@ class TrayScreen:
         worker.progress.connect(self._on_download_progress)
         worker.error.connect(self._on_download_error)
 
-        self._runner = ThreadRunner(worker)
+        self._runner = worker
         self._runner.start()
 
     def _on_download_cancelled(self) -> None:

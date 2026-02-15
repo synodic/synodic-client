@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from porringer.api import API
 from porringer.schema import PluginInfo, PluginKind
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import (
     QComboBox,
@@ -44,7 +44,6 @@ from synodic_client.application.theme import (
     PLUGIN_TOGGLE_STYLE,
     PLUGIN_UPDATE_STYLE,
 )
-from synodic_client.application.threading import ThreadRunner
 from synodic_client.config import GlobalConfiguration, save_config
 
 if TYPE_CHECKING:
@@ -490,7 +489,7 @@ class ProjectsView(QWidget):
         """
         super().__init__(parent)
         self._porringer = porringer
-        self._runner: ThreadRunner | None = None
+        self._runner: QThread | None = None
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -548,7 +547,8 @@ class ProjectsView(QWidget):
 
             if not exists:
                 # Grey out entries whose directory no longer exists on disk
-                item = self._combo.model().item(idx)  # type: ignore[union-attr]
+                model = self._combo.model()
+                item = model.item(idx) if hasattr(model, 'item') else None
                 if isinstance(item, QStandardItem):
                     item.setForeground(self.palette().placeholderText())
                     item.setToolTip(f'{tooltip} \u2014 directory not found' if tooltip else 'Directory not found')
@@ -645,7 +645,7 @@ class ProjectsView(QWidget):
         preview_worker.finished.connect(self._preview.on_preview_finished)
         preview_worker.error.connect(self._on_preview_error)
 
-        self._runner = ThreadRunner(preview_worker)
+        self._runner = preview_worker
         self._runner.start()
 
     def _on_preview_error(self, message: str) -> None:

@@ -439,9 +439,9 @@ class TestInitializeVelopack:
 
     @staticmethod
     def test_initialize_success() -> None:
-        """Verify initialize_velopack calls velopack.App().run()."""
+        """Verify initialize_velopack calls _VelopackApp().run()."""
         mock_app = MagicMock()
-        with patch('synodic_client.updater.velopack.App', return_value=mock_app) as mock_app_class:
+        with patch('synodic_client.updater._VelopackApp', return_value=mock_app) as mock_app_class:
             initialize_velopack()
             mock_app_class.assert_called_once()
             mock_app.run.assert_called_once()
@@ -451,6 +451,6 @@ class TestInitializeVelopack:
         """Verify initialize_velopack handles exceptions gracefully."""
         mock_app = MagicMock()
         mock_app.run.side_effect = Exception('Test')
-        with patch('synodic_client.updater.velopack.App', return_value=mock_app):
+        with patch('synodic_client.updater._VelopackApp', return_value=mock_app):
             # Should not raise
             initialize_velopack()

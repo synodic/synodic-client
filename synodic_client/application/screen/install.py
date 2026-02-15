@@ -31,7 +31,7 @@ from porringer.schema import (
     SetupResults,
     SubActionProgress,
 )
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -69,7 +69,6 @@ from synodic_client.application.theme import (
     MUTED_STYLE,
     NO_MARGINS,
 )
-from synodic_client.application.threading import ThreadRunner
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +82,7 @@ def format_cli_command(action: SetupAction) -> str:
     return action.description
 
 
-class InstallWorker(QObject):
+class InstallWorker(QThread):
     """Background worker that executes setup actions via porringer.
 
     Uses the ``execute_stream`` async generator to consume progress events
@@ -275,7 +274,7 @@ class SetupPreviewWidget(QWidget):
         self._preview: SetupResults | None = None
         self._manifest_path: Path | None = None
         self._project_directory: Path | None = None
-        self._runner: ThreadRunner | None = None
+        self._runner: QThread | None = None
         self._cancellation_token: CancellationToken | None = None
         self._completed_count = 0
         self._action_statuses: list[str] = []
@@ -586,7 +585,7 @@ class SetupPreviewWidget(QWidget):
         worker.finished.connect(self._on_install_finished)
         worker.error.connect(self._on_install_error)
 
-        self._runner = ThreadRunner(worker)
+        self._runner = worker
         self._runner.start()
 
     def _on_action_started(self, action: SetupAction) -> None:
@@ -686,7 +685,7 @@ class InstallPreviewWindow(QMainWindow):
         self._porringer = porringer
         self._manifest_url = manifest_url
         self._temp_dir_path: str | None = None
-        self._runner: ThreadRunner | None = None
+        self._runner: QThread | None = None
 
         # Default project directory to the current working directory
         self._project_directory: Path = Path.cwd()
@@ -788,7 +787,7 @@ class InstallPreviewWindow(QMainWindow):
         preview_worker.finished.connect(self._preview_widget.on_preview_finished)
         preview_worker.error.connect(self._preview_widget.on_preview_error)
 
-        self._runner = ThreadRunner(preview_worker)
+        self._runner = preview_worker
         self._runner.start()
 
     # --- Preview callback (intercepts to capture temp dir) ---
@@ -804,7 +803,7 @@ class InstallPreviewWindow(QMainWindow):
         self._preview_widget.on_preview_ready(preview, manifest_path, temp_dir_path)
 
 
-class PreviewWorker(QObject):
+class PreviewWorker(QThread):
     """Background worker that downloads a manifest and performs a dry-run.
 
     Combines two stages into a single background pipeline:

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import types
 from collections.abc import Callable
+from typing import Any
 
 from porringer.api import API
 from porringer.schema import LocalConfiguration
@@ -78,12 +79,12 @@ def _suppress_subprocess_consoles() -> None:
 
     _original_init = subprocess.Popen.__init__
 
-    def _patched_init(self: subprocess.Popen, *args: object, **kwargs: object) -> None:  # type: ignore[override]
+    def _patched_init(self: subprocess.Popen, *args: Any, **kwargs: Any) -> None:
         if 'creationflags' not in kwargs:
-            kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
-        _original_init(self, *args, **kwargs)  # type: ignore[arg-type]
+            kwargs['creationflags'] = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        _original_init(self, *args, **kwargs)
 
-    subprocess.Popen.__init__ = _patched_init  # type: ignore[assignment]
+    subprocess.Popen.__init__ = _patched_init
 
 
 def _install_exception_hook(logger: logging.Logger) -> None:
@@ -110,7 +111,9 @@ def _init_app() -> QApplication:
     # Set the App User Model ID so Windows uses our icon on the taskbar
     # instead of the generic python.exe icon.
     if sys.platform == 'win32':
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('synodic.client')  # type: ignore[union-attr]
+        windll = getattr(ctypes, 'windll', None)
+        if windll is not None:
+            windll.shell32.SetCurrentProcessExplicitAppUserModelID('synodic.client')
 
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
