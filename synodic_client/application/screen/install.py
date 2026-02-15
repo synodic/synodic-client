@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
 )
 
 from synodic_client.application.screen import ACTION_KIND_LABELS, skip_reason_label
+from synodic_client.application.screen.log_panel import ExecutionLogPanel
 from synodic_client.application.theme import (
     COMMAND_HEADER_STYLE,
     COMPACT_MARGINS,
@@ -316,8 +317,6 @@ class SetupPreviewWidget(QWidget):
 
         self._command_list = CommandListWidget()
         self._view_stack.addWidget(self._command_list)  # page 1
-
-        from synodic_client.application.screen.log_panel import ExecutionLogPanel
 
         self._log_panel = ExecutionLogPanel()
         self._view_stack.addWidget(self._log_panel)  # page 2

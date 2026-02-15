@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from porringer.schema import (
+    CancellationToken,
     PluginKind,
+    ProgressEvent,
+    ProgressEventKind,
     SetupAction,
     SetupActionResult,
+    SetupResults,
     SkipReason,
     SubActionProgress,
 )
@@ -16,11 +21,10 @@ from porringer.schema import (
 # PySide6 widgets require a QApplication; create one once for the module.
 from PySide6.QtWidgets import QApplication
 
-_app = QApplication.instance() or QApplication(sys.argv)
-
+from synodic_client.application.screen.install import InstallWorker
 from synodic_client.application.screen.log_panel import (
-    _CHEVRON_DOWN,
-    _CHEVRON_RIGHT,
+    CHEVRON_DOWN,
+    CHEVRON_RIGHT,
     ActionLogSection,
     ExecutionLogPanel,
 )
@@ -35,6 +39,8 @@ from synodic_client.application.theme import (
     LOG_STATUS_SKIPPED,
     LOG_STATUS_SUCCESS,
 )
+
+_app = QApplication.instance() or QApplication(sys.argv)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -104,7 +110,7 @@ class TestActionLogSection:
         """Section starts expanded with the down-pointing chevron."""
         action = _make_action()
         section = ActionLogSection(action, index=1)
-        assert section._chevron.text() == _CHEVRON_DOWN
+        assert section._chevron.text() == CHEVRON_DOWN
         assert section._expanded is True
         assert not section._output.isHidden()
 
@@ -117,12 +123,12 @@ class TestActionLogSection:
         section._toggle()
         assert not section._expanded
         assert section._output.isHidden()
-        assert section._chevron.text() == _CHEVRON_RIGHT
+        assert section._chevron.text() == CHEVRON_RIGHT
 
         section._toggle()
         assert section._expanded
         assert not section._output.isHidden()
-        assert section._chevron.text() == _CHEVRON_DOWN
+        assert section._chevron.text() == CHEVRON_DOWN
 
     @staticmethod
     def test_append_stdout_output() -> None:
@@ -433,7 +439,8 @@ class TestExecutionLogPanel:
 
         s1 = panel.get_section(a1)
         s2 = panel.get_section(a2)
-        assert s1 is not None and s2 is not None
+        assert s1 is not None
+        assert s2 is not None
         assert 'line for a1' in s1._output.toPlainText()
         assert 'line for a2' in s2._output.toPlainText()
         assert 'line for a2' not in s1._output.toPlainText()
@@ -443,17 +450,6 @@ class TestExecutionLogPanel:
 # ---------------------------------------------------------------------------
 # InstallWorker signal tests for new action_started / sub_progress signals
 # ---------------------------------------------------------------------------
-
-from pathlib import Path
-
-from porringer.schema import (
-    CancellationToken,
-    ProgressEvent,
-    ProgressEventKind,
-    SetupResults,
-)
-
-from synodic_client.application.screen.install import InstallWorker
 
 
 class TestInstallWorkerNewSignals:

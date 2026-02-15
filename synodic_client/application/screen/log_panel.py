@@ -47,8 +47,8 @@ from synodic_client.application.theme import (
 logger = logging.getLogger(__name__)
 
 # Unicode chevrons
-_CHEVRON_DOWN = '\u25bc'
-_CHEVRON_RIGHT = '\u25b6'
+CHEVRON_DOWN = '\u25bc'
+CHEVRON_RIGHT = '\u25b6'
 
 
 class ActionLogSection(QWidget):
@@ -85,7 +85,7 @@ class ActionLogSection(QWidget):
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(6)
 
-        self._chevron = QLabel(_CHEVRON_DOWN)
+        self._chevron = QLabel(CHEVRON_DOWN)
         self._chevron.setStyleSheet(LOG_CHEVRON_STYLE)
         self._chevron.setFixedWidth(14)
         header_layout.addWidget(self._chevron)
@@ -163,7 +163,7 @@ class ActionLogSection(QWidget):
         """Toggle the output body visibility."""
         self._expanded = not self._expanded
         self._output.setVisible(self._expanded)
-        self._chevron.setText(_CHEVRON_DOWN if self._expanded else _CHEVRON_RIGHT)
+        self._chevron.setText(CHEVRON_DOWN if self._expanded else CHEVRON_RIGHT)
 
 
 class ExecutionLogPanel(QScrollArea):
