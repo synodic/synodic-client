@@ -27,7 +27,7 @@ def main() -> None:
     logging.basicConfig(level=logging.WARNING)
 
     if not _EXAMPLES_DIR.is_dir():
-        console.print(f'  [red]✗[/red] examples/ directory not found at {_EXAMPLES_DIR}')
+        console.print(f'  [red]x[/red] examples/ directory not found at {_EXAMPLES_DIR}')
         sys.exit(1)
 
     local_config = LocalConfiguration()
@@ -43,7 +43,8 @@ def main() -> None:
         if _EXAMPLES_DIR.resolve() in resolved.parents and resolved not in example_dirs:
             try:
                 porringer.cache.remove_directory(entry.path)
-                console.print(f'  [yellow]−[/yellow] [bold]{entry.name or resolved.name}[/bold] [dim](removed)[/dim]')
+                name = entry.name or resolved.name
+                console.print(f'  [yellow]-[/yellow] [bold]{name}[/bold] [dim](removed)[/dim]')
                 pruned += 1
             except ValueError:
                 pass
@@ -59,7 +60,7 @@ def main() -> None:
 
         try:
             porringer.cache.add_directory(child, name=child.name)
-            console.print(f'  [green]✓[/green] [bold]{child.name}[/bold] [dim]({child})[/dim]')
+            console.print(f'  [green]+[/green] [bold]{child.name}[/bold] [dim]({child})[/dim]')
             added += 1
         except ValueError:
             skipped += 1
