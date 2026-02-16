@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 # Collect porringer and its plugins with metadata
@@ -40,7 +41,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=['rthook_no_console.py'],
+    runtime_hooks=[os.path.join(SPECPATH, 'rthook_no_console.py')],
     excludes=[],
     noarchive=False,
 )
