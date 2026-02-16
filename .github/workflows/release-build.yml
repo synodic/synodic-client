@@ -104,6 +104,20 @@ jobs:
         if: needs.get-version.outputs.is-dev == 'true'
         run: dotnet tool install -g vpk
 
+      - name: Remove conflicting dev release assets
+        if: needs.get-version.outputs.is-dev == 'true'
+        continue-on-error: true
+        run: |
+          for asset in $(gh release view dev --json assets -q '.assets[].name' 2>/dev/null); do
+            case "$asset" in
+              *-full.nupkg|*-delta.nupkg) ;; # Keep old nupkgs for delta chain
+              *) gh release delete-asset dev "$asset" --yes ;;
+            esac
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
       - name: Upload dev release via Velopack
         if: needs.get-version.outputs.is-dev == 'true'
         run: |
