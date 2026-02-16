@@ -21,6 +21,11 @@ on:
 
 env:
     VELOPACK_APP_ID: synodic
+    VELOPACK_APP_TITLE: Synodic Client
+    VELOPACK_TARGETS: |
+        build-windows-x64:synodic.exe
+        build-linux-x64:synodic
+        build-macos-x64:synodic
 
 jobs:
     package:
@@ -50,43 +55,36 @@ jobs:
                   sudo apt-get install -y libfuse2
 
             - name: Create Velopack packages
+              shell: bash
               run: |
+                  set -euo pipefail
+
                   mkdir -p releases
+                  package_count=0
 
-                  # Windows package
-                  if [ -d "builds/build-windows-x64" ]; then
+                  while IFS=':' read -r artifact_dir main_exe; do
+                    [ -n "${artifact_dir}" ] || continue
+
+                    pack_dir="builds/${artifact_dir}"
+
+                    if [ ! -d "${pack_dir}" ]; then
+                      continue
+                    fi
+
                     vpk pack \
                       --packId ${{ env.VELOPACK_APP_ID }} \
                       --packVersion ${{ inputs.version }} \
-                      --packDir builds/build-windows-x64 \
-                      --mainExe synodic.exe \
-                      --packTitle "Synodic Client" \
+                      --packDir "${pack_dir}" \
+                      --mainExe "${main_exe}" \
+                      --packTitle "${{ env.VELOPACK_APP_TITLE }}" \
                       --channel ${{ inputs.channel }} \
                       --outputDir releases
-                  fi
+                    package_count=$((package_count + 1))
+                  done <<< "${{ env.VELOPACK_TARGETS }}"
 
-                  # Linux package
-                  if [ -d "builds/build-linux-x64" ]; then
-                    vpk pack \
-                      --packId ${{ env.VELOPACK_APP_ID }} \
-                      --packVersion ${{ inputs.version }} \
-                      --packDir builds/build-linux-x64 \
-                      --mainExe synodic \
-                      --packTitle "Synodic Client" \
-                      --channel ${{ inputs.channel }} \
-                      --outputDir releases
-                  fi
-
-                  # macOS package
-                  if [ -d "builds/build-macos-x64" ]; then
-                    vpk pack \
-                      --packId ${{ env.VELOPACK_APP_ID }} \
-                      --packVersion ${{ inputs.version }} \
-                      --packDir builds/build-macos-x64 \
-                      --mainExe synodic \
-                      --packTitle "Synodic Client" \
-                      --channel ${{ inputs.channel }} \
-                      --outputDir releases
+                  if [ "${package_count}" -eq 0 ]; then
+                    echo "No build artifacts found to package." >&2
+                    exit 1
                   fi
 
                   ls -la releases/

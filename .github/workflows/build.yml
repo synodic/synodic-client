@@ -5,11 +5,6 @@ name: Build Executables
 
 on:
   workflow_call:
-    inputs:
-      version:
-        description: "Version string for the build"
-        required: true
-        type: string
 
 jobs:
   build-windows:

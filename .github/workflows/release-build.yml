@@ -1,9 +1,15 @@
 name: Release Build
 
-# Builds and publishes stable releases to GitHub Releases using Velopack.
-# Triggered by published releases or manual dispatch.
+# Builds and publishes dev/stable releases to GitHub Releases using Velopack.
+# Triggered by Python dev release updates, published releases, or manual dispatch.
 
 on:
+  workflow_run:
+    workflows: ["Update Python Development Release"]
+    types: [completed]
+    branches:
+      - development
+      - main
   release:
     types: [published]
   workflow_dispatch:
@@ -18,36 +24,71 @@ permissions:
 
 jobs:
   get-version:
+    if: github.repository == 'synodic/synodic-client' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      installer-version: ${{ steps.version.outputs.installer-version }}
       tag: ${{ steps.version.outputs.tag }}
+      channel: ${{ steps.version.outputs.channel }}
+      is-dev: ${{ steps.version.outputs.is-dev }}
     steps:
+      - name: Checkout
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Semantic Version
+        if: github.event_name == 'workflow_run'
+        id: semver
+        uses: PaulHatch/semantic-version@v6.0.1
+        with:
+          tag_prefix: "v"
+          version_format: "${major}.${minor}.${patch}"
+
       - name: Get version
         id: version
         run: |
-          if [ "${{ github.event_name }}" == "release" ]; then
-            VERSION="${{ github.event.release.tag_name }}"
+          if [ "${{ github.event_name }}" == "workflow_run" ]; then
+            base_version="${{ steps.semver.outputs.version }}"
+            increment="${{ steps.semver.outputs.increment }}"
+            version="${base_version}.dev${increment}"
+            installer_version="${base_version}-dev.${increment}"
+            channel="dev"
+            tag="dev"
+            is_dev="true"
           else
-            VERSION="${{ inputs.version }}"
+            if [ "${{ github.event_name }}" == "release" ]; then
+              version_input="${{ github.event.release.tag_name }}"
+            else
+              version_input="${{ inputs.version }}"
+            fi
+
+            version="${version_input#v}"
+            installer_version="${version}"
+            channel="stable"
+            tag="v${version}"
+            is_dev="false"
           fi
-          # Strip leading 'v' if present
-          VERSION="${VERSION#v}"
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+
+          echo "version=${version}" >> $GITHUB_OUTPUT
+          echo "installer-version=${installer_version}" >> $GITHUB_OUTPUT
+          echo "channel=${channel}" >> $GITHUB_OUTPUT
+          echo "tag=${tag}" >> $GITHUB_OUTPUT
+          echo "is-dev=${is_dev}" >> $GITHUB_OUTPUT
 
   build:
     needs: get-version
     uses: ./.github/workflows/build.yml
-    with:
-      version: ${{ needs.get-version.outputs.version }}
 
   package:
     needs: [get-version, build]
     uses: ./.github/workflows/package.yml
     with:
-      version: ${{ needs.get-version.outputs.version }}
-      channel: stable
+      version: ${{ needs.get-version.outputs.installer-version }}
+      channel: ${{ needs.get-version.outputs.channel }}
 
   release:
     needs: [get-version, package]
@@ -59,16 +100,43 @@ jobs:
           name: velopack-releases
           path: releases
 
-      # For releases triggered by release event
+      - name: Delete existing dev release
+        if: needs.get-version.outputs.is-dev == 'true'
+        run: gh release delete dev --cleanup-tag -y || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
+      - name: Create dev release
+        if: needs.get-version.outputs.is-dev == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev
+          name: "Development Build"
+          prerelease: true
+          make_latest: false
+          files: releases/*
+          body: |
+            **Latest Development Build**
+
+            Version: `${{ needs.get-version.outputs.version }}`
+            Commit: `${{ github.sha }}`
+
+            ⚠️ This is a development build and may be unstable.
+
+            ## Installation
+            - **Windows**: Download `synodic-Setup.exe` and run it
+            - **Linux**: Download the `.AppImage` file, make it executable with `chmod +x`, and run
+            - **macOS**: Download and extract the package
+
       - name: Upload to existing release
-        if: github.event_name == 'release'
+        if: needs.get-version.outputs.is-dev != 'true' && github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: releases/*
 
-      # For manual workflow_dispatch
       - name: Create release
-        if: github.event_name == 'workflow_dispatch'
+        if: needs.get-version.outputs.is-dev != 'true' && github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.get-version.outputs.tag }}
