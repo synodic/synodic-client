@@ -231,11 +231,12 @@ class TestResolveLocalPath:
         assert resolve_local_path('https://example.com/porringer.json') is None
 
     @staticmethod
-    def test_absolute_path_returns_path() -> None:
+    def test_absolute_path_returns_path(tmp_path: Path) -> None:
         """Absolute OS paths should resolve."""
-        result = resolve_local_path('C:\\Users\\test\\porringer.json')
+        path = str(tmp_path / 'porringer.json')
+        result = resolve_local_path(path)
         assert result is not None
-        assert result == Path('C:\\Users\\test\\porringer.json')
+        assert result == Path(path)
 
     @staticmethod
     def test_file_uri_returns_path() -> None:
@@ -283,10 +284,11 @@ class TestPreviewWorkerLocal:
         porringer.sync.download.assert_not_called()
 
     @staticmethod
-    def test_local_manifest_not_found() -> None:
+    def test_local_manifest_not_found(tmp_path: Path) -> None:
         """Verify PreviewWorker emits error for missing local file."""
+        path = str(tmp_path / 'nonexistent' / 'porringer.json')
         porringer = MagicMock()
-        worker = PreviewWorker(porringer, 'C:\\nonexistent\\porringer.json')
+        worker = PreviewWorker(porringer, path)
 
         errors: list[str] = []
         worker.error.connect(errors.append)

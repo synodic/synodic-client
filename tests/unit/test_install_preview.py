@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 pytest.importorskip('PySide6.QtWidgets', reason='PySide6 requires system Qt libraries')
@@ -237,9 +239,10 @@ class TestResolveLocalPath:
     @staticmethod
     def test_absolute_path_returns_path() -> None:
         """Absolute OS paths should resolve."""
-        result = resolve_local_path('C:\\Users\\test\\porringer.json')
+        path = 'C:\\Users\\test\\porringer.json' if sys.platform == 'win32' else '/Users/test/porringer.json'
+        result = resolve_local_path(path)
         assert result is not None
-        assert result == Path('C:\\Users\\test\\porringer.json')
+        assert result == Path(path)
 
     @staticmethod
     def test_file_uri_returns_path() -> None:
@@ -289,8 +292,9 @@ class TestPreviewWorkerLocal:
     @staticmethod
     def test_local_manifest_not_found() -> None:
         """Verify PreviewWorker emits error for missing local file."""
+        path = 'C:\\nonexistent\\porringer.json' if sys.platform == 'win32' else '/nonexistent/porringer.json'
         porringer = MagicMock()
-        worker = PreviewWorker(porringer, 'C:\\nonexistent\\porringer.json')
+        worker = PreviewWorker(porringer, path)
 
         errors: list[str] = []
         worker.error.connect(errors.append)
