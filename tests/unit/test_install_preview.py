@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip('PySide6.QtWidgets', reason='PySide6 requires system Qt libraries')
+
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock

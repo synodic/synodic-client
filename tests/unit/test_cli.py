@@ -2,6 +2,10 @@
 
 from unittest.mock import patch
 
+import pytest
+
+pytest.importorskip('PySide6.QtWidgets', reason='PySide6 requires system Qt libraries')
+
 from typer.testing import CliRunner
 
 from synodic_client.cli import app
