@@ -14,9 +14,9 @@ requires-python = ">=3.14, <3.15"
 dependencies = [
     "pyside6>=6.10.2",
     "packaging>=26.0",
-    "porringer>=0.2.1.dev10",
+    "porringer>=0.2.1.dev19",
     "velopack>=0.0.1369.dev7516",
-    "typer>=0.23.0",
+    "typer>=0.23.1",
 ]
 
 [project.urls]
@@ -24,8 +24,8 @@ homepage = "https://github.com/synodic/synodic-client"
 repository = "https://github.com/synodic/synodic-client"
 
 [dependency-groups]
-build = ["pyinstaller>=6.18.0"]
-lint = ["ruff>=0.15.0", "pyrefly>=0.52.0"]
+build = ["pyinstaller>=6.19.0"]
+lint = ["ruff>=0.15.1", "pyrefly>=0.52.0"]
 test = ["pytest>=9.0.2", "pytest-cov>=7.0.0", "pytest-mock>=3.15.1"]
 
 [project.scripts]
