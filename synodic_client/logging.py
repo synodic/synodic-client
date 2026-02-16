@@ -1,16 +1,12 @@
 """Centralised logging configuration for the Synodic Client.
 
-Provides a rotating file handler with eager flushing and a helper to open
-the current log file in the system's default editor.
+Provides a rotating file handler with eager flushing.
 """
 
 import logging
 import tempfile
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
 
 from synodic_client.config import is_dev_mode
 
@@ -52,7 +48,15 @@ def configure_logging() -> None:
     Attaches a :class:`EagerRotatingFileHandler` to the ``synodic_client``
     and ``porringer`` loggers and configures :func:`logging.basicConfig`
     for ``INFO`` level output on *stderr*.
+
+    Safe to call more than once — subsequent calls are no-ops.
     """
+    app_logger = logging.getLogger('synodic_client')
+
+    # Guard: skip if already configured (e.g. by bootstrap.py)
+    if any(isinstance(h, EagerRotatingFileHandler) for h in app_logger.handlers):
+        return
+
     logging.basicConfig(level=logging.INFO)
 
     handler = EagerRotatingFileHandler(
@@ -63,22 +67,8 @@ def configure_logging() -> None:
     )
     handler.setFormatter(logging.Formatter(_FORMAT))
 
-    app_logger = logging.getLogger('synodic_client')
     app_logger.addHandler(handler)
 
     porringer_logger = logging.getLogger('porringer')
     porringer_logger.addHandler(handler)
     porringer_logger.setLevel(logging.INFO)
-
-
-def open_log() -> None:
-    """Open the log file in the system's default editor.
-
-    Creates an empty file if one does not yet exist so that the OS always
-    has something to open.
-    """
-    path = log_path()
-    if not path.exists():
-        path.touch()
-
-    QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))

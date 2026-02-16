@@ -5,7 +5,6 @@ from typing import Annotated
 import typer
 
 from synodic_client import __version__
-from synodic_client.application.qt import application
 
 app = typer.Typer(
     name='synodic-c',
@@ -38,4 +37,6 @@ def main(
     ] = False,
 ) -> None:
     """Launch the Synodic Client GUI application."""
+    from synodic_client.application.qt import application  # noqa: PLC0415
+
     application(uri=uri, dev_mode=dev)

@@ -5,12 +5,12 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+from synodic_client.application.screen.tray import TrayScreen
 from synodic_client.config import set_dev_mode
 from synodic_client.logging import (
     EagerRotatingFileHandler,
     configure_logging,
     log_path,
-    open_log,
 )
 
 
@@ -106,31 +106,31 @@ class TestConfigureLogging:
 
 
 class TestOpenLog:
-    """Tests for open_log()."""
+    """Tests for TrayScreen._open_log()."""
 
     @staticmethod
     def test_creates_file_if_missing(tmp_path: Path) -> None:
-        """open_log() should create the log file when it does not exist."""
+        """_open_log() should create the log file when it does not exist."""
         log_file = tmp_path / 'synodic.log'
         assert not log_file.exists()
 
         with (
-            patch('synodic_client.logging.log_path', return_value=log_file),
-            patch('synodic_client.logging.QDesktopServices') as mock_ds,
+            patch('synodic_client.application.screen.tray.log_path', return_value=log_file),
+            patch('synodic_client.application.screen.tray.QDesktopServices') as mock_ds,
         ):
-            open_log()
+            TrayScreen._open_log()
             assert log_file.exists()
             mock_ds.openUrl.assert_called_once()
 
     @staticmethod
     def test_opens_existing_file(tmp_path: Path) -> None:
-        """open_log() should open an existing log file without error."""
+        """_open_log() should open an existing log file without error."""
         log_file = tmp_path / 'synodic.log'
         log_file.write_text('existing content', encoding='utf-8')
 
         with (
-            patch('synodic_client.logging.log_path', return_value=log_file),
-            patch('synodic_client.logging.QDesktopServices') as mock_ds,
+            patch('synodic_client.application.screen.tray.log_path', return_value=log_file),
+            patch('synodic_client.application.screen.tray.QDesktopServices') as mock_ds,
         ):
-            open_log()
+            TrayScreen._open_log()
             mock_ds.openUrl.assert_called_once()

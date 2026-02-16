@@ -33,7 +33,7 @@ _PLATFORM_SUFFIXES: dict[str, str] = {
 }
 
 
-def _platform_suffix() -> str:
+def platform_suffix() -> str:
     """Return the Velopack channel suffix for the current platform."""
     try:
         return _PLATFORM_SUFFIXES[sys.platform]
@@ -104,8 +104,8 @@ class UpdateConfig:
         so each OS has its own release manifest and nupkg files.
         """
         base = 'dev' if self.channel == UpdateChannel.DEVELOPMENT else 'stable'
-        platform_suffix = _platform_suffix()
-        return f'{base}-{platform_suffix}'
+        suffix = platform_suffix()
+        return f'{base}-{suffix}'
 
 
 class Updater:

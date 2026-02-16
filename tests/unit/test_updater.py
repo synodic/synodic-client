@@ -14,8 +14,8 @@ from synodic_client.updater import (
     UpdateInfo,
     Updater,
     UpdateState,
-    _platform_suffix,
     initialize_velopack,
+    platform_suffix,
 )
 
 
@@ -127,13 +127,13 @@ class TestUpdateConfig:
     def test_channel_name_stable() -> None:
         """Verify STABLE channel returns platform-specific 'stable' name."""
         config = UpdateConfig(channel=UpdateChannel.STABLE)
-        assert config.channel_name == f'stable-{_platform_suffix()}'
+        assert config.channel_name == f'stable-{platform_suffix()}'
 
     @staticmethod
     def test_channel_name_development() -> None:
         """Verify DEVELOPMENT channel returns platform-specific 'dev' name."""
         config = UpdateConfig(channel=UpdateChannel.DEVELOPMENT)
-        assert config.channel_name == f'dev-{_platform_suffix()}'
+        assert config.channel_name == f'dev-{platform_suffix()}'
 
 
 @pytest.fixture

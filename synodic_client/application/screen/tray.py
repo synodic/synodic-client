@@ -6,8 +6,8 @@ from pathlib import Path
 
 from porringer.api import API
 from porringer.schema import SetupParameters, SyncStrategy
-from PySide6.QtCore import QThread, QTimer, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -29,7 +29,7 @@ from synodic_client.application.screen.screen import MainWindow
 from synodic_client.application.theme import UPDATE_SOURCE_DIALOG_MIN_WIDTH
 from synodic_client.client import Client
 from synodic_client.config import GlobalConfiguration
-from synodic_client.logging import open_log
+from synodic_client.logging import log_path
 from synodic_client.resolution import resolve_config, resolve_enabled_plugins, resolve_update_config, update_and_resolve
 from synodic_client.updater import GITHUB_REPO_URL, UpdateChannel, UpdateInfo
 
@@ -281,7 +281,7 @@ class TrayScreen:
         self.settings_menu.addSeparator()
 
         self.open_log_action = QAction('Open Log...', self.settings_menu)
-        self.open_log_action.triggered.connect(open_log)
+        self.open_log_action.triggered.connect(self._open_log)
         self.settings_menu.addAction(self.open_log_action)
 
         self.menu.addSeparator()
@@ -293,6 +293,14 @@ class TrayScreen:
         self.tray.setContextMenu(self.menu)
 
     # -- Config helpers --
+
+    @staticmethod
+    def _open_log() -> None:
+        """Open the log file in the system's default editor."""
+        path = log_path()
+        if not path.exists():
+            path.touch()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _resolve_config(self) -> GlobalConfiguration:
         """Return the injected config or resolve from disk."""

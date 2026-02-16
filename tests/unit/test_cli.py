@@ -33,7 +33,7 @@ class TestCli:
     @staticmethod
     def test_launches_application_without_uri() -> None:
         """Verify invoking with no args calls application(uri=None, dev_mode=False)."""
-        with patch('synodic_client.cli.application') as mock_app:
+        with patch('synodic_client.application.qt.application') as mock_app:
             result = runner.invoke(app, [])
             assert result.exit_code == 0
             mock_app.assert_called_once_with(uri=None, dev_mode=False)
@@ -42,7 +42,7 @@ class TestCli:
     def test_launches_application_with_uri() -> None:
         """Verify invoking with a URI passes it to application()."""
         test_uri = 'synodic://install?manifest=https://example.com/foo.json'
-        with patch('synodic_client.cli.application') as mock_app:
+        with patch('synodic_client.application.qt.application') as mock_app:
             result = runner.invoke(app, [test_uri])
             assert result.exit_code == 0
             mock_app.assert_called_once_with(uri=test_uri, dev_mode=False)
@@ -50,7 +50,7 @@ class TestCli:
     @staticmethod
     def test_launches_application_with_dev_flag() -> None:
         """Verify --dev flag sets dev_mode=True."""
-        with patch('synodic_client.cli.application') as mock_app:
+        with patch('synodic_client.application.qt.application') as mock_app:
             result = runner.invoke(app, ['--dev'])
             assert result.exit_code == 0
             mock_app.assert_called_once_with(uri=None, dev_mode=True)

@@ -37,7 +37,7 @@ hiddenimports += [
 ]
 
 a = Analysis(
-    [str(REPO_ROOT / 'synodic_client' / 'application' / 'qt.py')],
+    [str(REPO_ROOT / 'synodic_client' / 'application' / 'bootstrap.py')],
     pathex=[],
     binaries=[],
     datas=datas,
