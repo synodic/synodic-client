@@ -3,11 +3,9 @@
 import ctypes
 import logging
 import signal
-import subprocess
 import sys
 import types
 from collections.abc import Callable
-from typing import Any
 
 from porringer.api import API
 from porringer.schema import LocalConfiguration
@@ -63,28 +61,6 @@ def _process_uri(uri: str, handler: Callable[[str], None]) -> None:
         manifests = parsed_data.get('manifest')
         if isinstance(manifests, list) and manifests:
             handler(manifests[0])
-
-
-def _suppress_subprocess_consoles() -> None:
-    """Monkey-patch ``subprocess.Popen`` to hide console windows on Windows.
-
-    When the application is built as a windowed executable (``console=False``
-    in PyInstaller), every ``subprocess.Popen`` call that launches a console
-    program (pip, pipx, uv, winget, etc.) would briefly flash a visible
-    console window.  This patch adds ``CREATE_NO_WINDOW`` to *creationflags*
-    for all calls that don't already set it, suppressing those flashes.
-    """
-    if sys.platform != 'win32':
-        return
-
-    _original_init = subprocess.Popen.__init__
-
-    def _patched_init(self: subprocess.Popen, *args: Any, **kwargs: Any) -> None:
-        if 'creationflags' not in kwargs:
-            kwargs['creationflags'] = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-        _original_init(self, *args, **kwargs)
-
-    subprocess.Popen.__init__ = _patched_init
 
 
 def _install_exception_hook(logger: logging.Logger) -> None:
@@ -146,12 +122,10 @@ def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
     # Activate dev-mode namespacing before anything reads config paths.
     set_dev_mode(dev_mode)
 
-    # Suppress console window flashes from subprocess calls (e.g. porringer
-    # running pip, pipx, uv) before any subprocesses are spawned.  Skipped
-    # in dev mode because the source-run process already has a console.
     if not dev_mode:
-        _suppress_subprocess_consoles()
-        # Initialize Velopack early, before any UI
+        # Initialize Velopack early, before any UI.
+        # Console window suppression for subprocesses is handled by the
+        # PyInstaller runtime hook (rthook_no_console.py).
         initialize_velopack()
         register_protocol(sys.executable)
 

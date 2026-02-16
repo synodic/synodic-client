@@ -17,7 +17,15 @@ _PROTOCOL_DESCRIPTION = 'Synodic Client Protocol'
 
 
 if sys.platform == 'win32':
+    import ctypes
     import winreg
+
+    # Bind RegDeleteTreeW for recursive registry key deletion in a single call.
+    _reg_delete_tree = ctypes.windll.advapi32.RegDeleteTreeW
+    _reg_delete_tree.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+    _reg_delete_tree.restype = ctypes.c_long
+
+    _ERROR_FILE_NOT_FOUND = 2
 
     def register_protocol(exe_path: str) -> None:
         """Register the ``synodic://`` URI protocol handler.
@@ -44,30 +52,13 @@ if sys.platform == 'win32':
         """Remove the ``synodic://`` URI protocol handler registration."""
         key_path = f'Software\\Classes\\{PROTOCOL_NAME}'
 
-        try:
-            _delete_key_recursive(winreg.HKEY_CURRENT_USER, key_path)
+        result = _reg_delete_tree(winreg.HKEY_CURRENT_USER, key_path)
+        if result == 0:
             logger.info('Removed synodic:// protocol handler registration')
-        except FileNotFoundError:
+        elif result == _ERROR_FILE_NOT_FOUND:
             logger.debug('Protocol handler registration not found, nothing to remove')
-        except OSError:
-            logger.exception('Failed to remove synodic:// protocol handler')
-
-    def _delete_key_recursive(root: int, key_path: str) -> None:
-        """Recursively delete a registry key and all its subkeys.
-
-        Args:
-            root: Registry root (e.g. ``winreg.HKEY_CURRENT_USER``).
-            key_path: Path to the key to delete.
-        """
-        with winreg.OpenKey(root, key_path, 0, winreg.KEY_ALL_ACCESS) as key:
-            while True:
-                try:
-                    subkey_name = winreg.EnumKey(key, 0)
-                    _delete_key_recursive(root, f'{key_path}\\{subkey_name}')
-                except OSError:
-                    break
-
-        winreg.DeleteKey(root, key_path)
+        else:
+            logger.error('Failed to remove synodic:// protocol handler (error code %d)', result)
 
 else:
 

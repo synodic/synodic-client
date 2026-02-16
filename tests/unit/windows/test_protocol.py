@@ -70,7 +70,7 @@ class TestRemoveProtocol:
     @staticmethod
     def test_deletes_registry_key() -> None:
         """Verify the protocol key is deleted."""
-        with patch('synodic_client.protocol._delete_key_recursive') as mock_delete:
+        with patch('synodic_client.protocol._reg_delete_tree', return_value=0) as mock_delete:
             remove_protocol()
 
         mock_delete.assert_called_once_with(
@@ -81,10 +81,7 @@ class TestRemoveProtocol:
     @staticmethod
     def test_handles_missing_key_gracefully() -> None:
         """Verify no error when protocol key doesn't exist."""
-        with patch(
-            'synodic_client.protocol._delete_key_recursive',
-            side_effect=FileNotFoundError,
-        ):
+        with patch('synodic_client.protocol._reg_delete_tree', return_value=2):  # ERROR_FILE_NOT_FOUND
             # Should not raise
             remove_protocol()
 

@@ -68,7 +68,6 @@ quote-style = "single"
 skip_empty = true
 
 [tool.pyrefly]
-replace_imports_with_any = ["velopack"]
 
 [tool.pdm.version]
 source = "scm"

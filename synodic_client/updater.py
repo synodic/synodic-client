@@ -14,10 +14,8 @@ from dataclasses import dataclass, field
 from enum import Enum, StrEnum, auto
 from typing import Any
 
+import velopack  # type: ignore[import]
 from packaging.version import Version
-from velopack import App as _VelopackApp
-from velopack import UpdateManager as _UpdateManager
-from velopack import UpdateOptions as _UpdateOptions
 
 from synodic_client.protocol import register_protocol, remove_protocol
 
@@ -296,11 +294,11 @@ class Updater:
             return self._velopack_manager
 
         try:
-            options = _UpdateOptions()
+            options = velopack.UpdateOptions()
             options.allow_version_downgrade = False
             options.explicit_channel = self._config.channel_name
 
-            self._velopack_manager = _UpdateManager(
+            self._velopack_manager = velopack.UpdateManager(
                 self._config.repo_url,
                 options,
             )
@@ -342,7 +340,7 @@ def initialize_velopack() -> None:
     On Windows, install/uninstall hooks register the ``synodic://`` URI protocol.
     """
     try:
-        app = _VelopackApp()
+        app = velopack.App()
         app.on_after_install_fast_callback(_on_after_install)
         app.on_before_uninstall_fast_callback(_on_before_uninstall)
         app.run()
