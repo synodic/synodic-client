@@ -122,16 +122,18 @@ def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
     # Activate dev-mode namespacing before anything reads config paths.
     set_dev_mode(dev_mode)
 
+    # Configure logging before Velopack so install/uninstall hooks and
+    # first-run diagnostics are captured in the log file.
+    configure_logging()
+    logger = logging.getLogger('synodic_client')
+    _install_exception_hook(logger)
+
     if not dev_mode:
         # Initialize Velopack early, before any UI.
         # Console window suppression for subprocesses is handled by the
         # PyInstaller runtime hook (rthook_no_console.py).
         initialize_velopack()
         register_protocol(sys.executable)
-
-    configure_logging()
-    logger = logging.getLogger('synodic_client')
-    _install_exception_hook(logger)
 
     if uri:
         logger.info('Received URI: %s', uri)

@@ -104,6 +104,13 @@ class Updater:
         self._velopack_manager: Any = None
         self._velopack_not_installed: bool = False
 
+        logger.info(
+            'Updater created: version=%s, channel=%s, repo=%s',
+            self._current_version,
+            self._config.channel_name,
+            self._config.repo_url,
+        )
+
     @property
     def state(self) -> UpdateState:
         """Current state of the update process."""
@@ -193,6 +200,7 @@ class Updater:
             return False
 
         self._state = UpdateState.DOWNLOADING
+        logger.info('Starting update download for %s', self._update_info._velopack_info)
 
         try:
             manager = self._get_velopack_manager()
@@ -323,6 +331,12 @@ class Updater:
                 self._config.repo_url,
                 options,
             )
+            logger.debug(
+                'Velopack manager created: app_id=%s, version=%s, portable=%s',
+                self._velopack_manager.get_app_id(),
+                self._velopack_manager.get_current_version(),
+                self._velopack_manager.get_is_portable(),
+            )
             return self._velopack_manager
         except RuntimeError as e:
             if self._NOT_INSTALLED_SENTINEL in str(e).lower():
@@ -336,7 +350,7 @@ class Updater:
             raise RuntimeError(f'Failed to create Velopack UpdateManager: {e}') from e
 
 
-def _on_before_uninstall(version: str) -> None:  # noqa: ARG001
+def _on_before_uninstall(version: str) -> None:
     """Velopack hook: called before the app is uninstalled.
 
     Removes the ``synodic://`` URI protocol handler registration.
@@ -344,10 +358,12 @@ def _on_before_uninstall(version: str) -> None:  # noqa: ARG001
     Args:
         version: The current version string (provided by Velopack).
     """
+    logger.info('Velopack uninstall hook fired for version %s', version)
     try:
         remove_protocol()
+        logger.info('Protocol handler removed successfully')
     except Exception:
-        logger.debug('Protocol removal failed during uninstall hook', exc_info=True)
+        logger.warning('Protocol removal failed during uninstall hook', exc_info=True)
 
 
 def initialize_velopack() -> None:
@@ -360,10 +376,11 @@ def initialize_velopack() -> None:
     On Windows, the uninstall hook removes the ``synodic://`` URI protocol.
     Protocol registration happens on every app launch (see ``qt.application``).
     """
+    logger.info('Initializing Velopack (exe=%s)', sys.executable)
     try:
         app = velopack.App()
         app.on_before_uninstall_fast_callback(_on_before_uninstall)
         app.run()
-        logger.debug('Velopack initialized')
+        logger.info('Velopack initialized successfully')
     except Exception as e:
-        logger.debug('Velopack initialization skipped: %s', e)
+        logger.info('Velopack initialization skipped (not a Velopack install): %s', e)
