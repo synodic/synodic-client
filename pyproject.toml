@@ -68,6 +68,7 @@ quote-style = "single"
 skip_empty = true
 
 [tool.pyrefly]
+replace-imports-with-any = ["velopack", "winreg"]
 
 [tool.pdm.version]
 source = "scm"

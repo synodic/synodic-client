@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from enum import Enum, StrEnum, auto
 from typing import Any
 
-import velopack  # type: ignore[import]
+import velopack
 from packaging.version import Version
 
 from synodic_client.protocol import register_protocol, remove_protocol
