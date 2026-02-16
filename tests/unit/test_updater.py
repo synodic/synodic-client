@@ -179,7 +179,6 @@ class TestUpdater:
     @staticmethod
     def test_is_installed_not_velopack(updater: Updater) -> None:
         """Verify is_installed returns False in test environment."""
-        # Tests run in non-Velopack environment
         with patch.object(updater, '_get_velopack_manager', return_value=None):
             assert updater.is_installed is False
 
@@ -191,9 +190,9 @@ class TestUpdater:
             assert updater.is_installed is True
 
     @staticmethod
-    def test_is_installed_handles_exception(updater: Updater) -> None:
-        """Verify is_installed returns False when exception occurs."""
-        with patch.object(updater, '_get_velopack_manager', side_effect=Exception('Test')):
+    def test_is_installed_handles_runtime_error(updater: Updater) -> None:
+        """Verify is_installed returns False when RuntimeError is raised."""
+        with patch.object(updater, '_get_velopack_manager', side_effect=RuntimeError('fail')):
             assert updater.is_installed is False
 
 
@@ -454,3 +453,67 @@ class TestInitializeVelopack:
         with patch('synodic_client.updater.velopack.App', return_value=mock_app):
             # Should not raise
             initialize_velopack()
+
+
+class TestGetVelopackManager:
+    """Tests for _get_velopack_manager install detection via the SDK."""
+
+    _PATCH_OPTIONS = patch('synodic_client.updater.velopack.UpdateOptions')
+
+    @staticmethod
+    def test_not_installed_returns_none(updater: Updater) -> None:
+        """Verify manager returns None when SDK says 'not properly installed'."""
+        error = RuntimeError('This application is not properly installed: Could not auto-locate app manifest')
+        with (
+            TestGetVelopackManager._PATCH_OPTIONS,
+            patch('synodic_client.updater.velopack.UpdateManager', side_effect=error),
+        ):
+            assert updater._get_velopack_manager() is None
+
+    @staticmethod
+    def test_not_installed_sentinel_cached(updater: Updater) -> None:
+        """Verify that once detected as not-installed, the SDK is not called again."""
+        error = RuntimeError('This application is not properly installed')
+        with (
+            TestGetVelopackManager._PATCH_OPTIONS,
+            patch('synodic_client.updater.velopack.UpdateManager', side_effect=error) as mock_cls,
+        ):
+            updater._get_velopack_manager()
+            updater._get_velopack_manager()
+            mock_cls.assert_called_once()
+
+    @staticmethod
+    def test_real_error_propagates(updater: Updater) -> None:
+        """Verify non-install RuntimeErrors propagate instead of returning None."""
+        error = RuntimeError('Some other SDK failure')
+        with (
+            TestGetVelopackManager._PATCH_OPTIONS,
+            patch('synodic_client.updater.velopack.UpdateManager', side_effect=error),
+            pytest.raises(RuntimeError, match='Some other SDK failure'),
+        ):
+            updater._get_velopack_manager()
+
+    @staticmethod
+    def test_non_runtime_error_propagates(updater: Updater) -> None:
+        """Verify non-RuntimeError exceptions are wrapped and propagated."""
+        error = ValueError('bad config')
+        with (
+            TestGetVelopackManager._PATCH_OPTIONS,
+            patch('synodic_client.updater.velopack.UpdateManager', side_effect=error),
+            pytest.raises(RuntimeError, match='Failed to create Velopack UpdateManager'),
+        ):
+            updater._get_velopack_manager()
+
+    @staticmethod
+    def test_success_caches_manager(updater: Updater) -> None:
+        """Verify successful manager creation is cached."""
+        mock_manager = MagicMock()
+        with (
+            TestGetVelopackManager._PATCH_OPTIONS,
+            patch('synodic_client.updater.velopack.UpdateManager', return_value=mock_manager) as mock_cls,
+        ):
+            result1 = updater._get_velopack_manager()
+            result2 = updater._get_velopack_manager()
+            assert result1 is mock_manager
+            assert result2 is mock_manager
+            mock_cls.assert_called_once()

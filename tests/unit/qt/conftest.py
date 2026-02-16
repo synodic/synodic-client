@@ -7,4 +7,4 @@ skipped automatically.
 
 import pytest
 
-pytest.importorskip("PySide6.QtWidgets", reason="PySide6 requires system Qt libraries")
+pytest.importorskip('PySide6.QtWidgets', reason='PySide6 requires system Qt libraries')

@@ -102,6 +102,7 @@ class Updater:
         self._state = UpdateState.NO_UPDATE
         self._update_info: UpdateInfo | None = None
         self._velopack_manager: Any = None
+        self._velopack_not_installed: bool = False
 
     @property
     def state(self) -> UpdateState:
@@ -110,12 +111,17 @@ class Updater:
 
     @property
     def is_installed(self) -> bool:
-        """Check if running as a Velopack-installed application."""
+        """Check if running as a Velopack-installed application.
+
+        Delegates to ``_get_velopack_manager`` which creates the
+        ``UpdateManager``.  The SDK constructor raises ``RuntimeError``
+        with *"not properly installed"* when no Velopack manifest is
+        found; that specific error is treated as "not installed" while
+        all other failures propagate.
+        """
         try:
-            manager = self._get_velopack_manager()
-            # If we can get the manager and it has a version, we're installed
-            return manager is not None
-        except Exception:
+            return self._get_velopack_manager() is not None
+        except RuntimeError:
             return False
 
     def check_for_update(self) -> UpdateInfo:
@@ -284,28 +290,50 @@ class Updater:
             self._update_info.error = str(e)
             raise
 
+    _NOT_INSTALLED_SENTINEL = 'not properly installed'
+    """Substring the Velopack SDK includes in its ``RuntimeError`` when
+    the application was not installed via Velopack."""
+
     def _get_velopack_manager(self) -> Any:
         """Get or create the Velopack UpdateManager.
 
         Returns:
-            UpdateManager instance, or None if not installed via Velopack
+            UpdateManager instance, or ``None`` when the application is
+            not running from a Velopack installation.
+
+        Raises:
+            RuntimeError: If the ``UpdateManager`` could not be created
+                for a reason *other* than the app not being installed
+                (e.g. a genuine SDK or configuration problem).
         """
         if self._velopack_manager is not None:
             return self._velopack_manager
 
+        if self._velopack_not_installed:
+            return None
+
         try:
-            options = velopack.UpdateOptions()
-            options.allow_version_downgrade = False
-            options.explicit_channel = self._config.channel_name
+            options = velopack.UpdateOptions(
+                AllowVersionDowngrade=False,
+                MaximumDeltasBeforeFallback=0,
+            )
+            options.ExplicitChannel = self._config.channel_name
 
             self._velopack_manager = velopack.UpdateManager(
                 self._config.repo_url,
                 options,
             )
             return self._velopack_manager
+        except RuntimeError as e:
+            if self._NOT_INSTALLED_SENTINEL in str(e).lower():
+                logger.debug('Not a Velopack install: %s', e)
+                self._velopack_not_installed = True
+                return None
+            logger.warning('Velopack manager creation failed: %s', e)
+            raise
         except Exception as e:
-            logger.debug('Failed to create Velopack manager: %s', e)
-            return None
+            logger.warning('Velopack manager creation failed: %s', e)
+            raise RuntimeError(f'Failed to create Velopack UpdateManager: {e}') from e
 
 
 def _on_before_uninstall(version: str) -> None:  # noqa: ARG001
