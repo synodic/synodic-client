@@ -393,13 +393,16 @@ def initialize_velopack() -> None:
     before any UI is shown. Velopack may need to perform cleanup or apply
     pending updates.
 
-    On Windows, the uninstall hook removes the ``synodic://`` URI protocol.
     Protocol registration happens on every app launch (see ``qt.application``).
+
+    .. note::
+
+        The SDK's callback hooks only accept ``PyCFunction`` — add an
+        uninstall hook here when that is fixed upstream.
     """
     logger.info('Initializing Velopack (exe=%s)', sys.executable)
     try:
         app = velopack.App()
-        app.on_before_uninstall_fast_callback(_on_before_uninstall)
         app.run()
         logger.info('Velopack initialized successfully')
     except Exception as e:
