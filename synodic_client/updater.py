@@ -17,7 +17,7 @@ from typing import Any
 import velopack
 from packaging.version import Version
 
-from synodic_client.protocol import register_protocol, remove_protocol
+from synodic_client.protocol import remove_protocol
 
 logger = logging.getLogger(__name__)
 
@@ -308,17 +308,6 @@ class Updater:
             return None
 
 
-def _on_after_install(version: str) -> None:  # noqa: ARG001
-    """Velopack hook: called after the app is installed.
-
-    Registers the ``synodic://`` URI protocol handler.
-
-    Args:
-        version: The installed version string (provided by Velopack).
-    """
-    register_protocol(sys.executable)
-
-
 def _on_before_uninstall(version: str) -> None:  # noqa: ARG001
     """Velopack hook: called before the app is uninstalled.
 
@@ -327,7 +316,10 @@ def _on_before_uninstall(version: str) -> None:  # noqa: ARG001
     Args:
         version: The current version string (provided by Velopack).
     """
-    remove_protocol()
+    try:
+        remove_protocol()
+    except Exception:
+        logger.debug('Protocol removal failed during uninstall hook', exc_info=True)
 
 
 def initialize_velopack() -> None:
@@ -337,11 +329,11 @@ def initialize_velopack() -> None:
     before any UI is shown. Velopack may need to perform cleanup or apply
     pending updates.
 
-    On Windows, install/uninstall hooks register the ``synodic://`` URI protocol.
+    On Windows, the uninstall hook removes the ``synodic://`` URI protocol.
+    Protocol registration happens on every app launch (see ``qt.application``).
     """
     try:
         app = velopack.App()
-        app.on_after_install_fast_callback(_on_after_install)
         app.on_before_uninstall_fast_callback(_on_before_uninstall)
         app.run()
         logger.debug('Velopack initialized')
