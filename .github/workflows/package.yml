@@ -60,7 +60,8 @@ jobs:
                   vpk download github \
                     --repoUrl https://github.com/${{ github.repository }} \
                     --channel ${{ inputs.channel }} \
-                    --token ${{ secrets.GITHUB_TOKEN }}
+                    --token ${{ secrets.GITHUB_TOKEN }} \
+                    ${{ inputs.channel == 'dev' && '--pre' || '' }}
 
             - name: Install libfuse2 for AppImage
               if: contains(matrix.artifact, 'linux')

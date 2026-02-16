@@ -94,34 +94,50 @@ jobs:
           name: velopack-releases
           path: releases
 
-      - name: Delete existing dev release
+      - name: Setup .NET
         if: needs.get-version.outputs.is-dev == 'true'
-        run: gh release delete dev --cleanup-tag -y || true
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0"
+
+      - name: Install Velopack CLI
+        if: needs.get-version.outputs.is-dev == 'true'
+        run: dotnet tool install -g vpk
+
+      - name: Upload dev release via Velopack
+        if: needs.get-version.outputs.is-dev == 'true'
+        run: |
+          vpk upload github \
+            --repoUrl https://github.com/${{ github.repository }} \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --tag dev \
+            --releaseName "Development Build" \
+            --pre \
+            --publish \
+            --merge \
+            --channel dev \
+            --outputDir releases
+
+      - name: Update dev release notes
+        if: needs.get-version.outputs.is-dev == 'true'
+        run: |
+          gh release edit dev --prerelease --notes "$(cat <<'EOF'
+          **Latest Development Build**
+
+          Version: `${{ needs.get-version.outputs.version }}`
+          Commit: `${{ github.sha }}`
+
+          ⚠️ This is a development build and may be unstable.
+
+          ## Installation
+          - **Windows**: Download `synodic-Setup.exe` and run it
+          - **Linux**: Download the `.AppImage` file, make it executable with `chmod +x`, and run
+          - **macOS**: Download and extract the package
+          EOF
+          )"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-
-      - name: Create dev release
-        if: needs.get-version.outputs.is-dev == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: dev
-          name: "Development Build"
-          prerelease: true
-          make_latest: false
-          files: releases/*
-          body: |
-            **Latest Development Build**
-
-            Version: `${{ needs.get-version.outputs.version }}`
-            Commit: `${{ github.sha }}`
-
-            ⚠️ This is a development build and may be unstable.
-
-            ## Installation
-            - **Windows**: Download `synodic-Setup.exe` and run it
-            - **Linux**: Download the `.AppImage` file, make it executable with `chmod +x`, and run
-            - **macOS**: Download and extract the package
 
       - name: Upload to existing release
         if: needs.get-version.outputs.is-dev != 'true' && github.event_name == 'release'

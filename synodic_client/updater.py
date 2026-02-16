@@ -323,7 +323,6 @@ class Updater:
         try:
             options = velopack.UpdateOptions(
                 AllowVersionDowngrade=False,
-                MaximumDeltasBeforeFallback=0,
             )
             options.ExplicitChannel = self._config.channel_name
 
