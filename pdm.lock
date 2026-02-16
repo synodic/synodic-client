@@ -5,7 +5,7 @@
 groups = ["default", "build", "lint", "test"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:bd9e98e0d50e1c54a0b99a288604b6f0abff6018bd52d4bf2caced3e73927265"
+content_hash = "sha256:aa8731ea981ed6883f7863dd41759ff250b8f136de4263acbfd2661d09f7a3b3"
 
 [[metadata.targets]]
 requires_python = ">=3.14,<3.15"
@@ -272,7 +272,7 @@ files = [
 
 [[package]]
 name = "porringer"
-version = "0.2.1.dev20"
+version = "0.2.1.dev21"
 requires_python = ">=3.14"
 summary = ""
 groups = ["default"]
@@ -285,8 +285,8 @@ dependencies = [
     "userpath>=1.9.2",
 ]
 files = [
-    {file = "porringer-0.2.1.dev20-py3-none-any.whl", hash = "sha256:a3ba824b3ba96b35c7dca722e8fe666b292d380572f7afc323ee573f9e38f3b1"},
-    {file = "porringer-0.2.1.dev20.tar.gz", hash = "sha256:7ea53736631ceb92657ee23eb6993bd377a48dba0c4bd53ea41e23956323b7c3"},
+    {file = "porringer-0.2.1.dev21-py3-none-any.whl", hash = "sha256:4dcf4b653873b8322a49b0902aeef2a5edf20d4cf66c80ed92d1b206e4eb4970"},
+    {file = "porringer-0.2.1.dev21.tar.gz", hash = "sha256:c6fc3f8a7a938bcc032b5ca4603957d68ab24f370691759c9718f813665860a7"},
 ]
 
 [[package]]
@@ -619,34 +619,34 @@ files = [
 
 [[package]]
 name = "typer"
-version = "0.23.1"
-requires_python = ">=3.9"
+version = "0.24.0"
+requires_python = ">=3.10"
 summary = "Typer, build great CLIs. Easy to code. Based on Python type hints."
 groups = ["default"]
 dependencies = [
     "annotated-doc>=0.0.2",
-    "click>=8.0.0",
-    "rich>=10.11.0",
+    "click>=8.2.1",
+    "rich>=12.3.0",
     "shellingham>=1.3.0",
 ]
 files = [
-    {file = "typer-0.23.1-py3-none-any.whl", hash = "sha256:3291ad0d3c701cbf522012faccfbb29352ff16ad262db2139e6b01f15781f14e"},
-    {file = "typer-0.23.1.tar.gz", hash = "sha256:2070374e4d31c83e7b61362fd859aa683576432fd5b026b060ad6b4cd3b86134"},
+    {file = "typer-0.24.0-py3-none-any.whl", hash = "sha256:5fc435a9c8356f6160ed6e85a6301fdd6e3d8b2851da502050d1f92c5e9eddc8"},
+    {file = "typer-0.24.0.tar.gz", hash = "sha256:f9373dc4eff901350694f519f783c29b6d7a110fc0dcc11b1d7e353b85ca6504"},
 ]
 
 [[package]]
 name = "typer"
-version = "0.23.1"
+version = "0.24.0"
 extras = ["all"]
-requires_python = ">=3.9"
+requires_python = ">=3.10"
 summary = "Typer, build great CLIs. Easy to code. Based on Python type hints."
 groups = ["default"]
 dependencies = [
-    "typer==0.23.1",
+    "typer==0.24.0",
 ]
 files = [
-    {file = "typer-0.23.1-py3-none-any.whl", hash = "sha256:3291ad0d3c701cbf522012faccfbb29352ff16ad262db2139e6b01f15781f14e"},
-    {file = "typer-0.23.1.tar.gz", hash = "sha256:2070374e4d31c83e7b61362fd859aa683576432fd5b026b060ad6b4cd3b86134"},
+    {file = "typer-0.24.0-py3-none-any.whl", hash = "sha256:5fc435a9c8356f6160ed6e85a6301fdd6e3d8b2851da502050d1f92c5e9eddc8"},
+    {file = "typer-0.24.0.tar.gz", hash = "sha256:f9373dc4eff901350694f519f783c29b6d7a110fc0dcc11b1d7e353b85ca6504"},
 ]
 
 [[package]]

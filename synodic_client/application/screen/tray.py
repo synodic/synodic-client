@@ -108,13 +108,13 @@ class ToolUpdateWorker(QThread):
             directories = self._porringer.cache.list_directories()
             count = 0
             for directory in directories:
-                manifest = Path(directory.path) / 'porringer.json'
-                if not manifest.exists():
-                    logger.debug('Skipping missing manifest: %s', manifest)
+                path = Path(directory.path)
+                if not self._porringer.sync.has_manifest(path):
+                    logger.debug('Skipping path without manifest: %s', path)
                     continue
                 params = SetupParameters(
-                    paths=[manifest],
-                    project_directory=Path(directory.path),
+                    paths=[path],
+                    project_directory=path if path.is_dir() else None,
                     strategy=SyncStrategy.LATEST,
                     plugins=self._plugins,
                 )

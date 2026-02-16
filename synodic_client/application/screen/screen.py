@@ -1,15 +1,12 @@
 """Screen class for the Synodic Client application."""
 
-from __future__ import annotations
-
 import logging
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from porringer.api import API
-from porringer.schema import PluginInfo, PluginKind
+from porringer.schema import DirectoryValidationResult, ManifestDirectory, PluginInfo, PluginKind, SetupResults
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import (
@@ -45,9 +42,6 @@ from synodic_client.application.theme import (
     PLUGIN_UPDATE_STYLE,
 )
 from synodic_client.config import GlobalConfiguration, save_config
-
-if TYPE_CHECKING:
-    from porringer.schema import ManifestDirectory
 
 logger = logging.getLogger(__name__)
 
@@ -534,24 +528,23 @@ class ProjectsView(QWidget):
         current_text = self._combo.currentText()
         self._combo.clear()
 
-        directories = self._porringer.cache.list_directories()
-        for directory in directories:
+        results: list[DirectoryValidationResult] = self._porringer.cache.validate_directories(check_manifest=True)
+        for result in results:
+            directory = result.directory
             display = str(directory.path)
             tooltip = directory.name or ''
-            exists = Path(directory.path).is_dir()
 
             idx = self._combo.count()
             self._combo.addItem(display)
             self._combo.setItemData(idx, tooltip, Qt.ItemDataRole.ToolTipRole)
             self._combo.setItemData(idx, str(directory.path), Qt.ItemDataRole.UserRole)
 
-            if not exists:
-                # Grey out entries whose directory no longer exists on disk
-                model = self._combo.model()
-                item = model.item(idx) if hasattr(model, 'item') else None
-                if isinstance(item, QStandardItem):
-                    item.setForeground(self.palette().placeholderText())
-                    item.setToolTip(f'{tooltip} \u2014 directory not found' if tooltip else 'Directory not found')
+            if not result.exists:
+                # Grey out entries whose path no longer exists on disk
+                self._grey_out_item(idx, tooltip, 'Path not found')
+            elif result.has_manifest is False:
+                # Dim entries where the path exists but no manifest is found
+                self._grey_out_item(idx, tooltip, 'No manifest found')
 
         # Restore previous selection if it still exists
         idx = self._combo.findText(current_text)
@@ -567,6 +560,14 @@ class ProjectsView(QWidget):
         if self._combo.currentText():
             self._load_preview()
 
+    def _grey_out_item(self, idx: int, tooltip: str, reason: str) -> None:
+        """Grey out a combo box item and append a reason to its tooltip."""
+        model = self._combo.model()
+        item = model.item(idx) if hasattr(model, 'item') else None
+        if isinstance(item, QStandardItem):
+            item.setForeground(self.palette().placeholderText())
+            item.setToolTip(f'{tooltip} \u2014 {reason}' if tooltip else reason)
+
     # --- Event handlers ---
 
     def _on_selection_changed(self, _index: int) -> None:
@@ -576,12 +577,14 @@ class ProjectsView(QWidget):
             self._load_preview()
 
     def _on_browse(self) -> None:
-        """Open a directory picker and set the combo text."""
-        chosen = QFileDialog.getExistingDirectory(
+        """Open a file picker filtered to recognised manifest filenames."""
+        filenames = self._porringer.sync.manifest_filenames()
+        filter_str = 'Manifests (' + ' '.join(filenames) + ');;All Files (*)'
+        chosen, _ = QFileDialog.getOpenFileName(
             self,
-            'Select Project Directory',
+            'Select Manifest File',
             self._combo.currentText() or '',
-            QFileDialog.Option.ShowDirsOnly,
+            filter_str,
         )
         if chosen:
             self._combo.setEditText(chosen)
@@ -624,29 +627,38 @@ class ProjectsView(QWidget):
         if not path_text:
             return
 
-        project_path = Path(path_text)
-        manifest_path = project_path / 'porringer.json'
+        selected_path = Path(path_text)
 
         self._preview.reset()
 
-        if not project_path.is_dir():
-            self._preview.show_not_found(f'Directory not found: {project_path}')
+        if not selected_path.exists():
+            self._preview.show_not_found(f'Path not found: {selected_path}')
             return
 
-        self._preview.set_project_directory(project_path)
+        if not self._porringer.sync.has_manifest(selected_path):
+            self._preview.show_not_found(f'No manifest found at: {selected_path}')
+            return
 
+        # Defer project directory assignment until the preview result
+        # provides root_directory — handles both file and directory inputs.
         preview_worker = PreviewWorker(
             self._porringer,
-            str(manifest_path),
-            project_directory=project_path,
+            str(selected_path),
+            project_directory=selected_path if selected_path.is_dir() else None,
         )
-        preview_worker.preview_ready.connect(self._preview.on_preview_ready)
+        preview_worker.preview_ready.connect(self._on_preview_ready)
         preview_worker.action_checked.connect(self._preview.on_action_checked)
         preview_worker.finished.connect(self._preview.on_preview_finished)
         preview_worker.error.connect(self._on_preview_error)
 
         self._runner = preview_worker
         self._runner.start()
+
+    def _on_preview_ready(self, preview: SetupResults, manifest_path: str, temp_dir_path: str) -> None:
+        """Set the project directory from the manifest result and forward."""
+        if preview.root_directory:
+            self._preview.set_project_directory(preview.root_directory)
+        self._preview.on_preview_ready(preview, manifest_path, temp_dir_path)
 
     def _on_preview_error(self, message: str) -> None:
         """Handle preview errors inline instead of showing a modal dialog."""

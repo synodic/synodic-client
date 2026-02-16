@@ -4,8 +4,6 @@ Loads the icon once from package resources and caches the ``QIcon``
 so every caller shares the same instance.
 """
 
-from __future__ import annotations
-
 from PySide6.QtGui import QIcon, QPixmap
 
 from synodic_client.client import Client

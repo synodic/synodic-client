@@ -4,8 +4,6 @@ Collecting magic numbers and inline stylesheets here keeps the widget
 code focused on layout and behaviour rather than pixel tweaking.
 """
 
-from __future__ import annotations
-
 # ---------------------------------------------------------------------------
 # Window sizes (width, height)
 # ---------------------------------------------------------------------------
