@@ -27,7 +27,6 @@ jobs:
     package:
         runs-on: ${{ matrix.runner }}
         strategy:
-            fail-fast: true
             matrix:
                 include:
                     - artifact: build-windows-x64
@@ -45,6 +44,11 @@ jobs:
               with:
                   name: ${{ matrix.artifact }}
                   path: pack
+
+            - name: Setup .NET
+              uses: actions/setup-dotnet@v4
+              with:
+                  dotnet-version: "9.0"
 
             - name: Install Velopack CLI
               run: dotnet tool install -g vpk
