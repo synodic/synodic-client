@@ -54,30 +54,24 @@ jobs:
           if [ "${{ github.event_name }}" == "workflow_run" ]; then
             base_version="${{ steps.semver.outputs.version }}"
             increment="${{ steps.semver.outputs.increment }}"
-            version="${base_version}.dev${increment}"
-            installer_version="${base_version}-dev.${increment}"
-            channel="dev"
-            tag="dev"
-            is_dev="true"
+            echo "version=${base_version}.dev${increment}" >> $GITHUB_OUTPUT
+            echo "installer-version=${base_version}-dev.${increment}" >> $GITHUB_OUTPUT
+            echo "channel=dev" >> $GITHUB_OUTPUT
+            echo "tag=dev" >> $GITHUB_OUTPUT
+            echo "is-dev=true" >> $GITHUB_OUTPUT
           else
             if [ "${{ github.event_name }}" == "release" ]; then
               version_input="${{ github.event.release.tag_name }}"
             else
               version_input="${{ inputs.version }}"
             fi
-
             version="${version_input#v}"
-            installer_version="${version}"
-            channel="stable"
-            tag="v${version}"
-            is_dev="false"
+            echo "version=${version}" >> $GITHUB_OUTPUT
+            echo "installer-version=${version}" >> $GITHUB_OUTPUT
+            echo "channel=stable" >> $GITHUB_OUTPUT
+            echo "tag=v${version}" >> $GITHUB_OUTPUT
+            echo "is-dev=false" >> $GITHUB_OUTPUT
           fi
-
-          echo "version=${version}" >> $GITHUB_OUTPUT
-          echo "installer-version=${installer_version}" >> $GITHUB_OUTPUT
-          echo "channel=${channel}" >> $GITHUB_OUTPUT
-          echo "tag=${tag}" >> $GITHUB_OUTPUT
-          echo "is-dev=${is_dev}" >> $GITHUB_OUTPUT
 
   build:
     needs: get-version

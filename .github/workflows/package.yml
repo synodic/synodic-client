@@ -17,26 +17,31 @@ on:
         outputs:
             artifact-name:
                 description: "Name of the uploaded release artifact"
-                value: ${{ jobs.package.outputs.artifact-name }}
+                value: ${{ jobs.collect-releases.outputs.artifact-name }}
 
 env:
     VELOPACK_APP_ID: synodic
     VELOPACK_APP_TITLE: Synodic Client
-    VELOPACK_TARGETS: |
-        build-windows-x64:synodic.exe
-        build-linux-x64:synodic
-        build-macos-x64:synodic
 
 jobs:
     package:
         runs-on: ubuntu-latest
-        outputs:
-            artifact-name: velopack-releases
+        strategy:
+            fail-fast: true
+            matrix:
+                include:
+                    - artifact: build-windows-x64
+                      main_exe: synodic.exe
+                    - artifact: build-linux-x64
+                      main_exe: synodic
+                    - artifact: build-macos-x64
+                      main_exe: synodic
         steps:
-            - name: Download all build artifacts
+            - name: Download build artifact
               uses: actions/download-artifact@v4
               with:
-                  path: builds
+                  name: ${{ matrix.artifact }}
+                  path: pack
 
             - name: Install Velopack CLI
               run: dotnet tool install -g vpk
@@ -50,46 +55,42 @@ jobs:
                     --token ${{ secrets.GITHUB_TOKEN }}
 
             - name: Install libfuse2 for AppImage
+              if: contains(matrix.artifact, 'linux')
               run: |
                   sudo apt-get update
                   sudo apt-get install -y libfuse2
 
-            - name: Create Velopack packages
-              shell: bash
+            - name: Create Velopack package
               run: |
-                  set -euo pipefail
-
-                  mkdir -p releases
-                  package_count=0
-
-                  while IFS=':' read -r artifact_dir main_exe; do
-                    [ -n "${artifact_dir}" ] || continue
-
-                    pack_dir="builds/${artifact_dir}"
-
-                    if [ ! -d "${pack_dir}" ]; then
-                      continue
-                    fi
-
-                    vpk pack \
-                      --packId ${{ env.VELOPACK_APP_ID }} \
-                      --packVersion ${{ inputs.version }} \
-                      --packDir "${pack_dir}" \
-                      --mainExe "${main_exe}" \
-                      --packTitle "${{ env.VELOPACK_APP_TITLE }}" \
-                      --channel ${{ inputs.channel }} \
-                      --outputDir releases
-                    package_count=$((package_count + 1))
-                  done <<< "${{ env.VELOPACK_TARGETS }}"
-
-                  if [ "${package_count}" -eq 0 ]; then
-                    echo "No build artifacts found to package." >&2
-                    exit 1
-                  fi
-
-                  ls -la releases/
+                  vpk pack \
+                    --packId ${{ env.VELOPACK_APP_ID }} \
+                    --packVersion ${{ inputs.version }} \
+                    --packDir pack \
+                    --mainExe ${{ matrix.main_exe }} \
+                    --packTitle "${{ env.VELOPACK_APP_TITLE }}" \
+                    --channel ${{ inputs.channel }} \
+                    --outputDir releases
 
             - name: Upload release artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: velopack-release-${{ matrix.artifact }}
+                  path: releases/*
+
+    collect-releases:
+        needs: package
+        runs-on: ubuntu-latest
+        outputs:
+            artifact-name: velopack-releases
+        steps:
+            - name: Download all release artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  pattern: velopack-release-*
+                  path: releases
+                  merge-multiple: true
+
+            - name: Upload combined release artifacts
               uses: actions/upload-artifact@v4
               with:
                   name: velopack-releases
