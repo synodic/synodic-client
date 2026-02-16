@@ -25,6 +25,21 @@ logger = logging.getLogger(__name__)
 # Velopack automatically discovers releases from GitHub releases
 GITHUB_REPO_URL = 'https://github.com/synodic/synodic-client'
 
+# Map sys.platform values to Velopack channel suffixes
+_PLATFORM_SUFFIXES: dict[str, str] = {
+    'win32': 'win',
+    'linux': 'linux',
+    'darwin': 'osx',
+}
+
+
+def _platform_suffix() -> str:
+    """Return the Velopack channel suffix for the current platform."""
+    try:
+        return _PLATFORM_SUFFIXES[sys.platform]
+    except KeyError:
+        raise RuntimeError(f'Unsupported platform for updates: {sys.platform}') from None
+
 
 class UpdateChannel(StrEnum):
     """Update channel selection."""
@@ -83,8 +98,14 @@ class UpdateConfig:
 
     @property
     def channel_name(self) -> str:
-        """Get the channel name for Velopack."""
-        return 'dev' if self.channel == UpdateChannel.DEVELOPMENT else 'stable'
+        """Get the channel name for Velopack.
+
+        Combines the update track (dev/stable) with a platform suffix
+        so each OS has its own release manifest and nupkg files.
+        """
+        base = 'dev' if self.channel == UpdateChannel.DEVELOPMENT else 'stable'
+        platform_suffix = _platform_suffix()
+        return f'{base}-{platform_suffix}'
 
 
 class Updater:

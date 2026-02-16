@@ -1,7 +1,7 @@
-name: Package with Velopack
+name: Build and Package
 
-# Reusable workflow that packages build artifacts with Velopack.
-# Expects build artifacts from the build.yml workflow.
+# Reusable workflow that builds PyInstaller executables and packages them with
+# Velopack on each platform. Produces one artifact per platform.
 
 on:
     workflow_call:
@@ -11,39 +11,51 @@ on:
                 required: true
                 type: string
             channel:
-                description: "Velopack channel (stable or dev)"
+                description: "Velopack channel base (stable or dev)"
                 required: true
                 type: string
-        outputs:
-            artifact-name:
-                description: "Name of the uploaded release artifact"
-                value: ${{ jobs.collect-releases.outputs.artifact-name }}
 
 env:
     VELOPACK_APP_ID: synodic
     VELOPACK_APP_TITLE: Synodic Client
 
 jobs:
-    package:
+    build-and-package:
+        if: github.repository_owner == 'synodic'
         runs-on: ${{ matrix.runner }}
         strategy:
             matrix:
                 include:
-                    - artifact: build-windows-x64
+                    - runner: windows-latest
                       main_exe: synodic.exe
-                      runner: windows-latest
-                    - artifact: build-linux-x64
+                      platform: win
+                    - runner: ubuntu-latest
                       main_exe: synodic
-                      runner: ubuntu-latest
-                    - artifact: build-macos-x64
+                      platform: linux
+                    - runner: macos-latest
                       main_exe: synodic
-                      runner: macos-latest
+                      platform: osx
         steps:
-            - name: Download build artifact
-              uses: actions/download-artifact@v4
+            - name: Checkout
+              uses: actions/checkout@v6
+
+            - name: Install system dependencies
+              if: matrix.platform == 'linux'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y libxcb-cursor0 libxkbcommon-x11-0 libfuse2
+
+            - name: Install PDM
+              uses: pdm-project/setup-pdm@v4
               with:
-                  name: ${{ matrix.artifact }}
-                  path: pack
+                  python-version: "3.14"
+                  cache: true
+
+            - name: Install dependencies
+              run: pdm install -G build
+
+            - name: Build executable
+              run: pdm run pyinstaller tool/pyinstaller/synodic.spec --distpath dist
 
             - name: Setup .NET
               uses: actions/setup-dotnet@v4
@@ -59,15 +71,9 @@ jobs:
               run: |
                   vpk download github \
                     --repoUrl https://github.com/${{ github.repository }} \
-                    --channel ${{ inputs.channel }} \
+                    --channel ${{ inputs.channel }}-${{ matrix.platform }} \
                     --token ${{ secrets.GITHUB_TOKEN }} \
                     ${{ inputs.channel == 'dev' && '--pre' || '' }}
-
-            - name: Install libfuse2 for AppImage
-              if: contains(matrix.artifact, 'linux')
-              run: |
-                  sudo apt-get update
-                  sudo apt-get install -y libfuse2
 
             - name: Create Velopack package
               shell: bash
@@ -75,33 +81,14 @@ jobs:
                   vpk pack \
                     --packId ${{ env.VELOPACK_APP_ID }} \
                     --packVersion ${{ inputs.version }} \
-                    --packDir pack \
+                    --packDir dist/synodic \
                     --mainExe ${{ matrix.main_exe }} \
                     --packTitle "${{ env.VELOPACK_APP_TITLE }}" \
-                    --channel ${{ inputs.channel }} \
+                    --channel ${{ inputs.channel }}-${{ matrix.platform }} \
                     --outputDir releases
 
             - name: Upload release artifacts
               uses: actions/upload-artifact@v4
               with:
-                  name: velopack-release-${{ matrix.artifact }}
-                  path: releases/*
-
-    collect-releases:
-        needs: package
-        runs-on: ubuntu-latest
-        outputs:
-            artifact-name: velopack-releases
-        steps:
-            - name: Download all release artifacts
-              uses: actions/download-artifact@v4
-              with:
-                  pattern: velopack-release-*
-                  path: releases
-                  merge-multiple: true
-
-            - name: Upload combined release artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: velopack-releases
+                  name: velopack-release-${{ matrix.platform }}
                   path: releases/*

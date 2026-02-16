@@ -73,36 +73,23 @@ jobs:
             echo "is-dev=false" >> $GITHUB_OUTPUT
           fi
 
-  build:
+  build-and-package:
     needs: get-version
-    uses: ./.github/workflows/build.yml
-
-  package:
-    needs: [get-version, build]
     uses: ./.github/workflows/package.yml
     with:
       version: ${{ needs.get-version.outputs.installer-version }}
       channel: ${{ needs.get-version.outputs.channel }}
 
   release:
-    needs: [get-version, package]
+    needs: [get-version, build-and-package]
     runs-on: ubuntu-latest
     steps:
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
-          name: velopack-releases
+          pattern: velopack-release-*
           path: releases
-
-      - name: Setup .NET
-        if: needs.get-version.outputs.is-dev == 'true'
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "9.0"
-
-      - name: Install Velopack CLI
-        if: needs.get-version.outputs.is-dev == 'true'
-        run: dotnet tool install -g vpk
+          merge-multiple: true
 
       - name: Remove conflicting dev release assets
         if: needs.get-version.outputs.is-dev == 'true'
@@ -118,40 +105,27 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
 
-      - name: Upload dev release via Velopack
+      - name: Create or update dev release
         if: needs.get-version.outputs.is-dev == 'true'
-        run: |
-          vpk upload github \
-            --repoUrl https://github.com/${{ github.repository }} \
-            --token ${{ secrets.GITHUB_TOKEN }} \
-            --tag dev \
-            --releaseName "Development Build" \
-            --pre \
-            --publish \
-            --merge \
-            --channel dev \
-            --outputDir releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev
+          name: "Development Build"
+          prerelease: true
+          make_latest: false
+          files: releases/*
+          body: |
+            **Latest Development Build**
 
-      - name: Update dev release notes
-        if: needs.get-version.outputs.is-dev == 'true'
-        run: |
-          gh release edit dev --prerelease --notes "$(cat <<'EOF'
-          **Latest Development Build**
+            Version: `${{ needs.get-version.outputs.version }}`
+            Commit: `${{ github.sha }}`
 
-          Version: `${{ needs.get-version.outputs.version }}`
-          Commit: `${{ github.sha }}`
+            ⚠️ This is a development build and may be unstable.
 
-          ⚠️ This is a development build and may be unstable.
-
-          ## Installation
-          - **Windows**: Download `synodic-Setup.exe` and run it
-          - **Linux**: Download the `.AppImage` file, make it executable with `chmod +x`, and run
-          - **macOS**: Download and extract the package
-          EOF
-          )"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
+            ## Installation
+            - **Windows**: Download `synodic-Setup.exe` and run it
+            - **Linux**: Download the `.AppImage` file, make it executable with `chmod +x`, and run
+            - **macOS**: Download and extract the package
 
       - name: Upload to existing release
         if: needs.get-version.outputs.is-dev != 'true' && github.event_name == 'release'
