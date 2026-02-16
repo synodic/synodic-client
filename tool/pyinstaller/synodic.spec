@@ -1,10 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-import os
-from PyInstaller.utils.hooks import collect_all, copy_metadata
+from pathlib import Path
+from PyInstaller.utils.hooks import copy_metadata
+
+SPEC_DIR = Path(SPECPATH)
+REPO_ROOT = SPEC_DIR.parent.parent
 
 # Collect porringer and its plugins with metadata
-datas = [('../../data', 'data')]
+datas = [(str(REPO_ROOT / 'data'), 'data')]
 hiddenimports = []
 
 # Add porringer metadata so entry points work
@@ -34,14 +37,14 @@ hiddenimports += [
 ]
 
 a = Analysis(
-    ['../../synodic_client/application/qt.py'],
+    [str(REPO_ROOT / 'synodic_client' / 'application' / 'qt.py')],
     pathex=[],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[os.path.join(SPECPATH, 'rthook_no_console.py')],
+    runtime_hooks=[str(SPEC_DIR / 'rthook_no_console.py')],
     excludes=[],
     noarchive=False,
 )
