@@ -25,17 +25,20 @@ env:
 
 jobs:
     package:
-        runs-on: ubuntu-latest
+        runs-on: ${{ matrix.runner }}
         strategy:
             fail-fast: true
             matrix:
                 include:
                     - artifact: build-windows-x64
                       main_exe: synodic.exe
+                      runner: windows-latest
                     - artifact: build-linux-x64
                       main_exe: synodic
+                      runner: ubuntu-latest
                     - artifact: build-macos-x64
                       main_exe: synodic
+                      runner: macos-latest
         steps:
             - name: Download build artifact
               uses: actions/download-artifact@v4
