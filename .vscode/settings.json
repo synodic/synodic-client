@@ -8,4 +8,7 @@
     "editor.codeActionsOnSave": {
         "source.organizeImports": "explicit"
     },
+    "cSpell.words": [
+        "qasync"
+    ],
 }

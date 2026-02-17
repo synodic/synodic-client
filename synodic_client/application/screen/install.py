@@ -349,8 +349,13 @@ class SetupPreviewWidget(QWidget):
         self._toggle_btn.setEnabled(False)
         self._toggle_btn.clicked.connect(self._toggle_view)
 
+        self._log_btn = QPushButton('Show Log')
+        self._log_btn.setEnabled(False)
+        self._log_btn.clicked.connect(self._show_log)
+
         button_bar = QHBoxLayout()
         button_bar.addWidget(self._toggle_btn)
+        button_bar.addWidget(self._log_btn)
         button_bar.addStretch()
 
         self._install_btn = QPushButton('Install')
@@ -395,6 +400,7 @@ class SetupPreviewWidget(QWidget):
         self._status_label.setStyleSheet('')
         self._install_btn.setEnabled(False)
         self._toggle_btn.setEnabled(False)
+        self._log_btn.setEnabled(False)
         self._view_stack.setCurrentIndex(0)
 
     def show_not_found(self, message: str) -> None:
@@ -521,17 +527,25 @@ class SetupPreviewWidget(QWidget):
     # --- View toggle ---
 
     def _toggle_view(self) -> None:
-        """Cycle between overview table, command list, and execution log."""
+        """Toggle between overview table and command list."""
         current = self._view_stack.currentIndex()
-        if current == 0:
-            self._view_stack.setCurrentIndex(1)
-            self._toggle_btn.setText('Show Log')
-        elif current == 1:
-            self._view_stack.setCurrentIndex(2)
-            self._toggle_btn.setText('Show Overview')
-        else:
+        if current == 1:
             self._view_stack.setCurrentIndex(0)
             self._toggle_btn.setText('Show Commands')
+        else:
+            self._view_stack.setCurrentIndex(1)
+            self._toggle_btn.setText('Show Overview')
+
+    def _show_log(self) -> None:
+        """Switch to the execution log view."""
+        current = self._view_stack.currentIndex()
+        if current == 2:
+            self._view_stack.setCurrentIndex(0)
+            self._toggle_btn.setText('Show Commands')
+            self._log_btn.setText('Show Log')
+        else:
+            self._view_stack.setCurrentIndex(2)
+            self._log_btn.setText('Hide Log')
 
     # --- Table / command list ---
 
@@ -572,6 +586,7 @@ class SetupPreviewWidget(QWidget):
 
         self._command_list.populate(actions)
         self._toggle_btn.setEnabled(True)
+        self._log_btn.setEnabled(True)
 
     # --- Install execution ---
 
@@ -583,6 +598,7 @@ class SetupPreviewWidget(QWidget):
         self._install_btn.setEnabled(False)
         self._close_btn.setEnabled(False)
         self._toggle_btn.setEnabled(False)
+        self._log_btn.setEnabled(False)
         self._completed_count = 0
 
         self._cancellation_token = CancellationToken()
@@ -671,6 +687,8 @@ class SetupPreviewWidget(QWidget):
         self._install_btn.setEnabled(False)
         self._close_btn.setEnabled(True)
         self._toggle_btn.setEnabled(True)
+        self._log_btn.setEnabled(True)
+        self._log_btn.setText('Hide Log')
         self.install_finished.emit(results)
 
     def _on_install_error(self, message: str) -> None:
@@ -679,6 +697,8 @@ class SetupPreviewWidget(QWidget):
         self._install_btn.setEnabled(True)
         self._close_btn.setEnabled(True)
         self._toggle_btn.setEnabled(True)
+        self._log_btn.setEnabled(True)
+        self._log_btn.setText('Hide Log')
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 """GUI entry point for the Synodic Client application."""
 
+import asyncio
 import ctypes
 import logging
 import signal
@@ -7,6 +8,7 @@ import sys
 import types
 from collections.abc import Callable
 
+import qasync
 from porringer.api import API
 from porringer.schema import LocalConfiguration
 from PySide6.QtCore import Qt, QTimer
@@ -47,8 +49,6 @@ def _init_services(logger: logging.Logger) -> tuple[Client, API, GlobalConfigura
         update_config.channel.name,
         update_config.repo_url,
     )
-
-    porringer.plugin.list()
 
     return client, porringer, config
 
@@ -142,6 +142,9 @@ def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
 
     app = _init_app()
 
+    loop = qasync.QEventLoop(app)
+    asyncio.set_event_loop(loop)
+
     instance = SingleInstance(app)
     if instance.try_send_to_existing(uri or ''):
         logger.info('Another instance is already running, exiting')
@@ -168,9 +171,10 @@ def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
     if uri:
         _process_uri(uri, _handle_install_uri)
 
-    # sys.exit ensures proper cleanup and exit code propagation
-    # Leading underscore indicates references kept alive intentionally until exec() returns
-    sys.exit(app.exec())
+    # qasync integrates the asyncio event loop with Qt's event loop,
+    # enabling async/await usage in the GUI layer without dedicated threads.
+    with loop:
+        loop.run_forever()
 
 
 _PROTOCOL_SCHEME = 'synodic'

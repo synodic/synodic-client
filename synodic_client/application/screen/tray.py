@@ -507,9 +507,14 @@ class TrayScreen:
             return
 
         logger.info('Starting periodic tool update check')
+        asyncio.ensure_future(self._do_tool_update(porringer))
 
+    async def _do_tool_update(self, porringer: API) -> None:
+        """Resolve enabled plugins off-thread, then start the update worker."""
+        loop = asyncio.get_running_loop()
         config = self._resolve_config()
-        all_names = [p.name for p in porringer.plugin.list() if p.installed]
+        all_plugins = await loop.run_in_executor(None, porringer.plugin.list)
+        all_names = [p.name for p in all_plugins if p.installed]
         enabled = resolve_enabled_plugins(config, all_names)
 
         worker = ToolUpdateWorker(porringer, plugins=enabled)
