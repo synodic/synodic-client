@@ -278,6 +278,7 @@ class SetupPreviewWidget(QWidget):
         self._cancellation_token: CancellationToken | None = None
         self._completed_count = 0
         self._action_statuses: list[str] = []
+        self._action_to_table_row: dict[int, int] = {}
 
         self._init_ui()
 
@@ -383,6 +384,7 @@ class SetupPreviewWidget(QWidget):
         self._cancellation_token = None
         self._completed_count = 0
         self._action_statuses = []
+        self._action_to_table_row = {}
 
         self._table.setRowCount(0)
         self._log_panel.clear()
@@ -440,7 +442,12 @@ class SetupPreviewWidget(QWidget):
         if 0 <= row < len(self._action_statuses):
             self._action_statuses[row] = label
 
-        item = self._table.item(row, 4)
+        # Command actions are not shown in the table.
+        table_row = self._action_to_table_row.get(row)
+        if table_row is None:
+            return
+
+        item = self._table.item(table_row, 4)
         if item is None:
             return
 
@@ -459,13 +466,17 @@ class SetupPreviewWidget(QWidget):
         for i, status in enumerate(self._action_statuses):
             if status == 'Checking…':
                 self._action_statuses[i] = 'Needed'
-                item = self._table.item(i, 4)
-                if item is not None:
-                    item.setText('Needed')
-                    item.setForeground(self.palette().text())
+                table_row = self._action_to_table_row.get(i)
+                if table_row is not None:
+                    item = self._table.item(table_row, 4)
+                    if item is not None:
+                        item.setText('Needed')
+                        item.setForeground(self.palette().text())
 
-        total = len(self._action_statuses)
-        needed = sum(1 for s in self._action_statuses if s == 'Needed')
+        # Count only actions shown in the table (excludes bare commands).
+        table_statuses = [self._action_statuses[i] for i in self._action_to_table_row]
+        total = len(table_statuses)
+        needed = sum(1 for s in table_statuses if s == 'Needed')
         satisfied = total - needed
 
         if needed == 0:
@@ -538,17 +549,26 @@ class SetupPreviewWidget(QWidget):
             clipboard.setText('\n'.join(lines))
 
     def _populate_table(self, actions: list[SetupAction]) -> None:
-        """Fill the actions table from a list of SetupAction objects."""
-        self._table.setRowCount(len(actions))
-        for row, action in enumerate(actions):
-            self._table.setItem(row, 0, QTableWidgetItem(ACTION_KIND_LABELS.get(action.kind, 'Action')))
-            self._table.setItem(row, 1, QTableWidgetItem(action.installer or ''))
-            self._table.setItem(row, 2, QTableWidgetItem(str(action.package) if action.package else ''))
-            self._table.setItem(row, 3, QTableWidgetItem(action.package_description or action.description))
+        """Fill the actions table from a list of SetupAction objects.
+
+        Command actions (``kind is None``) are excluded from the table
+        because they cannot be dry-run checked — they always appear as
+        *Needed* which is misleading.  They remain visible in the
+        command-list view and are still executed during install.
+        """
+        self._action_to_table_row = {}
+        table_actions = [(i, a) for i, a in enumerate(actions) if a.kind is not None]
+        self._table.setRowCount(len(table_actions))
+        for table_row, (action_idx, action) in enumerate(table_actions):
+            self._action_to_table_row[action_idx] = table_row
+            self._table.setItem(table_row, 0, QTableWidgetItem(ACTION_KIND_LABELS.get(action.kind, 'Action')))
+            self._table.setItem(table_row, 1, QTableWidgetItem(action.installer or ''))
+            self._table.setItem(table_row, 2, QTableWidgetItem(str(action.package) if action.package else ''))
+            self._table.setItem(table_row, 3, QTableWidgetItem(action.package_description or action.description))
 
             status_item = QTableWidgetItem('Checking…')
             status_item.setForeground(self.palette().placeholderText())
-            self._table.setItem(row, 4, status_item)
+            self._table.setItem(table_row, 4, status_item)
 
         self._command_list.populate(actions)
         self._toggle_btn.setEnabled(True)

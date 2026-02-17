@@ -14,7 +14,7 @@ requires-python = ">=3.14, <3.15"
 dependencies = [
     "pyside6>=6.10.2",
     "packaging>=26.0",
-    "porringer>=0.2.1.dev21",
+    "porringer>=0.2.1.dev23",
     "velopack>=0.0.1369.dev7516",
     "typer>=0.24.0",
 ]
