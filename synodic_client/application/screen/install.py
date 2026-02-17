@@ -23,7 +23,6 @@ from porringer.api import API
 from porringer.schema import (
     CancellationToken,
     DownloadParameters,
-    PluginKind,
     ProgressEventKind,
     SetupAction,
     SetupActionResult,
@@ -31,6 +30,7 @@ from porringer.schema import (
     SetupResults,
     SubActionProgress,
 )
+from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -862,7 +862,7 @@ class PreviewWorker(QThread):
                 dest = Path(temp_dir) / 'porringer.json'
 
                 params = DownloadParameters(url=self._url, destination=dest, timeout=3)
-                result = self._porringer.sync.download(params)
+                result = API.download(params)
 
                 if not result.success:
                     _safe_rmtree(temp_dir)

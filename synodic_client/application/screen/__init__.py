@@ -6,7 +6,8 @@ execution log panel live here to avoid circular imports.
 
 from __future__ import annotations
 
-from porringer.schema import PluginKind, SkipReason
+from porringer.schema import SkipReason
+from porringer.schema.plugin import PluginKind
 
 ACTION_KIND_LABELS: dict[PluginKind | None, str] = {
     PluginKind.PACKAGE: 'Package',

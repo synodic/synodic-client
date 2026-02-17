@@ -15,13 +15,13 @@ from unittest.mock import MagicMock
 from porringer.schema import (
     CancellationToken,
     DownloadResult,
-    PluginKind,
     ProgressEvent,
     ProgressEventKind,
     SetupActionResult,
     SetupResults,
     SkipReason,
 )
+from porringer.schema.plugin import PluginKind
 
 from synodic_client.application.screen import (
     ACTION_KIND_LABELS,

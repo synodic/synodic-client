@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from porringer.api import API
-from porringer.schema import DirectoryValidationResult, ManifestDirectory, PluginInfo, PluginKind, SetupResults
+from porringer.schema import DirectoryValidationResult, ManifestDirectory, PluginInfo, SetupResults
+from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import (
@@ -395,7 +396,7 @@ class PluginsView(QWidget):
 
                 for plugin in bucket:
                     packages = packages_map.get(plugin.name, [])
-                    section = self._build_plugin_section(
+                    section = PluginsView._build_plugin_section(
                         plugin,
                         packages,
                         auto_update_map,
@@ -427,8 +428,8 @@ class PluginsView(QWidget):
                 packages_map[plugin.name] = self._gather_packages(plugin.name, directories)
         return plugins, packages_map
 
+    @staticmethod
     def _build_plugin_section(
-        self,
         plugin: PluginInfo,
         packages: list[tuple[str, str]],
         auto_update_map: dict[str, bool],

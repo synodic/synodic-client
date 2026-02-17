@@ -8,7 +8,6 @@ from unittest.mock import MagicMock
 
 from porringer.schema import (
     CancellationToken,
-    PluginKind,
     ProgressEvent,
     ProgressEventKind,
     SetupAction,
@@ -17,6 +16,7 @@ from porringer.schema import (
     SkipReason,
     SubActionProgress,
 )
+from porringer.schema.plugin import PluginKind
 
 # PySide6 widgets require a QApplication; create one once for the module.
 from PySide6.QtWidgets import QApplication
