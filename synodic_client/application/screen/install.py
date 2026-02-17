@@ -309,7 +309,7 @@ class SetupPreviewWidget(QWidget):
         self._status_label = QLabel()
         layout.addWidget(self._status_label)
 
-        # --- View stack (table / command list / execution log) ---
+        # --- View stack (table / command list) ---
         self._view_stack = QStackedWidget()
 
         self._table = self._init_actions_table()
@@ -318,10 +318,12 @@ class SetupPreviewWidget(QWidget):
         self._command_list = CommandListWidget()
         self._view_stack.addWidget(self._command_list)  # page 1
 
-        self._log_panel = ExecutionLogPanel()
-        self._view_stack.addWidget(self._log_panel)  # page 2
-
         layout.addWidget(self._view_stack)
+
+        # Execution log (always visible below the table once install starts)
+        self._log_panel = ExecutionLogPanel()
+        self._log_panel.hide()
+        layout.addWidget(self._log_panel)
 
         # Button bar
         layout.addLayout(self._init_button_bar())
@@ -349,13 +351,8 @@ class SetupPreviewWidget(QWidget):
         self._toggle_btn.setEnabled(False)
         self._toggle_btn.clicked.connect(self._toggle_view)
 
-        self._log_btn = QPushButton('Show Log')
-        self._log_btn.setEnabled(False)
-        self._log_btn.clicked.connect(self._show_log)
-
         button_bar = QHBoxLayout()
         button_bar.addWidget(self._toggle_btn)
-        button_bar.addWidget(self._log_btn)
         button_bar.addStretch()
 
         self._install_btn = QPushButton('Install')
@@ -393,6 +390,7 @@ class SetupPreviewWidget(QWidget):
 
         self._table.setRowCount(0)
         self._log_panel.clear()
+        self._log_panel.hide()
         self._name_label.hide()
         self._description_label.hide()
         self._meta_label.hide()
@@ -400,7 +398,6 @@ class SetupPreviewWidget(QWidget):
         self._status_label.setStyleSheet('')
         self._install_btn.setEnabled(False)
         self._toggle_btn.setEnabled(False)
-        self._log_btn.setEnabled(False)
         self._view_stack.setCurrentIndex(0)
 
     def show_not_found(self, message: str) -> None:
@@ -536,17 +533,6 @@ class SetupPreviewWidget(QWidget):
             self._view_stack.setCurrentIndex(1)
             self._toggle_btn.setText('Show Overview')
 
-    def _show_log(self) -> None:
-        """Switch to the execution log view."""
-        current = self._view_stack.currentIndex()
-        if current == 2:
-            self._view_stack.setCurrentIndex(0)
-            self._toggle_btn.setText('Show Commands')
-            self._log_btn.setText('Show Log')
-        else:
-            self._view_stack.setCurrentIndex(2)
-            self._log_btn.setText('Hide Log')
-
     # --- Table / command list ---
 
     def _copy_table_selection(self) -> None:
@@ -586,7 +572,6 @@ class SetupPreviewWidget(QWidget):
 
         self._command_list.populate(actions)
         self._toggle_btn.setEnabled(True)
-        self._log_btn.setEnabled(True)
 
     # --- Install execution ---
 
@@ -598,14 +583,14 @@ class SetupPreviewWidget(QWidget):
         self._install_btn.setEnabled(False)
         self._close_btn.setEnabled(False)
         self._toggle_btn.setEnabled(False)
-        self._log_btn.setEnabled(False)
         self._completed_count = 0
 
         self._cancellation_token = CancellationToken()
 
-        # Switch to the execution log panel view
+        # Show the execution log panel below the table
         self._log_panel.clear()
-        self._view_stack.setCurrentIndex(2)
+        self._log_panel.show()
+        self._view_stack.setCurrentIndex(0)
         self._status_label.setText('Installing…')
 
         # Worker thread
@@ -687,8 +672,6 @@ class SetupPreviewWidget(QWidget):
         self._install_btn.setEnabled(False)
         self._close_btn.setEnabled(True)
         self._toggle_btn.setEnabled(True)
-        self._log_btn.setEnabled(True)
-        self._log_btn.setText('Hide Log')
         self.install_finished.emit(results)
 
     def _on_install_error(self, message: str) -> None:
@@ -697,8 +680,6 @@ class SetupPreviewWidget(QWidget):
         self._install_btn.setEnabled(True)
         self._close_btn.setEnabled(True)
         self._toggle_btn.setEnabled(True)
-        self._log_btn.setEnabled(True)
-        self._log_btn.setText('Hide Log')
 
 
 # ---------------------------------------------------------------------------
