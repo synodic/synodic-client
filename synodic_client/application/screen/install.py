@@ -36,6 +36,7 @@ from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -43,7 +44,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -53,9 +54,11 @@ from PySide6.QtWidgets import (
 )
 
 from synodic_client.application.screen import ACTION_KIND_LABELS, skip_reason_label
+from synodic_client.application.screen.card import CardFrame
 from synodic_client.application.screen.log_panel import ExecutionLogPanel
 from synodic_client.application.screen.spinner import SpinnerWidget
 from synodic_client.application.theme import (
+    CARD_SPACING,
     COMMAND_HEADER_STYLE,
     COMPACT_MARGINS,
     CONTENT_MARGINS,
@@ -165,27 +168,59 @@ class InstallWorker(QThread):
         )
 
 
-class CommandListWidget(QScrollArea):
-    """Scrollable list of per-action CLI commands with copy buttons."""
+class PostInstallSection(QWidget):
+    """Always-visible section showing bare-command (post-install) actions.
+
+    Bare-command actions (``kind is None``) cannot be dry-run checked, so
+    they are excluded from the main actions table.  This widget gives
+    them a dedicated, always-visible home with copyable CLI text.
+    """
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        """Initialise the command list widget."""
+        """Initialise the section (hidden until :meth:`populate` is called)."""
         super().__init__(parent)
-        self.setWidgetResizable(True)
+        self.hide()
+
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(*NO_MARGINS)
+        self._layout.setSpacing(4)
+
+        header = QLabel('Post-Install Commands')
+        header.setStyleSheet(COMMAND_HEADER_STYLE)
+        self._layout.addWidget(header)
+
+        self._content = QWidget()
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(*NO_MARGINS)
+        self._content_layout.setSpacing(4)
+        self._layout.addWidget(self._content)
 
     def populate(self, actions: list[SetupAction]) -> None:
-        """Build per-action command fields with descriptive labels above each."""
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(*NO_MARGINS)
+        """Show command actions from *actions*.
+
+        Only actions whose ``kind`` is ``None`` are shown.  If there are
+        none the widget stays hidden.
+
+        Args:
+            actions: The full list of setup actions.
+        """
+        # Clear previous content
+        while self._content_layout.count():
+            item = self._content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        commands = [(i, a) for i, a in enumerate(actions, 1) if a.kind is None]
+        if not commands:
+            self.hide()
+            return
 
         mono = QFont(MONOSPACE_FAMILY, MONOSPACE_SIZE)
-        for i, action in enumerate(actions, 1):
-            label_text = ACTION_KIND_LABELS.get(action.kind, 'Action')
+        for idx, action in commands:
             desc = action.package_description or action.description
-            header = QLabel(f'{i}. [{label_text}] {desc}')
-            header.setStyleSheet(COMMAND_HEADER_STYLE)
-            layout.addWidget(header)
+            label = QLabel(f'{idx}. {desc}')
+            label.setStyleSheet(COMMAND_HEADER_STYLE)
+            self._content_layout.addWidget(label)
 
             field = QLineEdit(format_cli_command(action))
             field.setReadOnly(True)
@@ -199,10 +234,9 @@ class CommandListWidget(QScrollArea):
 
             row_widget = QWidget()
             row_widget.setLayout(row_layout)
-            layout.addWidget(row_widget)
+            self._content_layout.addWidget(row_widget)
 
-        layout.addStretch()
-        self.setWidget(container)
+        self.show()
 
 
 def _make_copy_button(field: QLineEdit) -> QToolButton:
@@ -286,53 +320,85 @@ class SetupPreviewWidget(QWidget):
 
     # --- UI construction ---
 
-    def _init_ui(self) -> None:
-        """Build the widget layout."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(*NO_MARGINS)
+    _SPINNER_PAGE = 0
+    _CONTENT_PAGE = 1
 
-        # Metadata labels (populated after preview completes)
+    def _init_ui(self) -> None:
+        """Build the card-based grid layout.
+
+        The spinner and the actions card share a :class:`QStackedWidget`
+        so that switching between loading and content states never
+        changes the grid geometry — eliminating layout shifts.
+        """
+        grid = QGridLayout(self)
+        grid.setContentsMargins(*NO_MARGINS)
+        grid.setVerticalSpacing(CARD_SPACING)
+        grid.setHorizontalSpacing(CARD_SPACING)
+
+        row = 0
+
+        # Row 0 — Metadata card (hidden until preview metadata arrives)
+        self._metadata_card = CardFrame('Project', collapsible=True)
+        self._metadata_card.hide()
+
         self._name_label = QLabel()
         self._name_label.setStyleSheet(HEADER_STYLE)
         self._name_label.hide()
-        layout.addWidget(self._name_label)
+        self._metadata_card.content_layout.addWidget(self._name_label)
 
         self._description_label = QLabel()
         self._description_label.setWordWrap(True)
         self._description_label.hide()
-        layout.addWidget(self._description_label)
+        self._metadata_card.content_layout.addWidget(self._description_label)
 
         self._meta_label = QLabel()
         self._meta_label.setStyleSheet(MUTED_STYLE)
         self._meta_label.hide()
-        layout.addWidget(self._meta_label)
+        self._metadata_card.content_layout.addWidget(self._meta_label)
 
-        # Status label
+        grid.addWidget(self._metadata_card, row, 0, 1, 2)
+        row += 1
+
+        # Row 1 — Status label
         self._status_label = QLabel()
-        layout.addWidget(self._status_label)
+        grid.addWidget(self._status_label, row, 0, 1, 2)
+        row += 1
 
-        # Centered spinner (fills empty space while loading manifest)
+        # Row 2 — Content stack: spinner (page 0) / actions card (page 1)
+        #
+        # Both pages live in the same grid cell with the same stretch,
+        # so toggling the current page causes *no* layout shift.
+        self._content_stack = QStackedWidget()
+
         self._spinner = SpinnerWidget('Loading\u2026')
-        layout.addWidget(self._spinner, 1)
+        self._spinner.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._content_stack.addWidget(self._spinner)  # page 0
 
-        # --- View stack (table / command list) ---
-        self._view_stack = QStackedWidget()
-
+        self._actions_card = CardFrame()
         self._table = self._init_actions_table()
-        self._view_stack.addWidget(self._table)  # page 0
+        self._actions_card.content_layout.addWidget(self._table)
+        self._post_install_section = PostInstallSection()
+        self._actions_card.content_layout.addWidget(self._post_install_section)
+        self._content_stack.addWidget(self._actions_card)  # page 1
 
-        self._command_list = CommandListWidget()
-        self._view_stack.addWidget(self._command_list)  # page 1
+        self._content_stack.setCurrentIndex(self._CONTENT_PAGE)
 
-        layout.addWidget(self._view_stack)
+        grid.addWidget(self._content_stack, row, 0, 1, 2)
+        grid.setRowStretch(row, 2)
+        row += 1
 
-        # Execution log (always visible below the table once install starts)
+        # Row 3 — Execution log card (hidden until install starts)
+        self._log_card = CardFrame('Execution Log', collapsible=True)
         self._log_panel = ExecutionLogPanel()
-        self._log_panel.hide()
-        layout.addWidget(self._log_panel)
+        self._log_card.content_layout.addWidget(self._log_panel)
+        self._log_card.hide()
+        grid.addWidget(self._log_card, row, 0, 1, 2)
+        grid.setRowStretch(row, 1)
+        row += 1
 
-        # Button bar
-        layout.addLayout(self._init_button_bar())
+        # Row 4 — Button bar
+        button_bar = self._init_button_bar()
+        grid.addLayout(button_bar, row, 0, 1, 2)
 
     def _init_actions_table(self) -> QTableWidget:
         """Create and configure the actions table widget."""
@@ -353,12 +419,7 @@ class SetupPreviewWidget(QWidget):
 
     def _init_button_bar(self) -> QHBoxLayout:
         """Create the bottom button bar."""
-        self._toggle_btn = QPushButton('Show Commands')
-        self._toggle_btn.setEnabled(False)
-        self._toggle_btn.clicked.connect(self._toggle_view)
-
         button_bar = QHBoxLayout()
-        button_bar.addWidget(self._toggle_btn)
         button_bar.addStretch()
 
         self._install_btn = QPushButton('Install')
@@ -396,25 +457,29 @@ class SetupPreviewWidget(QWidget):
         self._plugin_installed = {}
 
         self._table.setRowCount(0)
+        self._post_install_section.hide()
         self._log_panel.clear()
-        self._log_panel.hide()
+        self._log_card.hide()
         self._name_label.hide()
         self._description_label.hide()
         self._meta_label.hide()
+        self._metadata_card.hide()
         self._status_label.setText('')
         self._status_label.setStyleSheet('')
-        self._spinner.stop()
+        self._spinner._timer.stop()
+        self._content_stack.setCurrentIndex(self._CONTENT_PAGE)
         self._install_btn.setEnabled(False)
-        self._toggle_btn.setEnabled(False)
-        self._view_stack.setCurrentIndex(0)
 
     def start_loading(self) -> None:
         """Show the centered loading spinner.
 
-        Call this before starting a :class:`PreviewWorker` so the user
-        sees an animated indicator in the otherwise-empty preview area.
+        Switches the content stack to the spinner page and starts the
+        animation.  The grid geometry stays constant because the spinner
+        and the actions card share the same :class:`QStackedWidget` cell.
         """
-        self._spinner.start()
+        self._content_stack.setCurrentIndex(self._SPINNER_PAGE)
+        self._spinner._canvas._angle = 0
+        self._spinner._timer.start()
 
     def show_not_found(self, message: str) -> None:
         """Display a muted 'not found' message in the status label.
@@ -454,7 +519,8 @@ class SetupPreviewWidget(QWidget):
         self._preview = preview
         self._manifest_path = Path(manifest_path)
         self._status_label.setStyleSheet('')
-        self._spinner.stop()
+        self._spinner._timer.stop()
+        self._content_stack.setCurrentIndex(self._CONTENT_PAGE)
 
         self._show_metadata(preview)
 
@@ -506,11 +572,10 @@ class SetupPreviewWidget(QWidget):
                         item.setText('Needed')
                         item.setForeground(self.palette().text())
 
-        # Count only actions shown in the table (excludes bare commands).
-        table_statuses = [self._action_statuses[i] for i in self._action_to_table_row]
-        total = len(table_statuses)
-        needed = sum(1 for s in table_statuses if s == 'Needed')
-        unavailable = sum(1 for s in table_statuses if s == 'Not installed')
+        # Count ALL actions (including bare commands) for enablement.
+        total = len(self._action_statuses)
+        needed = sum(1 for s in self._action_statuses if s == 'Needed')
+        unavailable = sum(1 for s in self._action_statuses if s == 'Not installed')
         satisfied = total - needed - unavailable
 
         parts: list[str] = []
@@ -538,7 +603,8 @@ class SetupPreviewWidget(QWidget):
     def on_preview_error(self, message: str) -> None:
         """Handle a preview error."""
         logger.error('Preview failed: %s', message)
-        self._spinner.stop()
+        self._spinner._timer.stop()
+        self._content_stack.setCurrentIndex(self._CONTENT_PAGE)
         self._status_label.setText('')
         QMessageBox.critical(self, 'Preview Failed', message)
         self.close_requested.emit()
@@ -551,12 +617,15 @@ class SetupPreviewWidget(QWidget):
         if not metadata:
             return
 
+        has_content = False
         if metadata.name:
             self._name_label.setText(metadata.name)
             self._name_label.show()
+            has_content = True
         if metadata.description:
             self._description_label.setText(metadata.description)
             self._description_label.show()
+            has_content = True
 
         meta_parts: list[str] = []
         if metadata.author:
@@ -566,20 +635,12 @@ class SetupPreviewWidget(QWidget):
         if meta_parts:
             self._meta_label.setText('  |  '.join(meta_parts))
             self._meta_label.show()
+            has_content = True
 
-    # --- View toggle ---
+        if has_content:
+            self._metadata_card.show()
 
-    def _toggle_view(self) -> None:
-        """Toggle between overview table and command list."""
-        current = self._view_stack.currentIndex()
-        if current == 1:
-            self._view_stack.setCurrentIndex(0)
-            self._toggle_btn.setText('Show Commands')
-        else:
-            self._view_stack.setCurrentIndex(1)
-            self._toggle_btn.setText('Show Overview')
-
-    # --- Table / command list ---
+    # --- Table ---
 
     def _copy_table_selection(self) -> None:
         """Copy selected table rows to the clipboard as tab-separated text."""
@@ -595,12 +656,12 @@ class SetupPreviewWidget(QWidget):
             clipboard.setText('\n'.join(lines))
 
     def _populate_table(self, actions: list[SetupAction]) -> None:
-        """Fill the actions table from a list of SetupAction objects.
+        """Fill the actions table and post-install section from *actions*.
 
         Command actions (``kind is None``) are excluded from the table
         because they cannot be dry-run checked — they always appear as
-        *Needed* which is misleading.  They remain visible in the
-        command-list view and are still executed during install.
+        *Needed* which is misleading.  They are shown in the dedicated
+        :class:`PostInstallSection` instead.
 
         Actions whose installer plugin is not installed are immediately
         flagged as *Not installed* so the user knows the plugin must be
@@ -632,8 +693,8 @@ class SetupPreviewWidget(QWidget):
             status_item.setForeground(self.palette().placeholderText())
             self._table.setItem(table_row, 4, status_item)
 
-        self._command_list.populate(actions)
-        self._toggle_btn.setEnabled(True)
+        # Populate the always-visible post-install commands section
+        self._post_install_section.populate(actions)
 
     # --- Install execution ---
 
@@ -644,15 +705,13 @@ class SetupPreviewWidget(QWidget):
 
         self._install_btn.setEnabled(False)
         self._close_btn.setEnabled(False)
-        self._toggle_btn.setEnabled(False)
         self._completed_count = 0
 
         self._cancellation_token = CancellationToken()
 
-        # Show the execution log panel below the table
+        # Show the execution log card below the actions card
         self._log_panel.clear()
-        self._log_panel.show()
-        self._view_stack.setCurrentIndex(0)
+        self._log_card.show()
         self._status_label.setText('Installing…')
 
         # Worker thread
@@ -681,14 +740,19 @@ class SetupPreviewWidget(QWidget):
 
     def _on_action_progress(self, action: SetupAction, result: SetupActionResult) -> None:
         """Handle a single action completion from the worker."""
-        row = self._completed_count
         self._completed_count += 1
 
         # Update the execution log panel
         self._log_panel.on_action_completed(action, result)
 
-        # Update the table status too (for when user switches back to table view)
-        self._update_table_status(row, result)
+        # Map the action back to its table row (commands have no table row)
+        if self._preview:
+            for idx, a in enumerate(self._preview.actions):
+                if a is action:
+                    table_row = self._action_to_table_row.get(idx)
+                    if table_row is not None:
+                        self._update_table_status(table_row, result)
+                    break
 
         # Update status label
         total = len(self._preview.actions) if self._preview else 0
@@ -733,7 +797,6 @@ class SetupPreviewWidget(QWidget):
         self._status_label.setText(f'Done — {summary}')
         self._install_btn.setEnabled(False)
         self._close_btn.setEnabled(True)
-        self._toggle_btn.setEnabled(True)
         self.install_finished.emit(results)
 
     def _on_install_error(self, message: str) -> None:
@@ -741,7 +804,6 @@ class SetupPreviewWidget(QWidget):
         self._status_label.setText(f'Install failed: {message}')
         self._install_btn.setEnabled(True)
         self._close_btn.setEnabled(True)
-        self._toggle_btn.setEnabled(True)
 
 
 # ---------------------------------------------------------------------------
@@ -784,14 +846,17 @@ class InstallPreviewWindow(QMainWindow):
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
         layout.setContentsMargins(*CONTENT_MARGINS)
+        layout.setSpacing(CARD_SPACING)
 
-        # URL header
+        # Source card — manifest URL + project directory
+        source_card = CardFrame('Source')
+
         self._url_label = QLabel()
         self._url_label.setWordWrap(True)
-        layout.addWidget(self._url_label)
+        source_card.content_layout.addWidget(self._url_label)
+        source_card.content_layout.addLayout(self._init_project_dir_row())
 
-        # Project directory input
-        layout.addLayout(self._init_project_dir_row())
+        layout.addWidget(source_card)
 
         # Shared preview widget
         self._preview_widget = SetupPreviewWidget(self._porringer, self)

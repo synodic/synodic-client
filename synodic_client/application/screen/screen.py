@@ -10,16 +10,18 @@ from porringer.api import API
 from porringer.schema import DirectoryValidationResult, ManifestDirectory, PluginInfo, SetupResults
 from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QStandardItem
+from PySide6.QtGui import QResizeEvent, QStandardItem
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMainWindow,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -29,9 +31,11 @@ from PySide6.QtWidgets import (
 
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen import plugin_kind_group_label
+from synodic_client.application.screen.card import CHEVRON_DOWN, CHEVRON_RIGHT, ClickableHeader
 from synodic_client.application.screen.install import PreviewWorker, SetupPreviewWidget
 from synodic_client.application.screen.spinner import SpinnerWidget
 from synodic_client.application.theme import (
+    CARD_SPACING,
     COMPACT_MARGINS,
     LOG_CHEVRON_STYLE,
     LOG_SECTION_TITLE_STYLE,
@@ -50,10 +54,6 @@ logger = logging.getLogger(__name__)
 
 # Plugin kinds that support auto-update and per-plugin upgrade.
 _UPDATABLE_KINDS = frozenset({PluginKind.TOOL, PluginKind.PACKAGE})
-
-# Unicode chevrons
-_CHEVRON_DOWN = '\u25bc'
-_CHEVRON_RIGHT = '\u25b6'
 
 
 @dataclass
@@ -115,19 +115,14 @@ class PluginSection(QWidget):
         show_controls: bool,
         *,
         installed: bool = True,
-    ) -> QWidget:
+    ) -> ClickableHeader:
         """Construct the clickable header row."""
-        header = QWidget()
-        header.setObjectName('pluginHeader')
-        header.setStyleSheet(PLUGIN_SECTION_HEADER_STYLE)
-        header.setCursor(Qt.CursorShape.PointingHandCursor)
-        header.mousePressEvent = lambda _event: self._toggle()
+        header = ClickableHeader('pluginHeader', PLUGIN_SECTION_HEADER_STYLE)
+        header.clicked.connect(self._toggle)
 
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(6)
+        header_layout = header.header_layout
 
-        self._chevron = QLabel(_CHEVRON_RIGHT)
+        self._chevron = QLabel(CHEVRON_RIGHT)
         self._chevron.setStyleSheet(LOG_CHEVRON_STYLE)
         self._chevron.setFixedWidth(14)
         header_layout.addWidget(self._chevron)
@@ -201,7 +196,7 @@ class PluginSection(QWidget):
         """Toggle the body visibility."""
         self._expanded = not self._expanded
         self._body.setVisible(self._expanded)
-        self._chevron.setText(_CHEVRON_DOWN if self._expanded else _CHEVRON_RIGHT)
+        self._chevron.setText(CHEVRON_DOWN if self._expanded else CHEVRON_RIGHT)
 
     # --- Callbacks ---
 
@@ -249,19 +244,14 @@ class PluginGroupSection(QWidget):
 
     # --- Header builder ---
 
-    def _build_header(self, kind: PluginKind) -> QWidget:
+    def _build_header(self, kind: PluginKind) -> ClickableHeader:
         """Construct the clickable group header row."""
-        header = QWidget()
-        header.setObjectName('pluginGroupHeader')
-        header.setStyleSheet(PLUGIN_GROUP_HEADER_STYLE)
-        header.setCursor(Qt.CursorShape.PointingHandCursor)
-        header.mousePressEvent = lambda _event: self._toggle()
+        header = ClickableHeader('pluginGroupHeader', PLUGIN_GROUP_HEADER_STYLE)
+        header.clicked.connect(self._toggle)
 
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(6)
+        header_layout = header.header_layout
 
-        self._chevron = QLabel(_CHEVRON_DOWN)
+        self._chevron = QLabel(CHEVRON_DOWN)
         self._chevron.setStyleSheet(LOG_CHEVRON_STYLE)
         self._chevron.setFixedWidth(14)
         header_layout.addWidget(self._chevron)
@@ -296,7 +286,7 @@ class PluginGroupSection(QWidget):
         """Toggle the body visibility."""
         self._expanded = not self._expanded
         self._body.setVisible(self._expanded)
-        self._chevron.setText(_CHEVRON_DOWN if self._expanded else _CHEVRON_RIGHT)
+        self._chevron.setText(CHEVRON_DOWN if self._expanded else CHEVRON_RIGHT)
 
 
 class PluginsView(QWidget):
@@ -529,42 +519,53 @@ class ProjectsView(QWidget):
         self._init_ui()
 
     def _init_ui(self) -> None:
-        """Initialize the UI components."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(*COMPACT_MARGINS)
+        """Initialize the UI components with a grid layout.
 
-        # Loading indicator (shown while data is fetched asynchronously)
-        self._loading_spinner = SpinnerWidget('Loading projects\u2026')
-        layout.addWidget(self._loading_spinner)
+        The loading spinner is a floating overlay parented to ``self``
+        but **not** part of the grid, so showing/hiding it never
+        changes the geometry of the rows beneath.
+        """
+        grid = QGridLayout(self)
+        grid.setContentsMargins(*COMPACT_MARGINS)
+        grid.setVerticalSpacing(CARD_SPACING)
 
-        # --- Project directory selector ---
-        selector_row = QHBoxLayout()
-        selector_row.setContentsMargins(0, 0, 0, 8)
-
+        # Row 0 — Project directory selector
         self._combo = QComboBox()
         self._combo.setEditable(True)
         self._combo.setToolTip('Select a cached project directory or enter a new path')
         self._combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self._combo.setMinimumContentsLength(40)
         self._combo.currentIndexChanged.connect(self._on_selection_changed)
-        selector_row.addWidget(self._combo, 1)
+        grid.addWidget(self._combo, 0, 0)
+        grid.setColumnStretch(0, 1)
 
         self._browse_btn = QPushButton('Browse…')
         self._browse_btn.clicked.connect(self._on_browse)
-        selector_row.addWidget(self._browse_btn)
+        grid.addWidget(self._browse_btn, 0, 1)
 
         self._remove_btn = QPushButton('Remove')
         self._remove_btn.setToolTip('Remove the selected directory from the cache')
         self._remove_btn.clicked.connect(self._on_remove)
         self._remove_btn.setEnabled(False)
-        selector_row.addWidget(self._remove_btn)
+        grid.addWidget(self._remove_btn, 0, 2)
 
-        layout.addLayout(selector_row)
-
-        # --- Shared preview widget ---
+        # Row 1 — Shared preview widget (takes majority of space)
         self._preview = SetupPreviewWidget(self._porringer, self, show_close=False)
         self._preview.install_finished.connect(self._on_install_finished)
-        layout.addWidget(self._preview)
+        grid.addWidget(self._preview, 1, 0, 1, 3)
+        grid.setRowStretch(1, 1)
+
+        # Floating overlay spinner — not in the grid layout.
+        # Positioned in resizeEvent to cover the full widget area.
+        self._loading_spinner = SpinnerWidget('Loading projects\u2026', parent=self)
+        self._loading_spinner.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._loading_spinner.raise_()
+
+    # ------------------------------------------------------------------
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        """Keep the overlay spinner filling the entire view."""
+        super().resizeEvent(event)
+        self._loading_spinner.setGeometry(self.rect())
 
     # --- Public API ---
 
@@ -627,6 +628,7 @@ class ProjectsView(QWidget):
             logger.exception('Failed to refresh projects')
         finally:
             self._loading_spinner.stop()
+            self._loading_spinner.lower()  # put behind content after loading
             self._combo.setEnabled(True)
             self._browse_btn.setEnabled(True)
             self._update_remove_btn()

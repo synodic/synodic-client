@@ -12,10 +12,8 @@ import html
 import logging
 
 from porringer.schema import SetupAction, SetupActionResult, SubActionProgress
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QLabel,
     QScrollArea,
     QSizePolicy,
@@ -25,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from synodic_client.application.screen import ACTION_KIND_LABELS, skip_reason_label
+from synodic_client.application.screen.card import CHEVRON_DOWN, CHEVRON_RIGHT, ClickableHeader
 from synodic_client.application.theme import (
     LOG_CHEVRON_STYLE,
     LOG_COLOR_ERROR,
@@ -45,10 +44,6 @@ from synodic_client.application.theme import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Unicode chevrons
-CHEVRON_DOWN = '\u25bc'
-CHEVRON_RIGHT = '\u25b6'
 
 
 class ActionLogSection(QWidget):
@@ -75,15 +70,10 @@ class ActionLogSection(QWidget):
         layout.setSpacing(0)
 
         # --- Header ---
-        self._header = QWidget()
-        self._header.setObjectName('sectionHeader')
-        self._header.setStyleSheet(LOG_SECTION_HEADER_STYLE)
-        self._header.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._header.mousePressEvent = lambda _event: self._toggle()
+        self._header = ClickableHeader('sectionHeader', LOG_SECTION_HEADER_STYLE, parent=self)
+        self._header.clicked.connect(self._toggle)
 
-        header_layout = QHBoxLayout(self._header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(6)
+        header_layout = self._header.header_layout
 
         self._chevron = QLabel(CHEVRON_DOWN)
         self._chevron.setStyleSheet(LOG_CHEVRON_STYLE)

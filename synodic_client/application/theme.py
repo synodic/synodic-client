@@ -142,3 +142,17 @@ PLUGIN_UPDATE_STYLE = (
 )
 PLUGIN_SECTION_SPACING = 4
 """Pixels between plugin sections in the scroll area."""
+
+# ---------------------------------------------------------------------------
+# Card-based layout
+# ---------------------------------------------------------------------------
+CARD_FRAME_STYLE = (
+    'QFrame#card {  border: 1px solid palette(mid);  border-radius: 6px;  background: palette(window);  padding: 8px;}'
+)
+"""Rounded card frame style used for layout sections."""
+
+CARD_HEADER_STYLE = 'font-weight: bold; font-size: 12px; margin-bottom: 4px;'
+"""Style for a card title label."""
+
+CARD_SPACING = 8
+"""Pixels between cards in a grid or box layout."""
