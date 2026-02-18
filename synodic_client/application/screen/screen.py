@@ -64,7 +64,7 @@ class PluginSectionData:
     packages: list[tuple[str, str]] = field(default_factory=list)
     auto_update: bool = True
     show_controls: bool = False
-    found: bool = True
+    installed: bool = True
 
 
 class PluginSection(QWidget):
@@ -96,7 +96,7 @@ class PluginSection(QWidget):
             data.version,
             data.auto_update,
             data.show_controls,
-            found=data.found,
+            installed=data.installed,
         )
         layout.addWidget(self._header)
 
@@ -113,7 +113,7 @@ class PluginSection(QWidget):
         auto_update: bool,
         show_controls: bool,
         *,
-        found: bool = True,
+        installed: bool = True,
     ) -> QWidget:
         """Construct the clickable header row."""
         header = QWidget()
@@ -158,12 +158,12 @@ class PluginSection(QWidget):
             )
             header_layout.addWidget(update_btn)
 
-            if not found:
+            if not installed:
                 self._toggle_btn.setEnabled(False)
                 self._toggle_btn.setChecked(False)
-                self._toggle_btn.setToolTip('Plugin not found \u2014 cannot auto-update')
+                self._toggle_btn.setToolTip('Not installed \u2014 cannot auto-update')
                 update_btn.setEnabled(False)
-                update_btn.setToolTip('Plugin not found \u2014 cannot update')
+                update_btn.setToolTip('Not installed \u2014 cannot update')
 
         return header
 
@@ -437,8 +437,14 @@ class PluginsView(QWidget):
         parent: QWidget | None = None,
     ) -> PluginSection:
         """Create a :class:`PluginSection` for a single plugin."""
-        found = plugin.installed
-        version = str(plugin.tool_version) if plugin.tool_version is not None else 'Installed' if found else 'Not found'
+        installed = plugin.installed
+        version = (
+            str(plugin.tool_version)
+            if plugin.tool_version is not None
+            else 'Installed'
+            if installed
+            else 'Not installed'
+        )
         show_controls = plugin.kind in _UPDATABLE_KINDS
         auto_update = auto_update_map.get(plugin.name, True)
 
@@ -449,7 +455,7 @@ class PluginsView(QWidget):
                 packages=packages,
                 auto_update=auto_update,
                 show_controls=show_controls,
-                found=found,
+                installed=installed,
             ),
             parent=parent,
         )
@@ -717,6 +723,7 @@ class ProjectsView(QWidget):
         )
         preview_worker.preview_ready.connect(self._on_preview_ready)
         preview_worker.action_checked.connect(self._preview.on_action_checked)
+        preview_worker.plugins_queried.connect(self._preview.on_plugins_queried)
         preview_worker.finished.connect(self._preview.on_preview_finished)
         preview_worker.error.connect(self._on_preview_error)
 

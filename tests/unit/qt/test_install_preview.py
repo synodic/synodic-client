@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 from porringer.schema import (
     CancellationToken,
     DownloadResult,
+    PluginInfo,
     ProgressEvent,
     ProgressEventKind,
     SetupActionResult,
@@ -29,6 +31,8 @@ from synodic_client.application.screen.install import (
     resolve_local_path,
 )
 from synodic_client.application.uri import parse_uri
+
+_DOWNLOAD_PATCH = 'synodic_client.application.screen.install.API.download'
 
 
 class TestParseUriInstall:
@@ -302,15 +306,18 @@ class TestPreviewWorker:
     """Tests for PreviewWorker download and preview flow."""
 
     @staticmethod
-    def test_emits_error_on_download_failure() -> None:
+    def test_emits_error_on_download_failure(monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify PreviewWorker emits error when download fails."""
         porringer = MagicMock()
-        porringer.sync.download.return_value = DownloadResult(
-            success=False,
-            path=None,
-            verified=False,
-            size=0,
-            message='Network error',
+        monkeypatch.setattr(
+            _DOWNLOAD_PATCH,
+            lambda params, progress_callback=None: DownloadResult(
+                success=False,
+                path=None,
+                verified=False,
+                size=0,
+                message='Network error',
+            ),
         )
 
         worker = PreviewWorker(porringer, 'https://example.com/bad.json')
@@ -323,16 +330,24 @@ class TestPreviewWorker:
         assert 'Network error' in errors[0]
 
     @staticmethod
-    def test_emits_preview_ready_on_success() -> None:
+    def test_emits_preview_ready_on_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Verify PreviewWorker emits preview_ready with SetupResults."""
         porringer = MagicMock()
-        porringer.sync.download.return_value = DownloadResult(
-            success=True,
-            path=Path('/tmp/test/porringer.json'),
-            verified=True,
-            size=100,
-            message='OK',
+
+        dest = tmp_path / 'porringer.json'
+        dest.write_text('{}')
+
+        monkeypatch.setattr(
+            _DOWNLOAD_PATCH,
+            lambda params, progress_callback=None: DownloadResult(
+                success=True,
+                path=dest,
+                verified=True,
+                size=100,
+                message='OK',
+            ),
         )
+
         expected = SetupResults(actions=[])
         manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=expected)
 
@@ -483,3 +498,58 @@ class TestPreviewWorkerSignals:
         assert len(errors) == 1
         assert 'dry-run boom' in errors[0]
         assert len(finished_count) == 0
+
+    @staticmethod
+    def test_emits_plugins_queried(tmp_path: Path) -> None:
+        """Verify plugins_queried is emitted with plugin presence mapping."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+        porringer.plugin.list.return_value = [
+            PluginInfo(name='pip', kind=PluginKind.PACKAGE, version=MagicMock(), installed=True, tool_version=None),
+            PluginInfo(name='uv', kind=PluginKind.PACKAGE, version=MagicMock(), installed=False, tool_version=None),
+        ]
+
+        preview = SetupResults(actions=[])
+        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+
+        async def mock_stream(*args: Any, **kwargs: Any) -> Any:
+            yield manifest_event
+
+        porringer.sync.execute_stream = mock_stream
+
+        worker = PreviewWorker(porringer, str(manifest))
+
+        plugin_data: list[dict[str, bool]] = []
+        worker.plugins_queried.connect(plugin_data.append)
+        worker.run()
+
+        assert len(plugin_data) == 1
+        assert plugin_data[0] == {'pip': True, 'uv': False}
+
+    @staticmethod
+    def test_plugins_queried_emitted_before_preview_ready(tmp_path: Path) -> None:
+        """Verify plugins_queried fires before preview_ready."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+        porringer.plugin.list.return_value = []
+
+        preview = SetupResults(actions=[])
+        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+
+        async def mock_stream(*args: Any, **kwargs: Any) -> Any:
+            yield manifest_event
+
+        porringer.sync.execute_stream = mock_stream
+
+        worker = PreviewWorker(porringer, str(manifest))
+
+        order: list[str] = []
+        worker.plugins_queried.connect(lambda _: order.append('plugins'))
+        worker.preview_ready.connect(lambda *_: order.append('preview'))
+        worker.run()
+
+        assert order == ['plugins', 'preview']

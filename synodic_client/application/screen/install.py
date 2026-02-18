@@ -279,6 +279,7 @@ class SetupPreviewWidget(QWidget):
         self._completed_count = 0
         self._action_statuses: list[str] = []
         self._action_to_table_row: dict[int, int] = {}
+        self._plugin_installed: dict[str, bool] = {}
 
         self._init_ui()
 
@@ -387,6 +388,7 @@ class SetupPreviewWidget(QWidget):
         self._completed_count = 0
         self._action_statuses = []
         self._action_to_table_row = {}
+        self._plugin_installed = {}
 
         self._table.setRowCount(0)
         self._log_panel.clear()
@@ -413,6 +415,18 @@ class SetupPreviewWidget(QWidget):
         self._status_label.setStyleSheet(MUTED_STYLE)
 
     # --- Preview callbacks (connect to PreviewWorker signals) ---
+
+    def on_plugins_queried(self, mapping: dict[str, bool]) -> None:
+        """Store plugin presence data for annotating the preview table.
+
+        Called before :meth:`on_preview_ready` so that
+        :meth:`_populate_table` can flag actions whose installer plugin
+        is not installed.
+
+        Args:
+            mapping: Plugin name → installed status.
+        """
+        self._plugin_installed = mapping
 
     def on_preview_ready(self, preview: SetupResults, manifest_path: str, temp_dir_path: str) -> None:
         """Handle a successful preview.
@@ -465,7 +479,8 @@ class SetupPreviewWidget(QWidget):
         if not self._action_statuses:
             return
 
-        # Resolve any still-pending statuses as 'Needed'
+        # Resolve any still-pending statuses as 'Needed', but leave
+        # 'Not installed' entries untouched — they indicate a missing plugin.
         for i, status in enumerate(self._action_statuses):
             if status == 'Checking…':
                 self._action_statuses[i] = 'Needed'
@@ -480,15 +495,30 @@ class SetupPreviewWidget(QWidget):
         table_statuses = [self._action_statuses[i] for i in self._action_to_table_row]
         total = len(table_statuses)
         needed = sum(1 for s in table_statuses if s == 'Needed')
-        satisfied = total - needed
+        unavailable = sum(1 for s in table_statuses if s == 'Not installed')
+        satisfied = total - needed - unavailable
 
-        if needed == 0:
+        parts: list[str] = []
+        if needed:
+            parts.append(f'{needed} needed')
+        if satisfied:
+            parts.append(f'{satisfied} already satisfied')
+        if unavailable:
+            parts.append(f'{unavailable} unavailable (plugin not installed)')
+
+        if needed == 0 and unavailable == 0:
             self._status_label.setText(f'{total} action(s) — all already satisfied.')
             self._install_btn.setEnabled(False)
         else:
-            self._status_label.setText(f'{total} action(s): {needed} needed, {satisfied} already satisfied.')
+            self._status_label.setText(f'{total} action(s): {", ".join(parts)}.')
 
-        logger.info('Preview complete: %d total, %d needed, %d satisfied', total, needed, satisfied)
+        logger.info(
+            'Preview complete: %d total, %d needed, %d satisfied, %d unavailable',
+            total,
+            needed,
+            satisfied,
+            unavailable,
+        )
 
     def on_preview_error(self, message: str) -> None:
         """Handle a preview error."""
@@ -555,6 +585,10 @@ class SetupPreviewWidget(QWidget):
         because they cannot be dry-run checked — they always appear as
         *Needed* which is misleading.  They remain visible in the
         command-list view and are still executed during install.
+
+        Actions whose installer plugin is not installed are immediately
+        flagged as *Not installed* so the user knows the plugin must be
+        set up before the action can succeed.
         """
         self._action_to_table_row = {}
         table_actions = [(i, a) for i, a in enumerate(actions) if a.kind is not None]
@@ -566,7 +600,19 @@ class SetupPreviewWidget(QWidget):
             self._table.setItem(table_row, 2, QTableWidgetItem(str(action.package) if action.package else ''))
             self._table.setItem(table_row, 3, QTableWidgetItem(action.package_description or action.description))
 
-            status_item = QTableWidgetItem('Checking…')
+            # Check whether the installer plugin is present on the system.
+            installer_missing = (
+                action.installer is not None
+                and action.installer in self._plugin_installed
+                and not self._plugin_installed[action.installer]
+            )
+
+            if installer_missing:
+                status_item = QTableWidgetItem('Not installed')
+                self._action_statuses[action_idx] = 'Not installed'
+            else:
+                status_item = QTableWidgetItem('Checking…')
+
             status_item.setForeground(self.palette().placeholderText())
             self._table.setItem(table_row, 4, status_item)
 
@@ -803,6 +849,7 @@ class InstallPreviewWindow(QMainWindow):
 
         preview_worker = PreviewWorker(self._porringer, self._manifest_url, project_directory=self._project_directory)
 
+        preview_worker.plugins_queried.connect(self._preview_widget.on_plugins_queried)
         preview_worker.preview_ready.connect(self._on_preview_ready)
         preview_worker.action_checked.connect(self._preview_widget.on_action_checked)
         preview_worker.finished.connect(self._preview_widget.on_preview_finished)
@@ -835,6 +882,7 @@ class PreviewWorker(QThread):
 
     preview_ready = Signal(object, str, str)  # (SetupResults, manifest_path, temp_dir_path)
     action_checked = Signal(int, object)  # (row_index, SetupActionResult)
+    plugins_queried = Signal(object)  # dict[str, bool] — plugin name → installed
     finished = Signal()
     error = Signal(str)
 
@@ -884,6 +932,12 @@ class PreviewWorker(QThread):
 
     async def _dry_run(self, manifest_path: Path, temp_dir: str) -> None:
         """Stream dry-run events, emitting preview_ready and action_checked signals."""
+        # Query plugin presence before the dry-run so the widget can
+        # annotate actions whose installer is not available.
+        plugins = self._porringer.plugin.list()
+        plugin_installed = {p.name: p.installed for p in plugins}
+        self.plugins_queried.emit(plugin_installed)
+
         params = SetupParameters(
             paths=[manifest_path],
             dry_run=True,
