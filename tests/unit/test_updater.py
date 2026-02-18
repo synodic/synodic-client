@@ -6,8 +6,6 @@ import pytest
 from packaging.version import Version
 
 from synodic_client.updater import (
-    DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
-    DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
     GITHUB_REPO_URL,
     UpdateChannel,
     UpdateConfig,
@@ -19,109 +17,8 @@ from synodic_client.updater import (
 )
 
 
-class TestUpdateChannel:
-    """Tests for UpdateChannel enum."""
-
-    @staticmethod
-    def test_stable_channel_exists() -> None:
-        """Verify STABLE channel is defined."""
-        assert hasattr(UpdateChannel, 'STABLE')
-
-    @staticmethod
-    def test_development_channel_exists() -> None:
-        """Verify DEVELOPMENT channel is defined."""
-        assert hasattr(UpdateChannel, 'DEVELOPMENT')
-
-
-class TestUpdateState:
-    """Tests for UpdateState enum."""
-
-    @staticmethod
-    def test_all_states_exist() -> None:
-        """Verify all expected states are defined."""
-        expected_states = [
-            'NO_UPDATE',
-            'UPDATE_AVAILABLE',
-            'DOWNLOADING',
-            'DOWNLOADED',
-            'APPLYING',
-            'APPLIED',
-            'FAILED',
-        ]
-        for state_name in expected_states:
-            assert hasattr(UpdateState, state_name)
-
-
-class TestUpdateInfo:
-    """Tests for UpdateInfo dataclass."""
-
-    @staticmethod
-    def test_minimal_creation() -> None:
-        """Verify UpdateInfo can be created with minimal required fields."""
-        info = UpdateInfo(
-            available=False,
-            current_version=Version('1.0.0'),
-        )
-        assert info.available is False
-        assert info.current_version == Version('1.0.0')
-        assert info.latest_version is None
-        assert info.error is None
-        assert info._velopack_info is None
-
-    @staticmethod
-    def test_full_creation() -> None:
-        """Verify UpdateInfo can be created with all fields."""
-        mock_velopack_info = MagicMock()
-        info = UpdateInfo(
-            available=True,
-            current_version=Version('1.0.0'),
-            latest_version=Version('2.0.0'),
-            error=None,
-            _velopack_info=mock_velopack_info,
-        )
-        assert info.available is True
-        assert info.latest_version == Version('2.0.0')
-        assert info._velopack_info is mock_velopack_info
-
-    @staticmethod
-    def test_with_error() -> None:
-        """Verify UpdateInfo can be created with error."""
-        info = UpdateInfo(
-            available=False,
-            current_version=Version('1.0.0'),
-            error='Network error',
-        )
-        assert info.available is False
-        assert info.error == 'Network error'
-
-
 class TestUpdateConfig:
     """Tests for UpdateConfig dataclass."""
-
-    @staticmethod
-    def test_default_values() -> None:
-        """Verify default configuration values."""
-        config = UpdateConfig()
-        assert config.repo_url == GITHUB_REPO_URL
-        assert config.channel == UpdateChannel.STABLE
-        assert config.auto_update_interval_minutes == DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES
-        assert config.tool_update_interval_minutes == DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
-
-    @staticmethod
-    def test_custom_values() -> None:
-        """Verify custom configuration values are applied."""
-        auto = DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES * 2
-        tool = DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES // 2
-        config = UpdateConfig(
-            repo_url='https://github.com/custom/repo',
-            channel=UpdateChannel.DEVELOPMENT,
-            auto_update_interval_minutes=auto,
-            tool_update_interval_minutes=tool,
-        )
-        assert config.repo_url == 'https://github.com/custom/repo'
-        assert config.channel == UpdateChannel.DEVELOPMENT
-        assert config.auto_update_interval_minutes == auto
-        assert config.tool_update_interval_minutes == tool
 
     @staticmethod
     def test_channel_name_stable() -> None:

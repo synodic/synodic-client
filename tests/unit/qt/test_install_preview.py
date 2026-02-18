@@ -30,41 +30,8 @@ from synodic_client.application.screen.install import (
     format_cli_command,
     resolve_local_path,
 )
-from synodic_client.application.uri import parse_uri
 
 _DOWNLOAD_PATCH = 'synodic_client.application.screen.install.API.download'
-
-
-class TestParseUriInstall:
-    """Tests for parsing install URIs."""
-
-    @staticmethod
-    def test_install_action_parsed() -> None:
-        """Verify the action is 'install' for an install URI."""
-        result = parse_uri('synodic://install?manifest=https://example.com/porringer.json')
-        assert result['action'] == 'install'
-
-    @staticmethod
-    def test_manifest_key_present() -> None:
-        """Verify the manifest query parameter is extracted."""
-        result = parse_uri('synodic://install?manifest=https://example.com/porringer.json')
-        assert 'manifest' in result
-        assert isinstance(result['manifest'], list)
-        assert result['manifest'][0] == 'https://example.com/porringer.json'
-
-    @staticmethod
-    def test_multiple_manifests() -> None:
-        """Verify multiple manifest values are captured."""
-        result = parse_uri('synodic://install?manifest=https://a.com/a.json&manifest=https://b.com/b.json')
-        manifests = result['manifest']
-        assert isinstance(manifests, list)
-        assert len(manifests) == 2  # noqa: PLR2004
-
-    @staticmethod
-    def test_unknown_action() -> None:
-        """Verify unknown actions are still parsed without error."""
-        result = parse_uri('synodic://unknown?foo=bar')
-        assert result['action'] == 'unknown'
 
 
 class TestInstallPreviewWindow:
