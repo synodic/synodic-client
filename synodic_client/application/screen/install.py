@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
 
 from synodic_client.application.screen import ACTION_KIND_LABELS, skip_reason_label
 from synodic_client.application.screen.log_panel import ExecutionLogPanel
+from synodic_client.application.screen.spinner import SpinnerWidget
 from synodic_client.application.theme import (
     COMMAND_HEADER_STYLE,
     COMPACT_MARGINS,
@@ -310,6 +311,10 @@ class SetupPreviewWidget(QWidget):
         self._status_label = QLabel()
         layout.addWidget(self._status_label)
 
+        # Centered spinner (fills empty space while loading manifest)
+        self._spinner = SpinnerWidget('Loading\u2026')
+        layout.addWidget(self._spinner, 1)
+
         # --- View stack (table / command list) ---
         self._view_stack = QStackedWidget()
 
@@ -398,9 +403,18 @@ class SetupPreviewWidget(QWidget):
         self._meta_label.hide()
         self._status_label.setText('')
         self._status_label.setStyleSheet('')
+        self._spinner.stop()
         self._install_btn.setEnabled(False)
         self._toggle_btn.setEnabled(False)
         self._view_stack.setCurrentIndex(0)
+
+    def start_loading(self) -> None:
+        """Show the centered loading spinner.
+
+        Call this before starting a :class:`PreviewWorker` so the user
+        sees an animated indicator in the otherwise-empty preview area.
+        """
+        self._spinner.start()
 
     def show_not_found(self, message: str) -> None:
         """Display a muted 'not found' message in the status label.
@@ -440,6 +454,7 @@ class SetupPreviewWidget(QWidget):
         self._preview = preview
         self._manifest_path = Path(manifest_path)
         self._status_label.setStyleSheet('')
+        self._spinner.stop()
 
         self._show_metadata(preview)
 
@@ -523,6 +538,7 @@ class SetupPreviewWidget(QWidget):
     def on_preview_error(self, message: str) -> None:
         """Handle a preview error."""
         logger.error('Preview failed: %s', message)
+        self._spinner.stop()
         self._status_label.setText('')
         QMessageBox.critical(self, 'Preview Failed', message)
         self.close_requested.emit()
@@ -846,6 +862,7 @@ class InstallPreviewWindow(QMainWindow):
         """
         logger.info('Starting install preview for: %s', self._manifest_url)
         self._url_label.setText(f'<b>Manifest:</b> {self._manifest_url}')
+        self._preview_widget.start_loading()
 
         preview_worker = PreviewWorker(self._porringer, self._manifest_url, project_directory=self._project_directory)
 

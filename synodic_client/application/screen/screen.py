@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen import plugin_kind_group_label
 from synodic_client.application.screen.install import PreviewWorker, SetupPreviewWidget
+from synodic_client.application.screen.spinner import SpinnerWidget
 from synodic_client.application.theme import (
     COMPACT_MARGINS,
     LOG_CHEVRON_STYLE,
@@ -333,10 +334,8 @@ class PluginsView(QWidget):
         outer.setContentsMargins(*COMPACT_MARGINS)
 
         # Loading indicator (shown while data is fetched asynchronously)
-        self._loading_label = QLabel('Loading plugins\u2026')
-        self._loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._loading_label.hide()
-        outer.addWidget(self._loading_label)
+        self._loading_spinner = SpinnerWidget('Loading plugins\u2026')
+        outer.addWidget(self._loading_spinner)
 
         # Toolbar
         toolbar = QHBoxLayout()
@@ -372,7 +371,7 @@ class PluginsView(QWidget):
     async def _async_refresh(self) -> None:
         """Rebuild the plugin sections from porringer data, grouped by kind."""
         self._refresh_in_progress = True
-        self._loading_label.show()
+        self._loading_spinner.start()
 
         try:
             loop = asyncio.get_running_loop()
@@ -413,7 +412,7 @@ class PluginsView(QWidget):
         except Exception:
             logger.exception('Failed to refresh plugins')
         finally:
-            self._loading_label.hide()
+            self._loading_spinner.stop()
             self._refresh_in_progress = False
 
     def _fetch_plugin_data(
@@ -535,10 +534,8 @@ class ProjectsView(QWidget):
         layout.setContentsMargins(*COMPACT_MARGINS)
 
         # Loading indicator (shown while data is fetched asynchronously)
-        self._loading_label = QLabel('Loading projects\u2026')
-        self._loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._loading_label.hide()
-        layout.addWidget(self._loading_label)
+        self._loading_spinner = SpinnerWidget('Loading projects\u2026')
+        layout.addWidget(self._loading_spinner)
 
         # --- Project directory selector ---
         selector_row = QHBoxLayout()
@@ -580,7 +577,7 @@ class ProjectsView(QWidget):
     async def _async_refresh(self) -> None:
         """Refresh the cached directories combo box from porringer cache."""
         self._refresh_in_progress = True
-        self._loading_label.show()
+        self._loading_spinner.start()
         self._combo.setEnabled(False)
         self._browse_btn.setEnabled(False)
         self._remove_btn.setEnabled(False)
@@ -629,7 +626,7 @@ class ProjectsView(QWidget):
         except Exception:
             logger.exception('Failed to refresh projects')
         finally:
-            self._loading_label.hide()
+            self._loading_spinner.stop()
             self._combo.setEnabled(True)
             self._browse_btn.setEnabled(True)
             self._update_remove_btn()
@@ -713,6 +710,8 @@ class ProjectsView(QWidget):
         if not self._porringer.sync.has_manifest(selected_path):
             self._preview.show_not_found(f'No manifest found at: {selected_path}')
             return
+
+        self._preview.start_loading()
 
         # Defer project directory assignment until the preview result
         # provides root_directory — handles both file and directory inputs.
