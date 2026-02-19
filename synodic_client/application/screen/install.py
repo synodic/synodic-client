@@ -207,8 +207,10 @@ class PostInstallSection(QWidget):
         # Clear previous content
         while self._content_layout.count():
             item = self._content_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            if item is not None:
+                widget = item.widget()
+                if widget is not None:
+                    widget.deleteLater()
 
         commands = [(i, a) for i, a in enumerate(actions, 1) if a.kind is None]
         if not commands:

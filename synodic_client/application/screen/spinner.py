@@ -14,6 +14,7 @@ _SIZE = 24
 _PEN = 3
 _INTERVAL = 50
 _ARC = 90
+_FULL_CIRCLE = 360
 
 
 class _Canvas(QWidget):
@@ -32,11 +33,11 @@ class _Canvas(QWidget):
         m = _PEN // 2 + 1
         rect = QRect(m, m, _SIZE - 2 * m, _SIZE - 2 * m)
 
-        for colour, span in ((self.palette().mid(), 360), (self.palette().highlight(), _ARC)):
+        for colour, span in ((self.palette().mid(), _FULL_CIRCLE), (self.palette().highlight(), _ARC)):
             pen = QPen(colour, _PEN)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
-            if span == 360:
+            if span == _FULL_CIRCLE:
                 painter.drawEllipse(rect)
             else:
                 painter.drawArc(rect, self._angle * 16, span * 16)
@@ -58,6 +59,12 @@ class SpinnerWidget(QWidget):
     """
 
     def __init__(self, text: str = '', parent: QWidget | None = None) -> None:
+        """Initialize the spinner.
+
+        Args:
+            text: Optional label shown beside the spinner arc.
+            parent: Optional parent widget.
+        """
         super().__init__(parent)
         self.hide()
 
