@@ -32,7 +32,11 @@ from PySide6.QtWidgets import (
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen import plugin_kind_group_label
 from synodic_client.application.screen.card import CHEVRON_DOWN, CHEVRON_RIGHT, ClickableHeader
-from synodic_client.application.screen.install import PreviewWorker, SetupPreviewWidget
+from synodic_client.application.screen.install import (
+    PreviewWorker,
+    SetupPreviewWidget,
+    normalize_manifest_key,
+)
 from synodic_client.application.screen.spinner import SpinnerWidget
 from synodic_client.application.theme import (
     CARD_SPACING,
@@ -505,15 +509,17 @@ class ProjectsView(QWidget):
     install execution.
     """
 
-    def __init__(self, porringer: API, parent: QWidget | None = None) -> None:
+    def __init__(self, porringer: API, config: GlobalConfiguration, parent: QWidget | None = None) -> None:
         """Initialize the projects view.
 
         Args:
             porringer: The porringer API instance.
+            config: Resolved global configuration.
             parent: Optional parent widget.
         """
         super().__init__(parent)
         self._porringer = porringer
+        self._config = config
         self._runner: QThread | None = None
         self._refresh_in_progress = False
         self._init_ui()
@@ -550,8 +556,9 @@ class ProjectsView(QWidget):
         grid.addWidget(self._remove_btn, 0, 2)
 
         # Row 1 — Shared preview widget (takes majority of space)
-        self._preview = SetupPreviewWidget(self._porringer, self, show_close=False)
+        self._preview = SetupPreviewWidget(self._porringer, self, show_close=False, config=self._config)
         self._preview.install_finished.connect(self._on_install_finished)
+        self._preview.prerelease_changed.connect(self._on_prerelease_changed)
         grid.addWidget(self._preview, 1, 0, 1, 3)
         grid.setRowStretch(1, 1)
 
@@ -677,7 +684,12 @@ class ProjectsView(QWidget):
         self.refresh()
 
     def _on_install_finished(self, _results: object) -> None:
-        """Register a new path in the cache after successful install."""
+        """Register a new path in the cache after successful install.
+
+        The directory is added to the porringer cache and the combo box
+        is updated *without* reloading the preview, so the execution
+        log remains visible.
+        """
         current_text = self._combo.currentText().strip()
         if not current_text:
             return
@@ -689,9 +701,26 @@ class ProjectsView(QWidget):
             try:
                 self._porringer.cache.add_directory(Path(current_text))
                 logger.info('Registered new project directory: %s', current_text)
-                self.refresh()
+                # Add the entry to the combo inline so the Remove button
+                # works without a full refresh that would wipe the log.
+                new_idx = self._combo.count()
+                self._combo.addItem(current_text)
+                self._combo.setItemData(new_idx, current_text, Qt.ItemDataRole.UserRole)
+                self._combo.setCurrentIndex(new_idx)
+                self._update_remove_btn()
             except ValueError:
                 logger.debug('Directory already cached or invalid: %s', current_text)
+
+    def _on_prerelease_changed(self) -> None:
+        """Re-load the preview with the updated pre-release setting."""
+        self._load_preview()
+
+    def _stop_preview(self) -> None:
+        """Wait for any running preview worker to finish before starting a new one."""
+        if self._runner is not None and self._runner.isRunning():
+            self._runner.quit()
+            self._runner.wait()
+            self._runner = None
 
     # --- Preview loading ---
 
@@ -703,6 +732,7 @@ class ProjectsView(QWidget):
 
         selected_path = Path(path_text)
 
+        self._stop_preview()
         self._preview.reset()
 
         if not selected_path.exists():
@@ -715,12 +745,22 @@ class ProjectsView(QWidget):
 
         self._preview.start_loading()
 
+        # Set the manifest key so per-item pre-release checkboxes
+        # reflect persisted overrides for this specific manifest.
+        self._preview.set_manifest_key(str(selected_path))
+
+        # Build prerelease_packages from persisted overrides
+        manifest_key = normalize_manifest_key(str(selected_path))
+        overrides = set((self._config.prerelease_packages or {}).get(manifest_key, []))
+
         # Defer project directory assignment until the preview result
         # provides root_directory — handles both file and directory inputs.
         preview_worker = PreviewWorker(
             self._porringer,
             str(selected_path),
             project_directory=selected_path if selected_path.is_dir() else None,
+            detect_updates=self._config.detect_updates,
+            prerelease_packages=overrides or None,
         )
         preview_worker.preview_ready.connect(self._on_preview_ready)
         preview_worker.action_checked.connect(self._preview.on_action_checked)
@@ -789,7 +829,7 @@ class MainWindow(QMainWindow):
         if self._tabs is None and self._porringer is not None:
             self._tabs = QTabWidget(self)
 
-            self._projects_view = ProjectsView(self._porringer, self)
+            self._projects_view = ProjectsView(self._porringer, self._config, self)
             self._tabs.addTab(self._projects_view, 'Projects')
 
             self._plugins_view = PluginsView(self._porringer, self._config, self)

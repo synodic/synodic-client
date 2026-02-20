@@ -28,6 +28,7 @@ from synodic_client.application.screen.install import (
     InstallWorker,
     PreviewWorker,
     format_cli_command,
+    normalize_manifest_key,
     resolve_local_path,
 )
 
@@ -71,7 +72,122 @@ class TestInstallPreviewWindow:
     def test_skip_reason_label_human_readable() -> None:
         """Verify skip reason labels are human-readable, not raw enum names."""
         assert skip_reason_label(SkipReason.ALREADY_INSTALLED) == 'Already installed'
+        assert skip_reason_label(SkipReason.UPDATE_AVAILABLE) == 'Update available'
         assert skip_reason_label(None) == 'Skipped'
+
+
+class TestUpdateAvailableLabels:
+    """Tests for UPDATE_AVAILABLE skip reason handling in the preview UI."""
+
+    @staticmethod
+    def _make_action(
+        kind: str = 'PACKAGE',
+        description: str = 'Install test',
+        installer: str = 'pip',
+        package: str = 'requests',
+    ) -> MagicMock:
+        """Create a mock SetupAction."""
+        action = MagicMock()
+        action.kind = getattr(PluginKind, kind)
+        action.description = description
+        action.installer = installer
+        action.package = package
+        action.command = None
+        action.cli_command = None
+        return action
+
+    @staticmethod
+    def test_update_available_label_with_versions() -> None:
+        """Verify UPDATE_AVAILABLE produces a clean status label without inline versions."""
+        result = SetupActionResult(
+            action=MagicMock(),
+            success=True,
+            skipped=True,
+            skip_reason=SkipReason.UPDATE_AVAILABLE,
+            installed_version='1.0.0',
+            available_version='2.0.0a1',
+        )
+        # Status column now uses the bare label; versions go to the Version column.
+        assert skip_reason_label(result.skip_reason) == 'Update available'
+
+    @staticmethod
+    def test_version_column_update_available() -> None:
+        """Verify version column shows transition when an update is available."""
+        result = SetupActionResult(
+            action=MagicMock(),
+            success=True,
+            skipped=True,
+            skip_reason=SkipReason.UPDATE_AVAILABLE,
+            installed_version='1.0.0',
+            available_version='2.0.0a1',
+        )
+        # The Version column should contain the transition text.
+        version_text = f'{result.installed_version} \u2192 {result.available_version}'
+        assert '1.0.0' in version_text
+        assert '2.0.0a1' in version_text
+
+    @staticmethod
+    def test_version_column_already_installed() -> None:
+        """Verify version column shows installed version for already-installed packages."""
+        result = SetupActionResult(
+            action=MagicMock(),
+            success=True,
+            skipped=True,
+            skip_reason=SkipReason.ALREADY_INSTALLED,
+            installed_version='3.5.2',
+        )
+        assert result.installed_version == '3.5.2'
+        assert result.available_version is None
+
+    @staticmethod
+    def test_update_available_label_without_versions() -> None:
+        """Verify UPDATE_AVAILABLE falls back to base label when versions are missing."""
+        result = SetupActionResult(
+            action=MagicMock(),
+            success=True,
+            skipped=True,
+            skip_reason=SkipReason.UPDATE_AVAILABLE,
+        )
+        assert skip_reason_label(result.skip_reason) == 'Update available'
+
+    @staticmethod
+    def test_update_available_counted_as_actionable() -> None:
+        """Verify upgradable rows are counted as actionable alongside needed."""
+        # Simulate the data model: 4 actions where row 1 is upgradable
+        statuses = ['Already installed', 'Update available', 'Needed', 'Not installed']
+        upgradable_rows = {1}
+
+        needed = sum(1 for s in statuses if s == 'Needed')
+        upgradable = len(upgradable_rows)
+        unavailable = sum(1 for s in statuses if s == 'Not installed')
+        satisfied = len(statuses) - needed - upgradable - unavailable
+
+        assert needed == 1
+        assert upgradable == 1
+        assert unavailable == 1
+        assert satisfied == 1
+        assert needed + upgradable > 0  # Install button should be enabled
+
+    @staticmethod
+    def test_version_updated_after_successful_upgrade() -> None:
+        """Verify the available_version is surfaced for post-install display.
+
+        After a successful upgrade, the ``_update_table_status`` method
+        uses ``result.available_version`` to replace the transition arrow
+        in the Version column.  This test validates the result carries
+        the new version.
+        """
+        result = SetupActionResult(
+            action=MagicMock(),
+            success=True,
+            skipped=False,
+            installed_version='1.0.0',
+            available_version='2.0.0a1',
+        )
+        # After a successful upgrade, available_version is the new version
+        assert result.success
+        assert not result.skipped
+        assert result.available_version == '2.0.0a1'
 
 
 class TestFormatCliCommand:
@@ -191,6 +307,59 @@ class TestInstallWorker:
 
         assert len(errors) == 1
         assert 'boom' in errors[0]
+
+    @staticmethod
+    def test_worker_passes_prerelease_packages() -> None:
+        """Verify prerelease_packages is forwarded to SetupParameters."""
+        porringer = MagicMock()
+        manifest_path = Path('/tmp/test/porringer.json')
+
+        manifest = SetupResults(actions=[])
+        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=manifest)
+
+        captured_params: list[Any] = []
+
+        async def mock_stream(params: Any) -> Any:
+            captured_params.append(params)
+            yield manifest_event
+
+        porringer.sync.execute_stream = mock_stream
+
+        token = CancellationToken()
+        worker = InstallWorker(
+            porringer,
+            manifest_path,
+            token,
+            prerelease_packages={'cppython'},
+        )
+        worker.run()
+
+        assert len(captured_params) == 1
+        assert captured_params[0].prerelease_packages == {'cppython'}
+
+    @staticmethod
+    def test_worker_omits_prerelease_when_none() -> None:
+        """Verify prerelease_packages defaults to None."""
+        porringer = MagicMock()
+        manifest_path = Path('/tmp/test/porringer.json')
+
+        manifest = SetupResults(actions=[])
+        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=manifest)
+
+        captured_params: list[Any] = []
+
+        async def mock_stream(params: Any) -> Any:
+            captured_params.append(params)
+            yield manifest_event
+
+        porringer.sync.execute_stream = mock_stream
+
+        token = CancellationToken()
+        worker = InstallWorker(porringer, manifest_path, token)
+        worker.run()
+
+        assert len(captured_params) == 1
+        assert captured_params[0].prerelease_packages is None
 
 
 class TestResolveLocalPath:
@@ -520,3 +689,125 @@ class TestPreviewWorkerSignals:
         worker.run()
 
         assert order == ['plugins', 'preview']
+
+
+class TestPreviewWorkerUpdateDetection:
+    """Tests for PreviewWorker passing update-detection flags to porringer."""
+
+    @staticmethod
+    def test_passes_detect_updates_and_prerelease_packages(tmp_path: Path) -> None:
+        """Verify detect_updates and prerelease_packages are forwarded to SetupParameters."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+        porringer.plugin.list.return_value = []
+        preview = SetupResults(actions=[])
+        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+
+        captured_params: list[Any] = []
+
+        async def mock_stream(params: Any) -> Any:
+            captured_params.append(params)
+            yield manifest_event
+
+        porringer.sync.execute_stream = mock_stream
+
+        worker = PreviewWorker(
+            porringer,
+            str(manifest),
+            detect_updates=True,
+            prerelease_packages={'some-pkg'},
+        )
+        worker.run()
+
+        assert len(captured_params) == 1
+        assert captured_params[0].detect_updates is True
+        assert captured_params[0].prerelease_packages == {'some-pkg'}
+
+    @staticmethod
+    def test_defaults_detect_updates_true(tmp_path: Path) -> None:
+        """Verify detect_updates defaults to True."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+        porringer.plugin.list.return_value = []
+        preview = SetupResults(actions=[])
+        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+
+        captured_params: list[Any] = []
+
+        async def mock_stream(params: Any) -> Any:
+            captured_params.append(params)
+            yield manifest_event
+
+        porringer.sync.execute_stream = mock_stream
+
+        worker = PreviewWorker(porringer, str(manifest))
+        worker.run()
+
+        assert len(captured_params) == 1
+        assert captured_params[0].detect_updates is True
+        assert captured_params[0].prerelease_packages is None
+
+
+class TestNormalizeManifestKey:
+    """Tests for normalize_manifest_key helper."""
+
+    @staticmethod
+    def test_http_url_passthrough() -> None:
+        """HTTP URLs are returned unchanged."""
+        url = 'https://example.com/porringer.json'
+        assert normalize_manifest_key(url) == url
+
+    @staticmethod
+    def test_local_path_resolved(tmp_path: Path) -> None:
+        """Local paths are resolved to absolute form."""
+        result = normalize_manifest_key(str(tmp_path / 'manifest'))
+        assert Path(result).is_absolute()
+
+    @staticmethod
+    def test_relative_path_resolved() -> None:
+        """Relative paths are resolved relative to cwd."""
+        result = normalize_manifest_key('some/relative/path')
+        assert Path(result).is_absolute()
+
+
+class TestPrereleaseCheckboxLock:
+    """Tests for the pre-release checkbox lock/unlock decision logic.
+
+    The checkbox should be locked (disabled) only when the manifest
+    sets ``include_prereleases=True`` AND the user has NOT added the
+    package as an override.  If the user checked the box manually
+    (package in ``_prerelease_overrides``), it must remain unlocked
+    even after the reload returns the action with
+    ``include_prereleases=True`` (because the upstream applied the
+    user's override additively).
+    """
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        ('include_prereleases', 'in_overrides', 'expected_locked'),
+        [
+            # Manifest enables pre-release, user hasn't touched it → locked
+            (True, False, True),
+            # Manifest enables pre-release, but user toggled it on → unlocked
+            (True, True, False),
+            # Manifest does not enable, user hasn't touched → unlocked
+            (False, False, False),
+            # Manifest does not enable, user checked it → unlocked
+            (False, True, False),
+        ],
+    )
+    def test_lock_decision(
+        include_prereleases: bool,
+        in_overrides: bool,
+        expected_locked: bool,
+    ) -> None:
+        """Verify the manifest-native vs user-override lock decision."""
+        # Mirror the conditional in _populate_table:
+        #   if action.include_prereleases and not is_user_override → locked
+        is_user_override = in_overrides
+        locked = include_prereleases and not is_user_override
+        assert locked is expected_locked

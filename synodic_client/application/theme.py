@@ -140,6 +140,7 @@ PLUGIN_UPDATE_STYLE = (
     '  min-width: 60px; max-width: 60px; }'
     'QPushButton:disabled { color: palette(mid); border-color: palette(mid); background: transparent; }'
 )
+
 PLUGIN_SECTION_SPACING = 4
 """Pixels between plugin sections in the scroll area."""
 

@@ -159,7 +159,11 @@ def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
 
     def _handle_install_uri(manifest_url: str) -> None:
         logger.info('Opening install preview for: %s', manifest_url)
-        window = InstallPreviewWindow(porringer, manifest_url)
+        window = InstallPreviewWindow(
+            porringer,
+            manifest_url,
+            config=config,
+        )
         _install_windows.append(window)
         window.show()
         window.raise_()

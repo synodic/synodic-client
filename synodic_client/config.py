@@ -76,6 +76,19 @@ class _ConfigBase(BaseModel):
     # entries disable auto-update for that plugin.
     plugin_auto_update: dict[str, bool] | None = None
 
+    # Check for updates during dry-run previews.  When True the preview
+    # will query package indices for newer versions.
+    detect_updates: bool = True
+
+    # Per-manifest pre-release overrides.  Outer key is a normalised
+    # manifest path (or URL for remote manifests) produced by
+    # ``normalize_manifest_key()``.  Inner value is a sorted list of
+    # package names (case-insensitive) that should be checked for
+    # pre-release updates even when the manifest does not set
+    # ``include_prereleases: true`` on the package.  ``None`` means
+    # no overrides anywhere.
+    prerelease_packages: dict[str, list[str]] | None = None
+
 
 class LocalConfiguration(_ConfigBase):
     """Portable configuration embedded next to the executable.

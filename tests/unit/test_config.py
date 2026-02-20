@@ -27,6 +27,8 @@ class TestLocalConfiguration:
         assert config.auto_update_interval_minutes is None
         assert config.tool_update_interval_minutes is None
         assert config.plugin_auto_update is None
+        assert config.detect_updates is True
+        assert config.prerelease_packages is None
 
     @staticmethod
     def test_with_values() -> None:
@@ -48,6 +50,8 @@ class TestGlobalConfiguration:
         assert config.auto_update_interval_minutes is None
         assert config.tool_update_interval_minutes is None
         assert config.plugin_auto_update is None
+        assert config.detect_updates is True
+        assert config.prerelease_packages is None
 
     @staticmethod
     def test_with_values() -> None:
@@ -55,6 +59,15 @@ class TestGlobalConfiguration:
         config = GlobalConfiguration(update_source='/path/to/releases', update_channel='dev')
         assert config.update_source == '/path/to/releases'
         assert config.update_channel == 'dev'
+
+    @staticmethod
+    def test_prerelease_packages_round_trip() -> None:
+        """Verify prerelease_packages survives JSON round-trip."""
+        packages = {'/some/path': ['alpha', 'beta'], 'https://example.com/manifest.json': ['gamma']}
+        original = GlobalConfiguration(prerelease_packages=packages)
+        data = json.loads(original.model_dump_json())
+        restored = GlobalConfiguration.model_validate(data)
+        assert restored.prerelease_packages == packages
 
     @staticmethod
     def test_plugin_auto_update_round_trip() -> None:
