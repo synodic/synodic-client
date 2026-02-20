@@ -72,6 +72,7 @@ class TestInstallPreviewWindow:
     def test_skip_reason_label_human_readable() -> None:
         """Verify skip reason labels are human-readable, not raw enum names."""
         assert skip_reason_label(SkipReason.ALREADY_INSTALLED) == 'Already installed'
+        assert skip_reason_label(SkipReason.ALREADY_LATEST) == 'Already latest'
         assert skip_reason_label(SkipReason.UPDATE_AVAILABLE) == 'Update available'
         assert skip_reason_label(None) == 'Skipped'
 

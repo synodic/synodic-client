@@ -157,3 +157,121 @@ CARD_HEADER_STYLE = 'font-weight: bold; font-size: 12px; margin-bottom: 4px;'
 
 CARD_SPACING = 8
 """Pixels between cards in a grid or box layout."""
+
+# ---------------------------------------------------------------------------
+# Action card (install screen)
+# ---------------------------------------------------------------------------
+ACTION_CARD_STYLE = (
+    'QFrame#actionCard {'
+    '  border: 1px solid palette(mid);'
+    '  border-radius: 4px;'
+    '  background: palette(window);'
+    '  padding: 6px 8px;'
+    '}'
+)
+"""Default style for an action card in the install preview."""
+
+ACTION_CARD_EXECUTING_STYLE = (
+    'QFrame#actionCard {'
+    '  border: 1px solid #3794ff;'
+    '  border-radius: 4px;'
+    '  background: palette(window);'
+    '  padding: 6px 8px;'
+    '}'
+)
+"""Style for an action card that is currently executing."""
+
+ACTION_CARD_SKELETON_STYLE = (
+    'QFrame#actionCard {'
+    '  border: 1px solid palette(mid);'
+    '  border-radius: 4px;'
+    '  background: palette(midlight);'
+    '  padding: 6px 8px;'
+    '}'
+)
+"""Muted style for skeleton/placeholder action cards."""
+
+ACTION_CARD_SPACING = 4
+"""Pixels between action cards in the list."""
+
+ACTION_CARD_TYPE_BADGE_STYLE = (
+    'QLabel { font-size: 10px; font-weight: bold;'
+    '  padding: 1px 6px; border-radius: 3px;'
+    '  background: palette(midlight); color: palette(text); }'
+)
+"""Small type badge (Package, Tool, Runtime, etc.) on each action card."""
+
+ACTION_CARD_PACKAGE_STYLE = 'font-weight: bold; font-size: 12px;'
+"""Primary line: package name."""
+
+ACTION_CARD_DESC_STYLE = 'color: grey; font-size: 11px;'
+"""Secondary line: description text."""
+
+ACTION_CARD_VERSION_STYLE = 'font-size: 11px;'
+"""Version transition text."""
+
+ACTION_CARD_STATUS_CHECKING = 'color: grey; font-size: 11px;'
+"""Status label: Checking…"""
+
+ACTION_CARD_STATUS_NEEDED = 'color: palette(text); font-size: 11px; font-weight: bold;'
+"""Status label: Needed."""
+
+ACTION_CARD_STATUS_SATISFIED = 'color: grey; font-size: 11px;'
+"""Status label: Already installed."""
+
+ACTION_CARD_STATUS_UPDATE = 'color: #d7ba7d; font-size: 11px; font-weight: bold;'
+"""Status label: Update available (amber)."""
+
+ACTION_CARD_STATUS_UNAVAILABLE = 'color: #f48771; font-size: 11px;'
+"""Status label: Plugin not installed (red-orange)."""
+
+ACTION_CARD_STATUS_RUNNING = 'color: #3794ff; font-size: 11px; font-weight: bold;'
+"""Status label: Running… (blue)."""
+
+ACTION_CARD_STATUS_DONE = 'color: #89d185; font-size: 11px; font-weight: bold;'
+"""Status label: Done (green)."""
+
+ACTION_CARD_STATUS_FAILED = 'color: #f48771; font-size: 11px; font-weight: bold;'
+"""Status label: Failed (red-orange)."""
+
+ACTION_CARD_STATUS_SKIPPED = 'color: grey; font-size: 11px;'
+"""Status label: Skipped."""
+
+ACTION_CARD_LOG_STYLE = (
+    'QTextEdit {'
+    '  background: #1e1e1e;'
+    '  border: 1px solid palette(mid);'
+    '  border-radius: 3px;'
+    '  padding: 4px;'
+    '  margin-top: 4px;'
+    '}'
+)
+"""Inline log output area within an action card."""
+
+ACTION_CARD_SKELETON_BAR_STYLE = 'QFrame { background: palette(mid); border-radius: 2px; }'
+"""Placeholder bar used inside skeleton action cards."""
+
+ACTION_CARD_COMMAND_STYLE = 'color: grey; font-size: 10px; font-family: Consolas, monospace;'
+"""Muted monospace line showing the CLI command on each action card."""
+
+ACTION_CARD_SPINNER_SIZE = 12
+"""Diameter (px) of the per-card inline checking spinner."""
+
+ACTION_CARD_SPINNER_PEN = 2
+"""Pen width (px) for the per-card inline spinner arc."""
+
+# ---------------------------------------------------------------------------
+# Metadata skeleton card
+# ---------------------------------------------------------------------------
+METADATA_SKELETON_HEIGHT = 72
+"""Fixed height for the metadata skeleton card shown during loading."""
+
+METADATA_SKELETON_STYLE = (
+    'QFrame#card {'
+    '  border: 1px solid palette(mid);'
+    '  border-radius: 6px;'
+    '  background: palette(midlight);'
+    '  padding: 8px;'
+    '}'
+)
+"""Muted card frame used as the metadata placeholder during loading."""
