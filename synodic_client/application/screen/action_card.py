@@ -216,6 +216,7 @@ class ActionCard(QFrame):
         self._is_skeleton = skeleton
         self._log_expanded = False
         self._checking = False
+        self._check_available_version: str | None = None
 
         if skeleton:
             self._init_skeleton_ui()
@@ -516,6 +517,7 @@ class ActionCard(QFrame):
             self._status_label.setStyleSheet(ACTION_CARD_STATUS_NEEDED)
 
         # Version column
+        self._check_available_version = result.available_version
         if result.installed_version and result.available_version:
             self._version_label.setText(f'{result.installed_version} \u2192 {result.available_version}')
             self._version_label.setStyleSheet(ACTION_CARD_VERSION_STYLE + ' color: #d7ba7d;')
@@ -603,8 +605,9 @@ class ActionCard(QFrame):
                 f'<span style="color: {LOG_COLOR_SUCCESS};">\u2713 {html_mod.escape(msg)}</span>',
             )
             # Update version if an upgrade completed
-            if result.available_version:
-                self._version_label.setText(result.available_version)
+            new_version = result.available_version or self._check_available_version
+            if new_version:
+                self._version_label.setText(new_version)
                 self._version_label.setStyleSheet(ACTION_CARD_VERSION_STYLE)
         else:
             self._status_label.setText('Failed')
