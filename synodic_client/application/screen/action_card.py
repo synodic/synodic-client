@@ -75,14 +75,16 @@ _SPINNER_ARC = 90
 
 
 #: Sort priority for each :class:`PluginKind`.
-#: Lower numbers appear first.  Runtimes and SCM come before packages
-#: so that infrastructure is set up first.
+#: Lower numbers appear first.  Matches the execution phase order
+#: defined in ``porringer.backend.command.core.action_builder.PHASE_ORDER``
+#: so that cards are displayed in the same order they execute:
+#: runtime → package → tool → project → SCM.
 _KIND_ORDER: dict[PluginKind | None, int] = {
     PluginKind.RUNTIME: 0,
-    PluginKind.SCM: 1,
-    PluginKind.PROJECT: 2,
-    PluginKind.TOOL: 3,
-    PluginKind.PACKAGE: 4,
+    PluginKind.PACKAGE: 1,
+    PluginKind.TOOL: 2,
+    PluginKind.PROJECT: 3,
+    PluginKind.SCM: 4,
     None: 99,  # bare commands are excluded from ActionCardList anyway
 }
 
@@ -103,9 +105,10 @@ def action_key(action: SetupAction) -> tuple[object, ...]:
 def action_sort_key(action: SetupAction) -> tuple[int, str]:
     """Return a sort key so cards are grouped by kind then alphabetical.
 
-    The ordering places infrastructure kinds (runtime, SCM) before
-    packages / tools.  Within a group, actions are sorted
-    case-insensitively by package name.
+    The ordering matches the execution phase order
+    (runtime → package → tool → project → SCM) so that displayed
+    cards appear in the same sequence as they execute.  Within a
+    group, actions are sorted case-insensitively by package name.
     """
     kind_order = _KIND_ORDER.get(action.kind, 50)
     pkg_name = str(action.package.name).lower() if action.package else ''
@@ -410,6 +413,7 @@ class ActionCard(QFrame):
             self._command_label.hide()
 
         # Version — populated later by set_check_result()
+
         self._version_label.setText('')
 
         # Status — check plugin presence first
@@ -447,6 +451,24 @@ class ActionCard(QFrame):
             self._prerelease_cb.show()
         else:
             self._prerelease_cb.hide()
+
+    def update_command(self, action: SetupAction) -> None:
+        """Update the CLI command label after the resolved preview arrives.
+
+        Called from the two-phase display flow once ``MANIFEST_LOADED``
+        provides actions with their ``cli_command`` populated.
+
+        Args:
+            action: The setup action with resolved CLI command.
+        """
+        if self._is_skeleton:
+            return
+        cmd_text = _format_command(action)
+        if cmd_text:
+            self._command_label.setText(cmd_text)
+            self._command_label.show()
+        else:
+            self._command_label.hide()
 
     def initial_status(self) -> str:
         """Return the initial status text set during :meth:`populate`."""

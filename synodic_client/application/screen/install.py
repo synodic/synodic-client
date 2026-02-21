@@ -658,6 +658,25 @@ class SetupPreviewWidget(QWidget):
 
         self._install_btn.setEnabled(True)
 
+    def on_preview_resolved(self, preview: SetupResults) -> None:
+        """Handle the fully-resolved preview (CLI commands populated).
+
+        Called after ``MANIFEST_LOADED`` — cards are already visible
+        from the earlier ``on_preview_ready`` call.  This method
+        updates the CLI command display text on each existing card.
+
+        Args:
+            preview: The fully-resolved setup results with CLI commands.
+        """
+        if self._preview is None:
+            return
+
+        for action in preview.actions:
+            if action.cli_command:
+                card = self._card_list.get_card(action)
+                if card is not None:
+                    card.update_command(action)
+
     def on_action_checked(self, row: int, result: SetupActionResult) -> None:
         """Update the data model and action card with the dry-run result."""
         if result.skipped and result.skip_reason == SkipReason.UPDATE_AVAILABLE:
@@ -1025,6 +1044,7 @@ class InstallPreviewWindow(QMainWindow):
             prerelease_packages=overrides or None,
         )
 
+        preview_worker.manifest_parsed.connect(self._on_manifest_parsed)
         preview_worker.plugins_queried.connect(self._preview_widget.on_plugins_queried)
         preview_worker.preview_ready.connect(self._on_preview_ready)
         preview_worker.action_checked.connect(self._preview_widget.on_action_checked)
@@ -1034,10 +1054,10 @@ class InstallPreviewWindow(QMainWindow):
         self._runner = preview_worker
         self._runner.start()
 
-    # --- Preview callback (intercepts to capture temp dir) ---
+    # --- Preview callbacks (intercept to capture temp dir / metadata) ---
 
-    def _on_preview_ready(self, preview: SetupResults, manifest_path: str, temp_dir_path: str) -> None:
-        """Capture the temp dir path and forward to the preview widget."""
+    def _on_manifest_parsed(self, preview: SetupResults, manifest_path: str, temp_dir_path: str) -> None:
+        """Handle the fast MANIFEST_PARSED event — show cards immediately."""
         self._temp_dir_path = temp_dir_path
 
         # Update window title from metadata
@@ -1045,6 +1065,22 @@ class InstallPreviewWindow(QMainWindow):
             self.setWindowTitle(f'Install Preview — {preview.metadata.name}')
 
         self._preview_widget.on_preview_ready(preview, manifest_path, temp_dir_path)
+
+    def _on_preview_ready(self, preview: SetupResults, manifest_path: str, temp_dir_path: str) -> None:
+        """Handle the fully-resolved MANIFEST_LOADED event.
+
+        At this point CLI commands are populated on each action.  We
+        forward to the preview widget so it can refresh any command
+        display text, but cards are already visible from the earlier
+        ``_on_manifest_parsed`` handler.
+        """
+        self._temp_dir_path = temp_dir_path
+
+        # Update window title from metadata (in case it changed)
+        if preview.metadata and preview.metadata.name:
+            self.setWindowTitle(f'Install Preview — {preview.metadata.name}')
+
+        self._preview_widget.on_preview_resolved(preview)
 
     def _on_prerelease_changed(self) -> None:
         """Re-run the preview with the updated pre-release setting."""
@@ -1064,10 +1100,22 @@ class PreviewWorker(QThread):
     Combines two stages into a single background pipeline:
 
     1. Download the manifest (if remote).
-    2. Run ``execute_stream`` with ``dry_run=True`` to list actions and check status.
+    2. Run ``execute_stream`` with ``dry_run=True`` to stream events.
+
+    The worker emits signals in phases:
+
+    * ``manifest_parsed`` — emitted as soon as the JSON is loaded,
+      before plugin discovery.  GUI clients can populate cards
+      immediately from this.
+    * ``plugins_queried`` — emitted after porringer discovers plugins,
+      carrying plugin name → installed mapping.
+    * ``preview_ready`` — emitted once CLI commands are resolved.
+    * ``action_checked`` — emitted per-action as dry-run results
+      stream in (may arrive out of order due to parallel checks).
     """
 
-    preview_ready = Signal(object, str, str)  # (SetupResults, manifest_path, temp_dir_path)
+    manifest_parsed = Signal(object, str, str)  # (SetupResults, manifest_path, temp_dir_path) — fast preview
+    preview_ready = Signal(object, str, str)  # (SetupResults, manifest_path, temp_dir_path) — fully resolved
     action_checked = Signal(int, object)  # (row_index, SetupActionResult)
     plugins_queried = Signal(object)  # dict[str, bool] — plugin name → installed
     finished = Signal()
@@ -1138,13 +1186,19 @@ class PreviewWorker(QThread):
             self.error.emit(str(exc))
 
     async def _dry_run(self, manifest_path: Path, temp_dir: str) -> None:
-        """Stream dry-run events, emitting preview_ready and action_checked signals."""
-        # Query plugin presence before the dry-run so the widget can
-        # annotate actions whose installer is not available.
-        plugins = self._porringer.plugin.list()
-        plugin_installed = {p.name: p.installed for p in plugins}
-        self.plugins_queried.emit(plugin_installed)
+        """Stream dry-run events, emitting signals as each phase completes.
 
+        The new event pipeline is:
+
+        1. ``MANIFEST_PARSED`` → emit ``manifest_parsed`` (fast, before discovery)
+        2. ``PLUGINS_DISCOVERED`` → emit ``plugins_queried``
+        3. ``MANIFEST_LOADED`` → emit ``preview_ready`` (CLI commands populated)
+        4. ``ACTION_COMPLETED`` → emit ``action_checked`` (per-action status)
+
+        Falls back to the previous behaviour when the porringer version
+        does not emit the newer event kinds (``MANIFEST_PARSED`` /
+        ``PLUGINS_DISCOVERED``).
+        """
         params = SetupParameters(
             paths=[manifest_path],
             dry_run=True,
@@ -1153,10 +1207,29 @@ class PreviewWorker(QThread):
             prerelease_packages=self._prerelease_packages,
         )
         action_index: dict[int, int] = {}
+        got_parsed = False
 
         async for event in self._porringer.sync.execute_stream(params):
-            if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
+            if event.kind == ProgressEventKind.MANIFEST_PARSED and event.manifest:
+                # Fast path: cards can be shown immediately
                 action_index = {id(a): i for i, a in enumerate(event.manifest.actions)}
+                self.manifest_parsed.emit(event.manifest, str(manifest_path), temp_dir)
+                got_parsed = True
+
+            elif event.kind == ProgressEventKind.PLUGINS_DISCOVERED:
+                # Use the plugin availability from porringer's own discovery
+                # rather than making a separate plugin.list() call.
+                if event.plugin_availability is not None:
+                    self.plugins_queried.emit(event.plugin_availability)
+                elif event.plugin_names is not None:
+                    # Fallback: only names available, assume all installed
+                    self.plugins_queried.emit({name: True for name in event.plugin_names})
+
+            elif event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
+                # Fully-resolved preview with CLI commands
+                if not got_parsed:
+                    # Fallback: older porringer without MANIFEST_PARSED
+                    action_index = {id(a): i for i, a in enumerate(event.manifest.actions)}
                 self.preview_ready.emit(event.manifest, str(manifest_path), temp_dir)
 
             elif event.kind == ProgressEventKind.ACTION_COMPLETED and event.result and event.action:

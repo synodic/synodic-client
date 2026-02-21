@@ -683,6 +683,42 @@ class TestActionCardCommandLabel:
         flags = card._command_label.textInteractionFlags()
         assert flags & Qt.TextInteractionFlag.TextSelectableByMouse
 
+    @staticmethod
+    def test_update_command_updates_text() -> None:
+        """update_command replaces the command label text."""
+        card = ActionCard()
+        action = _make_action(package='ruff', installer='pip')
+        card.populate(action)
+        assert card._command_label.text() == 'pip install ruff'
+
+        resolved = _make_action(cli_command=['uv', 'tool', 'install', 'ruff'])
+        card.update_command(resolved)
+        assert card._command_label.text() == 'uv tool install ruff'
+        assert not card._command_label.isHidden()
+
+    @staticmethod
+    def test_update_command_hides_label_when_empty() -> None:
+        """update_command hides the label when the resolved action has no command."""
+        card = ActionCard()
+        action = _make_action(package='ruff', installer='pip')
+        card.populate(action)
+        assert not card._command_label.isHidden()
+
+        empty_action = _make_action(kind=PluginKind.RUNTIME)
+        empty_action.cli_command = None
+        empty_action.command = None
+        empty_action.package = None
+        card.update_command(empty_action)
+        assert card._command_label.isHidden()
+
+    @staticmethod
+    def test_update_command_noop_on_skeleton() -> None:
+        """update_command does nothing when card is a skeleton."""
+        card = ActionCard(skeleton=True)
+        action = _make_action(cli_command=['uv', 'tool', 'install', 'ruff'])
+        # Should not raise — skeleton simply returns early
+        card.update_command(action)
+
 
 # ---------------------------------------------------------------------------
 # ActionCard — per-card spinner
@@ -756,11 +792,18 @@ class TestActionSortKey:
         assert action_sort_key(runtime) < action_sort_key(package)
 
     @staticmethod
-    def test_scm_before_tool() -> None:
-        """SCM actions sort before tools."""
-        scm = _make_action(kind=PluginKind.SCM, package='git')
+    def test_tool_before_scm() -> None:
+        """Tool actions sort before SCM (matches execution phase order)."""
         tool = _make_action(kind=PluginKind.TOOL, package='ruff')
-        assert action_sort_key(scm) < action_sort_key(tool)
+        scm = _make_action(kind=PluginKind.SCM, package='git')
+        assert action_sort_key(tool) < action_sort_key(scm)
+
+    @staticmethod
+    def test_package_before_tool() -> None:
+        """Package actions sort before tools (matches execution phase order)."""
+        package = _make_action(kind=PluginKind.PACKAGE, package='numpy')
+        tool = _make_action(kind=PluginKind.TOOL, package='ruff')
+        assert action_sort_key(package) < action_sort_key(tool)
 
     @staticmethod
     def test_alphabetical_within_kind() -> None:
@@ -797,7 +840,8 @@ class TestActionCardListOrdering:
         # Populate in unsorted order
         card_list.populate([a_pkg_b, a_tool, a_pkg_a, a_runtime])
 
-        expected = ['python', 'ruff', 'alpha', 'beta']
+        # Execution-phase order: RUNTIME(0) → PACKAGE(1) → TOOL(2)
+        expected = ['python', 'alpha', 'beta', 'ruff']
         assert card_list.card_count() == len(expected)
         for i, name in enumerate(expected):
             card = card_list.card_at(i)

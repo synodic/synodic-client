@@ -10,7 +10,6 @@ import pytest
 from porringer.schema import (
     CancellationToken,
     DownloadResult,
-    PluginInfo,
     ProgressEvent,
     ProgressEventKind,
     SetupActionResult,
@@ -643,15 +642,16 @@ class TestPreviewWorkerSignals:
         manifest.write_text('{}')
 
         porringer = MagicMock()
-        porringer.plugin.list.return_value = [
-            PluginInfo(name='pip', kind=PluginKind.PACKAGE, version=MagicMock(), installed=True, tool_version=None),
-            PluginInfo(name='uv', kind=PluginKind.PACKAGE, version=MagicMock(), installed=False, tool_version=None),
-        ]
 
         preview = SetupResults(actions=[])
+        plugins_event = ProgressEvent(
+            kind=ProgressEventKind.PLUGINS_DISCOVERED,
+            plugin_availability={'pip': True, 'uv': False},
+        )
         manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
 
         async def mock_stream(*args: Any, **kwargs: Any) -> Any:
+            yield plugins_event
             yield manifest_event
 
         porringer.sync.execute_stream = mock_stream
@@ -672,12 +672,16 @@ class TestPreviewWorkerSignals:
         manifest.write_text('{}')
 
         porringer = MagicMock()
-        porringer.plugin.list.return_value = []
 
         preview = SetupResults(actions=[])
+        plugins_event = ProgressEvent(
+            kind=ProgressEventKind.PLUGINS_DISCOVERED,
+            plugin_availability={},
+        )
         manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
 
         async def mock_stream(*args: Any, **kwargs: Any) -> Any:
+            yield plugins_event
             yield manifest_event
 
         porringer.sync.execute_stream = mock_stream
@@ -691,6 +695,71 @@ class TestPreviewWorkerSignals:
 
         assert order == ['plugins', 'preview']
 
+    @staticmethod
+    def test_emits_manifest_parsed(tmp_path: Path) -> None:
+        """Verify manifest_parsed is emitted from MANIFEST_PARSED events."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+
+        preview = SetupResults(actions=[])
+        parsed_event = ProgressEvent(
+            kind=ProgressEventKind.MANIFEST_PARSED,
+            manifest=preview,
+        )
+        loaded_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+
+        async def mock_stream(*args: Any, **kwargs: Any) -> Any:
+            yield parsed_event
+            yield loaded_event
+
+        porringer.sync.execute_stream = mock_stream
+
+        worker = PreviewWorker(porringer, str(manifest))
+
+        parsed_data: list[Any] = []
+        worker.manifest_parsed.connect(lambda *a: parsed_data.append(a))
+        worker.run()
+
+        assert len(parsed_data) == 1
+
+    @staticmethod
+    def test_two_phase_signal_order(tmp_path: Path) -> None:
+        """Verify the full two-phase signal order: parsed → plugins → ready."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+
+        preview = SetupResults(actions=[])
+        parsed_event = ProgressEvent(
+            kind=ProgressEventKind.MANIFEST_PARSED,
+            manifest=preview,
+        )
+        plugins_event = ProgressEvent(
+            kind=ProgressEventKind.PLUGINS_DISCOVERED,
+            plugin_availability={'pip': True},
+        )
+        loaded_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+
+        async def mock_stream(*args: Any, **kwargs: Any) -> Any:
+            yield parsed_event
+            yield plugins_event
+            yield loaded_event
+
+        porringer.sync.execute_stream = mock_stream
+
+        worker = PreviewWorker(porringer, str(manifest))
+
+        order: list[str] = []
+        worker.manifest_parsed.connect(lambda *_: order.append('parsed'))
+        worker.plugins_queried.connect(lambda _: order.append('plugins'))
+        worker.preview_ready.connect(lambda *_: order.append('ready'))
+        worker.run()
+
+        assert order == ['parsed', 'plugins', 'ready']
+
 
 class TestPreviewWorkerUpdateDetection:
     """Tests for PreviewWorker passing update-detection flags to porringer."""
@@ -702,7 +771,6 @@ class TestPreviewWorkerUpdateDetection:
         manifest.write_text('{}')
 
         porringer = MagicMock()
-        porringer.plugin.list.return_value = []
         preview = SetupResults(actions=[])
         manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
 
@@ -733,7 +801,6 @@ class TestPreviewWorkerUpdateDetection:
         manifest.write_text('{}')
 
         porringer = MagicMock()
-        porringer.plugin.list.return_value = []
         preview = SetupResults(actions=[])
         manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
 
