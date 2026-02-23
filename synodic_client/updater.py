@@ -193,6 +193,20 @@ class Updater:
             return self._update_info
 
         except Exception as e:
+            if '404' in str(e):
+                channel = self._config.channel_name
+                msg = (
+                    f"No releases found for the '{channel}' channel. "
+                    "Try switching to the 'Development' channel in Settings \u2192 Channel."
+                )
+                logger.debug('No releases for channel %s: %s', channel, e)
+                self._state = UpdateState.NO_UPDATE
+                return UpdateInfo(
+                    available=False,
+                    current_version=self._current_version,
+                    error=msg,
+                )
+
             logger.exception('Failed to check for updates')
             self._state = UpdateState.FAILED
             return UpdateInfo(

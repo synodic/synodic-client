@@ -485,11 +485,14 @@ class TrayScreen:
 
         if result.error:
             if not silent:
-                self.tray.showMessage(
-                    'Update Check Failed',
-                    f'Failed to check for updates: {result.error}',
-                    QSystemTrayIcon.MessageIcon.Warning,
+                # Distinguish informational messages (no releases for channel)
+                # from genuine failures.
+                is_no_releases = 'No releases found' in result.error
+                title = 'No Updates Available' if is_no_releases else 'Update Check Failed'
+                icon = (
+                    QSystemTrayIcon.MessageIcon.Information if is_no_releases else QSystemTrayIcon.MessageIcon.Warning
                 )
+                self.tray.showMessage(title, result.error, icon)
             else:
                 logger.warning('Automatic update check failed: %s', result.error)
             return

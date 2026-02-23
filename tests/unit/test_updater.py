@@ -150,6 +150,34 @@ class TestUpdaterCheckForUpdate:
         assert info.error == 'Network error'
         assert updater.state == UpdateState.FAILED
 
+    @staticmethod
+    def test_check_404_returns_friendly_message(updater: Updater) -> None:
+        """Verify a 404 from GitHub returns a friendly no-releases message."""
+        mock_manager = MagicMock()
+        mock_manager.check_for_updates.side_effect = RuntimeError('Network error: Http error: http status: 404')
+
+        with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
+            info = updater.check_for_update()
+
+        assert info.available is False
+        assert info.error is not None
+        assert 'No releases found' in info.error
+        assert updater._config.channel_name in info.error
+        # A missing channel is informational, not a hard failure
+        assert updater.state == UpdateState.NO_UPDATE
+
+    @staticmethod
+    def test_check_non_404_http_error_is_failed(updater: Updater) -> None:
+        """Verify non-404 HTTP errors still produce FAILED state."""
+        mock_manager = MagicMock()
+        mock_manager.check_for_updates.side_effect = RuntimeError('Network error: Http error: http status: 500')
+
+        with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
+            info = updater.check_for_update()
+
+        assert info.available is False
+        assert updater.state == UpdateState.FAILED
+
 
 class TestUpdaterDownloadUpdate:
     """Tests for download_update method."""
