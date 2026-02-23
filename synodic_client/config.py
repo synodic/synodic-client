@@ -89,6 +89,11 @@ class _ConfigBase(BaseModel):
     # no overrides anywhere.
     prerelease_packages: dict[str, list[str]] | None = None
 
+    # Whether the application should start automatically with the OS.
+    # None means use the default (enabled).  Explicitly False disables
+    # auto-startup.
+    auto_start: bool | None = None
+
 
 class LocalConfiguration(_ConfigBase):
     """Portable configuration embedded next to the executable.

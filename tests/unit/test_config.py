@@ -29,6 +29,7 @@ class TestLocalConfiguration:
         assert config.plugin_auto_update is None
         assert config.detect_updates is True
         assert config.prerelease_packages is None
+        assert config.auto_start is None
 
     @staticmethod
     def test_with_values() -> None:
@@ -52,6 +53,7 @@ class TestGlobalConfiguration:
         assert config.plugin_auto_update is None
         assert config.detect_updates is True
         assert config.prerelease_packages is None
+        assert config.auto_start is None
 
     @staticmethod
     def test_with_values() -> None:
@@ -77,6 +79,15 @@ class TestGlobalConfiguration:
         data = json.loads(original.model_dump_json())
         restored = GlobalConfiguration.model_validate(data)
         assert restored.plugin_auto_update == mapping
+
+    @staticmethod
+    def test_auto_start_round_trip() -> None:
+        """Verify auto_start survives JSON round-trip."""
+        for value in (True, False, None):
+            original = GlobalConfiguration(auto_start=value)
+            data = json.loads(original.model_dump_json())
+            restored = GlobalConfiguration.model_validate(data)
+            assert restored.auto_start is value
 
     @staticmethod
     def test_json_round_trip() -> None:

@@ -11,6 +11,7 @@ SPEC_FILE = REPO_ROOT / 'tool' / 'pyinstaller' / 'synodic.spec'
 PACK_DIR = REPO_ROOT / 'dist' / 'synodic'
 OUTPUT_DIR = REPO_ROOT / 'Releases'
 MAIN_EXE = 'synodic.exe'
+ICON_FILE = REPO_ROOT / 'data' / 'icon.ico'
 PACK_ID = 'Synodic.SynodicClient'
 
 

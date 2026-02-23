@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import sys
 from pathlib import Path
 
 from porringer.api import API
@@ -28,9 +29,15 @@ from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.screen import MainWindow
 from synodic_client.application.theme import UPDATE_SOURCE_DIALOG_MIN_WIDTH
 from synodic_client.client import Client
-from synodic_client.config import GlobalConfiguration
+from synodic_client.config import GlobalConfiguration, save_config
 from synodic_client.logging import log_path
-from synodic_client.resolution import resolve_config, resolve_enabled_plugins, resolve_update_config, update_and_resolve
+from synodic_client.resolution import (
+    resolve_config,
+    resolve_enabled_plugins,
+    resolve_update_config,
+    update_and_resolve,
+)
+from synodic_client.startup import is_startup_registered, register_startup, remove_startup
 from synodic_client.updater import GITHUB_REPO_URL, UpdateChannel, UpdateInfo
 
 logger = logging.getLogger(__name__)
@@ -280,6 +287,15 @@ class TrayScreen:
 
         self.settings_menu.addSeparator()
 
+        # Start with Windows toggle
+        self._auto_start_action = QAction('Start with Windows', self.settings_menu)
+        self._auto_start_action.setCheckable(True)
+        self._auto_start_action.setChecked(is_startup_registered())
+        self._auto_start_action.triggered.connect(self._on_auto_start_toggled)
+        self.settings_menu.addAction(self._auto_start_action)
+
+        self.settings_menu.addSeparator()
+
         self.open_log_action = QAction('Open Log...', self.settings_menu)
         self.open_log_action.triggered.connect(self._open_log)
         self.settings_menu.addAction(self.open_log_action)
@@ -379,6 +395,19 @@ class TrayScreen:
         logger.info('Update channel changed to: %s', config.update_channel)
         self._sync_channel_checks()
         self._reinitialize_updater(config)
+
+    def _on_auto_start_toggled(self, checked: bool) -> None:
+        """Handle Start with Windows toggle."""
+        config = self._resolve_config()
+        config.auto_start = checked
+        save_config(config)
+
+        if checked:
+            register_startup(sys.executable)
+        else:
+            remove_startup()
+
+        logger.info('Auto-startup %s', 'enabled' if checked else 'disabled')
 
     def _reinitialize_updater(self, config: GlobalConfiguration) -> None:
         """Re-derive update settings and restart the updater and timers."""

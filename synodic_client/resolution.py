@@ -124,6 +124,22 @@ def resolve_enabled_plugins(
     return [n for n in all_plugin_names if n not in disabled]
 
 
+def resolve_auto_start(config: GlobalConfiguration) -> bool:
+    """Determine whether auto-startup should be enabled.
+
+    ``None`` (the default) is treated as enabled.
+
+    Args:
+        config: A resolved global configuration.
+
+    Returns:
+        ``True`` when the application should register for auto-startup.
+    """
+    if config.auto_start is None:
+        return True
+    return config.auto_start
+
+
 def update_and_resolve(config: GlobalConfiguration) -> UpdateConfig:
     """Save a modified global config and resolve it into an UpdateConfig.
 

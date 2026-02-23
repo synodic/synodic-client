@@ -374,17 +374,25 @@ class Updater:
 def _on_before_uninstall(version: str) -> None:
     """Velopack hook: called before the app is uninstalled.
 
-    Removes the ``synodic://`` URI protocol handler registration.
+    Removes the ``synodic://`` URI protocol handler and auto-startup
+    registrations.
 
     Args:
         version: The current version string (provided by Velopack).
     """
+    from synodic_client.startup import remove_startup
+
     logger.info('Velopack uninstall hook fired for version %s', version)
     try:
         remove_protocol()
         logger.info('Protocol handler removed successfully')
     except Exception:
         logger.warning('Protocol removal failed during uninstall hook', exc_info=True)
+    try:
+        remove_startup()
+        logger.info('Auto-startup registration removed successfully')
+    except Exception:
+        logger.warning('Auto-startup removal failed during uninstall hook', exc_info=True)
 
 
 def initialize_velopack() -> None:

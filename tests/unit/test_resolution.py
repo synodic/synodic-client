@@ -7,6 +7,7 @@ from unittest.mock import patch
 from synodic_client.config import GlobalConfiguration, LocalConfiguration
 from synodic_client.resolution import (
     merge_config,
+    resolve_auto_start,
     resolve_config,
     resolve_enabled_plugins,
     resolve_update_config,
@@ -65,6 +66,28 @@ class TestMergeConfig:
         local_cfg = LocalConfiguration(plugin_auto_update={'pip': True, 'pipx': False})
         result = merge_config(global_cfg, local_cfg)
         assert result.plugin_auto_update == {'pip': True, 'pipx': False}
+
+
+class TestResolveAutoStart:
+    """Tests for resolve_auto_start."""
+
+    @staticmethod
+    def test_none_defaults_to_true() -> None:
+        """Verify None (default) resolves to True."""
+        config = GlobalConfiguration()
+        assert resolve_auto_start(config) is True
+
+    @staticmethod
+    def test_explicit_true() -> None:
+        """Verify explicit True is returned."""
+        config = GlobalConfiguration(auto_start=True)
+        assert resolve_auto_start(config) is True
+
+    @staticmethod
+    def test_explicit_false() -> None:
+        """Verify explicit False is returned."""
+        config = GlobalConfiguration(auto_start=False)
+        assert resolve_auto_start(config) is False
 
 
 class TestResolveEnabledPlugins:

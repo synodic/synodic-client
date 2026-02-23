@@ -20,6 +20,7 @@ class Client:
 
     distribution: LiteralString = 'synodic_client'
     icon: LiteralString = 'icon.png'
+    icon_ico: LiteralString = 'icon.ico'
     _updater: Updater | None = None
 
     @property
