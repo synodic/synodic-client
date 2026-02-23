@@ -14,10 +14,10 @@ requires-python = ">=3.14, <3.15"
 dependencies = [
     "pyside6>=6.10.2",
     "packaging>=26.0",
-    "porringer>=0.2.1.dev49",
+    "porringer>=0.2.1.dev48",
     "qasync>=0.28.0",
     "velopack>=0.0.1369.dev7516",
-    "typer>=0.24.0",
+    "typer>=0.24.1",
 ]
 
 [project.urls]
@@ -26,7 +26,7 @@ repository = "https://github.com/synodic/synodic-client"
 
 [dependency-groups]
 build = ["pyinstaller>=6.19.0"]
-lint = ["ruff>=0.15.2", "pyrefly>=0.53.0"]
+lint = ["ruff>=0.15.2", "pyrefly>=0.54.0"]
 test = ["pytest>=9.0.2", "pytest-cov>=7.0.0", "pytest-mock>=3.15.1"]
 
 [project.scripts]
@@ -95,8 +95,6 @@ serve = "zensical serve"
 data = [{ path = "data/**/*", relative-to = "data/" }]
 
 
-[tool.pdm.dev-dependencies]
-dev = ["-e file:///d:/Projects/Synodic/porringer#egg=porringer"]
 [build-system]
 build-backend = "pdm.backend"
 requires = ["pdm.backend"]
