@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from synodic_client.startup import (
-    _RUN_KEY_PATH,
+    RUN_KEY_PATH,
     STARTUP_VALUE_NAME,
     is_startup_registered,
     register_startup,
@@ -35,7 +35,7 @@ class TestRegisterStartup:
 
         mock_open.assert_called_once_with(
             winreg.HKEY_CURRENT_USER,
-            _RUN_KEY_PATH,
+            RUN_KEY_PATH,
             0,
             winreg.KEY_SET_VALUE,
         )
@@ -137,7 +137,7 @@ class TestStartupIntegration:
             with patch('synodic_client.startup.STARTUP_VALUE_NAME', _TEST_VALUE_NAME):
                 register_startup(test_exe)
 
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY_PATH, 0, winreg.KEY_QUERY_VALUE) as key:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY_PATH, 0, winreg.KEY_QUERY_VALUE) as key:
                 value, reg_type = winreg.QueryValueEx(key, _TEST_VALUE_NAME)
                 assert reg_type == winreg.REG_SZ
                 assert test_exe in value
@@ -153,9 +153,11 @@ class TestStartupIntegration:
             register_startup(r'C:\test\synodic_test.exe')
             remove_startup()
 
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY_PATH, 0, winreg.KEY_QUERY_VALUE) as key:
-            with pytest.raises(FileNotFoundError):
-                winreg.QueryValueEx(key, _TEST_VALUE_NAME)
+        with (
+            winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY_PATH, 0, winreg.KEY_QUERY_VALUE) as key,
+            pytest.raises(FileNotFoundError),
+        ):
+            winreg.QueryValueEx(key, _TEST_VALUE_NAME)
 
     @staticmethod
     def test_register_is_idempotent() -> None:
@@ -168,7 +170,7 @@ class TestStartupIntegration:
                 register_startup(exe_v1)
                 register_startup(exe_v2)
 
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY_PATH, 0, winreg.KEY_QUERY_VALUE) as key:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY_PATH, 0, winreg.KEY_QUERY_VALUE) as key:
                 value, _ = winreg.QueryValueEx(key, _TEST_VALUE_NAME)
                 assert exe_v2 in value
                 assert exe_v1 not in value

@@ -18,6 +18,7 @@ import velopack
 from packaging.version import Version
 
 from synodic_client.protocol import remove_protocol
+from synodic_client.startup import remove_startup
 
 logger = logging.getLogger(__name__)
 
@@ -380,8 +381,6 @@ def _on_before_uninstall(version: str) -> None:
     Args:
         version: The current version string (provided by Velopack).
     """
-    from synodic_client.startup import remove_startup
-
     logger.info('Velopack uninstall hook fired for version %s', version)
     try:
         remove_protocol()
