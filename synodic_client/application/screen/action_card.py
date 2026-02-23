@@ -19,6 +19,7 @@ from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QTextCursor
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QFrame,
     QHBoxLayout,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -53,6 +55,10 @@ from synodic_client.application.theme import (
     ACTION_CARD_STYLE,
     ACTION_CARD_TYPE_BADGE_STYLE,
     ACTION_CARD_VERSION_STYLE,
+    COPY_BTN_SIZE,
+    COPY_BTN_STYLE,
+    COPY_FEEDBACK_MS,
+    COPY_ICON,
     LOG_COLOR_ERROR,
     LOG_COLOR_PHASE,
     LOG_COLOR_STDERR,
@@ -326,13 +332,31 @@ class ActionCard(QFrame):
         outer.addWidget(self._desc_label)
 
         # --- CLI command row (always visible, muted monospace) ---
+        self._command_row = QWidget()
+        cmd_layout = QHBoxLayout(self._command_row)
+        cmd_layout.setContentsMargins(0, 0, 0, 0)
+        cmd_layout.setSpacing(4)
+
         self._command_label = QLabel()
         self._command_label.setStyleSheet(ACTION_CARD_COMMAND_STYLE)
         self._command_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse,
         )
-        self._command_label.hide()
-        outer.addWidget(self._command_label)
+        cmd_layout.addWidget(self._command_label)
+
+        self._copy_btn = QToolButton()
+        self._copy_btn.setText(COPY_ICON)
+        self._copy_btn.setToolTip('Copy to clipboard')
+        self._copy_btn.setFixedSize(*COPY_BTN_SIZE)
+        self._copy_btn.setStyleSheet(COPY_BTN_STYLE)
+        self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_btn.clicked.connect(self._copy_command)
+        cmd_layout.addWidget(self._copy_btn)
+
+        cmd_layout.addStretch()
+
+        self._command_row.hide()
+        outer.addWidget(self._command_row)
 
         # --- Inline log body (hidden by default) ---
         self._log_output = QTextEdit()
@@ -349,9 +373,12 @@ class ActionCard(QFrame):
     # Mouse events (toggle log)
     # ------------------------------------------------------------------
 
-    def mousePressEvent(self, _event: object) -> None:  # noqa: N802
+    def mousePressEvent(self, event: object) -> None:  # noqa: N802
         """Toggle the inline log body on click."""
         if self._is_skeleton or not hasattr(self, '_log_output'):
+            return
+        # Don't toggle the log when clicking the copy button
+        if hasattr(self, '_copy_btn') and self._copy_btn.underMouse():
             return
         self._toggle_log()
 
@@ -359,6 +386,23 @@ class ActionCard(QFrame):
         """Expand or collapse the inline log body."""
         self._log_expanded = not self._log_expanded
         self._log_output.setVisible(self._log_expanded)
+
+    def _copy_command(self) -> None:
+        """Copy the command label text to the clipboard with brief feedback."""
+        clipboard = QApplication.clipboard()
+        if clipboard:
+            clipboard.setText(self._command_label.text())
+        self._copy_btn.setText('\u2713')
+        self._copy_btn.setToolTip('Copied!')
+
+        def _restore() -> None:
+            try:
+                self._copy_btn.setText(COPY_ICON)
+                self._copy_btn.setToolTip('Copy to clipboard')
+            except RuntimeError:
+                pass
+
+        QTimer.singleShot(COPY_FEEDBACK_MS, _restore)
 
     # ------------------------------------------------------------------
     # Public API — populate from action data
@@ -409,9 +453,9 @@ class ActionCard(QFrame):
         cmd_text = _format_command(action)
         if cmd_text:
             self._command_label.setText(cmd_text)
-            self._command_label.show()
+            self._command_row.show()
         else:
-            self._command_label.hide()
+            self._command_row.hide()
 
         # Version — populated later by set_check_result()
 
@@ -467,9 +511,9 @@ class ActionCard(QFrame):
         cmd_text = _format_command(action)
         if cmd_text:
             self._command_label.setText(cmd_text)
-            self._command_label.show()
+            self._command_row.show()
         else:
-            self._command_label.hide()
+            self._command_row.hide()
 
     def initial_status(self) -> str:
         """Return the initial status text set during :meth:`populate`."""

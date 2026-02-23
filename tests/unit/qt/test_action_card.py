@@ -664,7 +664,7 @@ class TestActionCardCommandLabel:
         action = _make_action(package='ruff', installer='pip')
         card.populate(action)
         assert card._command_label.text() == 'pip install ruff'
-        assert not card._command_label.isHidden()
+        assert not card._command_row.isHidden()
 
     @staticmethod
     def test_explicit_cli_command() -> None:
@@ -694,22 +694,22 @@ class TestActionCardCommandLabel:
         resolved = _make_action(cli_command=['uv', 'tool', 'install', 'ruff'])
         card.update_command(resolved)
         assert card._command_label.text() == 'uv tool install ruff'
-        assert not card._command_label.isHidden()
+        assert not card._command_row.isHidden()
 
     @staticmethod
     def test_update_command_hides_label_when_empty() -> None:
-        """update_command hides the label when the resolved action has no command."""
+        """update_command hides the row when the resolved action has no command."""
         card = ActionCard()
         action = _make_action(package='ruff', installer='pip')
         card.populate(action)
-        assert not card._command_label.isHidden()
+        assert not card._command_row.isHidden()
 
         empty_action = _make_action(kind=PluginKind.RUNTIME)
         empty_action.cli_command = None
         empty_action.command = None
         empty_action.package = None
         card.update_command(empty_action)
-        assert card._command_label.isHidden()
+        assert card._command_row.isHidden()
 
     @staticmethod
     def test_update_command_noop_on_skeleton() -> None:
@@ -718,6 +718,29 @@ class TestActionCardCommandLabel:
         action = _make_action(cli_command=['uv', 'tool', 'install', 'ruff'])
         # Should not raise — skeleton simply returns early
         card.update_command(action)
+
+    @staticmethod
+    def test_copy_button_copies_command(monkeypatch: object) -> None:
+        """Clicking the copy button copies the command text to the clipboard."""
+        card = ActionCard()
+        action = _make_action(cli_command=['uv', 'tool', 'install', 'ruff'])
+        card.populate(action)
+
+        clipboard = QApplication.clipboard()
+        assert clipboard is not None
+        clipboard.clear()
+        card._copy_btn.click()
+        assert clipboard.text() == 'uv tool install ruff'
+
+    @staticmethod
+    def test_copy_button_shows_feedback() -> None:
+        """Clicking copy shows a check-mark on the button."""
+        card = ActionCard()
+        action = _make_action(cli_command=['uv', 'tool', 'install', 'ruff'])
+        card.populate(action)
+
+        card._copy_btn.click()
+        assert card._copy_btn.text() == '\u2713'
 
 
 # ---------------------------------------------------------------------------
