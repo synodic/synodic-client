@@ -14,6 +14,7 @@ from __future__ import annotations
 import html as html_mod
 import logging
 
+from porringer.backend.command.core.action_builder import PHASE_ORDER
 from porringer.schema import SetupAction, SetupActionResult, SkipReason
 from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import QRect, Qt, QTimer, Signal
@@ -80,19 +81,9 @@ _SPINNER_INTERVAL = 50
 _SPINNER_ARC = 90
 
 
-#: Sort priority for each :class:`PluginKind`.
-#: Lower numbers appear first.  Matches the execution phase order
-#: defined in ``porringer.backend.command.core.action_builder.PHASE_ORDER``
-#: so that cards are displayed in the same order they execute:
-#: runtime → package → tool → project → SCM.
-_KIND_ORDER: dict[PluginKind | None, int] = {
-    PluginKind.RUNTIME: 0,
-    PluginKind.PACKAGE: 1,
-    PluginKind.TOOL: 2,
-    PluginKind.PROJECT: 3,
-    PluginKind.SCM: 4,
-    None: 99,  # bare commands are excluded from ActionCardList anyway
-}
+#: Sort priority derived from porringer's execution phase order so the
+#: display order always matches the order actions actually execute.
+_KIND_ORDER: dict[PluginKind | None, int] = {kind: i for i, kind in enumerate(PHASE_ORDER)}
 
 
 def action_key(action: SetupAction) -> tuple[object, ...]:
@@ -108,17 +99,17 @@ def action_key(action: SetupAction) -> tuple[object, ...]:
     return (action.kind, action.installer, pkg_name, pt_name, cmd)
 
 
-def action_sort_key(action: SetupAction) -> tuple[int, str]:
-    """Return a sort key so cards are grouped by kind then alphabetical.
+def action_sort_key(action: SetupAction) -> int:
+    """Return a sort key that groups cards by execution phase.
 
-    The ordering matches the execution phase order
-    (runtime → package → tool → project → SCM) so that displayed
-    cards appear in the same sequence as they execute.  Within a
-    group, actions are sorted case-insensitively by package name.
+    The ordering is derived from :data:`porringer.backend.command.core.
+    action_builder.PHASE_ORDER` so that displayed cards appear in the
+    same sequence as they execute.  Within a phase group the original
+    order from porringer is preserved (Python sort is stable), which
+    respects dependency ordering (e.g. a tool must be installed before
+    its plugins).
     """
-    kind_order = _KIND_ORDER.get(action.kind, 50)
-    pkg_name = str(action.package.name).lower() if action.package else ''
-    return (kind_order, pkg_name)
+    return _KIND_ORDER.get(action.kind, len(PHASE_ORDER))
 
 
 def _format_command(action: SetupAction) -> str:

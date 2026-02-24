@@ -400,9 +400,9 @@ class SetupPreviewWidget(QWidget):
         self._card_list.prerelease_toggled.connect(self._on_prerelease_row_toggled)
         outer.addWidget(self._card_list, stretch=1)
 
-        # Post-install section lives below the card list but still scrolls
+        # Post-install section lives below the card list but still scrolls.
+        # It starts hidden and is inserted into the layout after populate().
         self._post_install_section = PostInstallSection()
-        self._card_list._layout.insertWidget(self._card_list._layout.count() - 1, self._post_install_section)
 
         # --- Button bar (fixed at bottom) ---
         button_bar = self._init_button_bar()
@@ -653,8 +653,12 @@ class SetupPreviewWidget(QWidget):
             if installer_missing:
                 self._action_statuses[i] = 'Not installed'
 
-        # Populate the post-install commands section
+        # Populate post-install commands and place them after all cards.
         self._post_install_section.populate(preview.actions)
+        self._card_list._layout.insertWidget(
+            self._card_list._layout.count() - 1,
+            self._post_install_section,
+        )
 
         self._install_btn.setEnabled(True)
 
