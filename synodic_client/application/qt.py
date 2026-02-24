@@ -47,8 +47,7 @@ def _init_services(logger: logging.Logger) -> tuple[Client, API, GlobalConfigura
     cached_dirs = porringer.cache.list_directories()
 
     logger.info(
-        'Synodic Client v%s started (channel: %s, source: %s, '
-        'config_fields_set: %s, cached_projects: %d)',
+        'Synodic Client v%s started (channel: %s, source: %s, config_fields_set: %s, cached_projects: %d)',
         client.version,
         update_config.channel.name,
         update_config.repo_url,

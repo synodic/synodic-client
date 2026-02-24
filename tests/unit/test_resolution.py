@@ -333,18 +333,25 @@ class TestResolveUpdateConfig:
         assert result.channel == UpdateChannel.DEVELOPMENT
 
     @staticmethod
-    def test_custom_source() -> None:
-        """Verify custom update source is used."""
+    def test_custom_source_non_github() -> None:
+        """Verify non-GitHub custom source passes through unchanged."""
         config = GlobalConfiguration(update_source='https://custom.example.com')
         result = resolve_update_config(config)
         assert result.repo_url == 'https://custom.example.com'
 
     @staticmethod
-    def test_default_source() -> None:
-        """Verify default GITHUB_REPO_URL is used when source is None."""
-        config = GlobalConfiguration()
+    def test_default_source_dev() -> None:
+        """Verify default dev source uses GitHub download path with dev tag."""
+        config = GlobalConfiguration(update_channel='dev')
         result = resolve_update_config(config)
-        assert result.repo_url == GITHUB_REPO_URL
+        assert result.repo_url == f'{GITHUB_REPO_URL}/releases/download/dev'
+
+    @staticmethod
+    def test_default_source_stable() -> None:
+        """Verify default stable source uses GitHub latest download path."""
+        config = GlobalConfiguration(update_channel='stable')
+        result = resolve_update_config(config)
+        assert result.repo_url == f'{GITHUB_REPO_URL}/releases/latest/download'
 
     @staticmethod
     def test_default_auto_update_interval() -> None:
@@ -397,7 +404,7 @@ class TestUpdateAndResolve:
             result = update_and_resolve(config)
 
         assert result.channel == UpdateChannel.DEVELOPMENT
-        assert result.repo_url == '/my/source'
+        assert result.repo_url == '/my/source'  # non-GitHub path unchanged
 
         # Verify file was saved (sparse — only user-set fields)
         saved = json.loads((tmp_path / 'config.json').read_text(encoding='utf-8'))

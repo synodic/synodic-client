@@ -22,9 +22,47 @@ from synodic_client.startup import remove_startup
 
 logger = logging.getLogger(__name__)
 
-# GitHub repository for Velopack updates
-# Velopack automatically discovers releases from GitHub releases
+# GitHub repository base URL.  Transformed into a release-asset URL
+# by :func:`github_release_asset_url` at resolution time so that
+# Velopack's ``HttpSource`` can fetch ``releases.{channel}.json``
+# from the correct GitHub Releases download path.
 GITHUB_REPO_URL = 'https://github.com/synodic/synodic-client'
+
+# Fixed tag used for rolling development releases on GitHub.
+_DEV_RELEASE_TAG = 'dev'
+
+
+def github_release_asset_url(repo_url: str, channel: UpdateChannel) -> str:
+    """Convert a GitHub repository URL into a release-asset download URL.
+
+    Velopack's runtime SDK uses a plain ``HttpSource`` that requests
+    ``{base_url}/releases.{channel}.json``.  GitHub serves release assets
+    at ``{repo}/releases/download/{tag}/`` (for a specific tag) or
+    ``{repo}/releases/latest/download/`` (auto-resolves to the newest
+    non-prerelease release).
+
+    * **Development** channel → ``/releases/download/dev/``
+    * **Stable** channel → ``/releases/latest/download/``
+
+    Non-GitHub URLs (local paths, custom HTTP servers) are returned
+    unchanged.
+
+    Args:
+        repo_url: A GitHub repository URL or custom update source.
+        channel: The resolved update channel.
+
+    Returns:
+        A URL (or path) suitable for Velopack's ``UpdateManager``.
+    """
+    normalized = repo_url.rstrip('/')
+    # Only transform URLs that look like a GitHub repository.
+    if not normalized.startswith(('https://github.com/', 'http://github.com/')):
+        return repo_url
+
+    if channel == UpdateChannel.DEVELOPMENT:
+        return f'{normalized}/releases/download/{_DEV_RELEASE_TAG}'
+    return f'{normalized}/releases/latest/download'
+
 
 # Map sys.platform values to Velopack channel suffixes
 _PLATFORM_SUFFIXES: dict[str, str] = {

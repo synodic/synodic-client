@@ -12,6 +12,7 @@ from synodic_client.updater import (
     UpdateInfo,
     Updater,
     UpdateState,
+    github_release_asset_url,
     initialize_velopack,
     platform_suffix,
 )
@@ -31,6 +32,41 @@ class TestUpdateConfig:
         """Verify DEVELOPMENT channel returns platform-specific 'dev' name."""
         config = UpdateConfig(channel=UpdateChannel.DEVELOPMENT)
         assert config.channel_name == f'dev-{platform_suffix()}'
+
+
+class TestGithubReleaseAssetUrl:
+    """Tests for github_release_asset_url helper."""
+
+    @staticmethod
+    def test_dev_channel() -> None:
+        """Verify dev channel produces /releases/download/dev URL."""
+        url = github_release_asset_url(GITHUB_REPO_URL, UpdateChannel.DEVELOPMENT)
+        assert url == f'{GITHUB_REPO_URL}/releases/download/dev'
+
+    @staticmethod
+    def test_stable_channel() -> None:
+        """Verify stable channel produces /releases/latest/download URL."""
+        url = github_release_asset_url(GITHUB_REPO_URL, UpdateChannel.STABLE)
+        assert url == f'{GITHUB_REPO_URL}/releases/latest/download'
+
+    @staticmethod
+    def test_non_github_url_unchanged() -> None:
+        """Verify non-GitHub URLs pass through unchanged."""
+        custom = 'https://custom.example.com/updates'
+        assert github_release_asset_url(custom, UpdateChannel.DEVELOPMENT) == custom
+        assert github_release_asset_url(custom, UpdateChannel.STABLE) == custom
+
+    @staticmethod
+    def test_local_path_unchanged() -> None:
+        """Verify local file paths pass through unchanged."""
+        path = '/srv/releases'
+        assert github_release_asset_url(path, UpdateChannel.DEVELOPMENT) == path
+
+    @staticmethod
+    def test_trailing_slash_stripped() -> None:
+        """Verify trailing slashes are stripped before appending path."""
+        url = github_release_asset_url('https://github.com/owner/repo/', UpdateChannel.DEVELOPMENT)
+        assert url == 'https://github.com/owner/repo/releases/download/dev'
 
 
 @pytest.fixture
