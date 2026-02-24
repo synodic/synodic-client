@@ -51,6 +51,7 @@ from synodic_client.application.theme import (
     PLUGIN_SECTION_SPACING,
     PLUGIN_TOGGLE_STYLE,
     PLUGIN_UPDATE_STYLE,
+    SETTINGS_GEAR_STYLE,
 )
 from synodic_client.config import GlobalConfiguration, save_config
 
@@ -794,6 +795,9 @@ class ProjectsView(QWidget):
 class MainWindow(QMainWindow):
     """Main window for the application."""
 
+    settings_requested = Signal()
+    """Emitted when the user clicks the settings gear button."""
+
     _tabs: QTabWidget | None = None
     _plugins_view: PluginsView | None = None
     _projects_view: ProjectsView | None = None
@@ -836,6 +840,13 @@ class MainWindow(QMainWindow):
 
             self._plugins_view = PluginsView(self._porringer, self._config, self)
             self._tabs.addTab(self._plugins_view, 'Plugins')
+
+            gear_btn = QPushButton('\u2699')
+            gear_btn.setStyleSheet(SETTINGS_GEAR_STYLE)
+            gear_btn.setToolTip('Settings')
+            gear_btn.setFlat(True)
+            gear_btn.clicked.connect(self.settings_requested.emit)
+            self._tabs.setCornerWidget(gear_btn)
 
             self.setCentralWidget(self._tabs)
 

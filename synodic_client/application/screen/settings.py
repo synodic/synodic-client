@@ -1,0 +1,289 @@
+"""Settings window for the Synodic Client application.
+
+Provides a single-page window with grouped sections for all application
+settings.  Quick-access items (Channel, Check for Updates) remain in the
+tray menu; the full set is available here.
+"""
+
+import logging
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+
+from PySide6.QtCore import QUrl, Signal
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
+
+from synodic_client.application.icon import app_icon
+from synodic_client.application.screen.card import CardFrame
+from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE
+from synodic_client.config import GlobalConfiguration, save_config
+from synodic_client.logging import log_path
+from synodic_client.startup import is_startup_registered, register_startup, remove_startup
+from synodic_client.updater import (
+    DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
+    DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
+    GITHUB_REPO_URL,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class SettingsWindow(QMainWindow):
+    """Application settings window with grouped card sections.
+
+    All controls persist changes immediately via :func:`save_config` and
+    emit :attr:`settings_changed` so that the tray and updater can react.
+    """
+
+    settings_changed = Signal()
+    """Emitted whenever a setting is changed and persisted."""
+
+    def __init__(
+        self,
+        config: GlobalConfiguration,
+        parent: QWidget | None = None,
+    ) -> None:
+        """Initialise the settings window.
+
+        Args:
+            config: The shared global configuration object.
+            parent: Optional parent widget.
+        """
+        super().__init__(parent)
+        self._config = config
+        self.setWindowTitle('Synodic Settings')
+        self.setMinimumSize(*SETTINGS_WINDOW_MIN_SIZE)
+        self.setWindowIcon(app_icon())
+        self._init_ui()
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
+
+    def _init_ui(self) -> None:
+        """Build the scrollable settings layout."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        layout.addWidget(self._build_updates_section())
+        layout.addWidget(self._build_startup_section())
+        layout.addWidget(self._build_advanced_section())
+        layout.addStretch()
+
+        scroll.setWidget(container)
+        self.setCentralWidget(scroll)
+
+    def _build_updates_section(self) -> CardFrame:
+        """Construct the *Updates* settings card."""
+        card = CardFrame('Updates')
+        content = card.content_layout
+
+        # Channel
+        row = QHBoxLayout()
+        label = QLabel('Channel')
+        label.setMinimumWidth(160)
+        row.addWidget(label)
+        self._channel_combo = QComboBox()
+        self._channel_combo.addItems(['Stable', 'Development'])
+        self._channel_combo.currentIndexChanged.connect(self._on_channel_changed)
+        row.addWidget(self._channel_combo)
+        row.addStretch()
+        content.addLayout(row)
+
+        # Update Source
+        row = QHBoxLayout()
+        label = QLabel('Update source')
+        label.setMinimumWidth(160)
+        row.addWidget(label)
+        self._source_edit = QLineEdit()
+        self._source_edit.setPlaceholderText(GITHUB_REPO_URL)
+        self._source_edit.editingFinished.connect(self._on_source_changed)
+        row.addWidget(self._source_edit, 1)
+        browse_btn = QPushButton('Browse\u2026')
+        browse_btn.clicked.connect(self._on_browse_source)
+        row.addWidget(browse_btn)
+        content.addLayout(row)
+
+        # Auto-update interval
+        row = QHBoxLayout()
+        label = QLabel('App update interval (min)')
+        label.setMinimumWidth(160)
+        row.addWidget(label)
+        self._auto_update_spin = QSpinBox()
+        self._auto_update_spin.setRange(0, 1440)
+        self._auto_update_spin.setSpecialValueText('Disabled')
+        self._auto_update_spin.valueChanged.connect(self._on_auto_update_interval_changed)
+        row.addWidget(self._auto_update_spin)
+        row.addStretch()
+        content.addLayout(row)
+
+        # Tool-update interval
+        row = QHBoxLayout()
+        label = QLabel('Tool update interval (min)')
+        label.setMinimumWidth(160)
+        row.addWidget(label)
+        self._tool_update_spin = QSpinBox()
+        self._tool_update_spin.setRange(0, 1440)
+        self._tool_update_spin.setSpecialValueText('Disabled')
+        self._tool_update_spin.valueChanged.connect(self._on_tool_update_interval_changed)
+        row.addWidget(self._tool_update_spin)
+        row.addStretch()
+        content.addLayout(row)
+
+        # Detect updates during previews
+        self._detect_updates_check = QCheckBox('Detect updates during previews')
+        self._detect_updates_check.toggled.connect(self._on_detect_updates_changed)
+        content.addWidget(self._detect_updates_check)
+
+        return card
+
+    def _build_startup_section(self) -> CardFrame:
+        """Construct the *Startup* settings card."""
+        card = CardFrame('Startup')
+        self._auto_start_check = QCheckBox('Start with Windows')
+        self._auto_start_check.toggled.connect(self._on_auto_start_changed)
+        card.content_layout.addWidget(self._auto_start_check)
+        return card
+
+    def _build_advanced_section(self) -> CardFrame:
+        """Construct the *Advanced* settings card."""
+        card = CardFrame('Advanced')
+        row = QHBoxLayout()
+        open_log_btn = QPushButton('Open Log\u2026')
+        open_log_btn.clicked.connect(self._open_log)
+        row.addWidget(open_log_btn)
+        row.addStretch()
+        card.content_layout.addLayout(row)
+        return card
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def sync_from_config(self) -> None:
+        """Synchronize all controls from the current configuration.
+
+        Signals are blocked during the update to prevent feedback loops.
+        """
+        config = self._config
+
+        with self._block_signals():
+            # Channel: index 0 = Stable, 1 = Development
+            is_dev = config.update_channel == 'dev'
+            self._channel_combo.setCurrentIndex(1 if is_dev else 0)
+
+            # Update source
+            self._source_edit.setText(config.update_source or '')
+
+            # Intervals
+            auto_interval = config.auto_update_interval_minutes
+            self._auto_update_spin.setValue(
+                auto_interval if auto_interval is not None else DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
+            )
+            tool_interval = config.tool_update_interval_minutes
+            self._tool_update_spin.setValue(
+                tool_interval if tool_interval is not None else DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
+            )
+
+            # Checkboxes
+            self._detect_updates_check.setChecked(config.detect_updates)
+            self._auto_start_check.setChecked(is_startup_registered())
+
+    def show(self) -> None:
+        """Sync controls from config, then show the window."""
+        self.sync_from_config()
+        super().show()
+        self.raise_()
+        self.activateWindow()
+
+    # ------------------------------------------------------------------
+    # Callbacks
+    # ------------------------------------------------------------------
+
+    def _persist(self) -> None:
+        """Save config and notify listeners."""
+        save_config(self._config)
+        self.settings_changed.emit()
+
+    @contextmanager
+    def _block_signals(self) -> Iterator[None]:
+        """Temporarily block signals on all settings controls."""
+        widgets = (
+            self._channel_combo,
+            self._source_edit,
+            self._auto_update_spin,
+            self._tool_update_spin,
+            self._detect_updates_check,
+            self._auto_start_check,
+        )
+        for w in widgets:
+            w.blockSignals(True)
+        try:
+            yield
+        finally:
+            for w in widgets:
+                w.blockSignals(False)
+
+    def _on_channel_changed(self, index: int) -> None:
+        self._config.update_channel = 'dev' if index == 1 else 'stable'
+        self._persist()
+
+    def _on_source_changed(self) -> None:
+        text = self._source_edit.text().strip()
+        self._config.update_source = text or None
+        self._persist()
+
+    def _on_browse_source(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, 'Select Releases Directory')
+        if path:
+            self._source_edit.setText(path)
+            self._on_source_changed()
+
+    def _on_auto_update_interval_changed(self, value: int) -> None:
+        self._config.auto_update_interval_minutes = value
+        self._persist()
+
+    def _on_tool_update_interval_changed(self, value: int) -> None:
+        self._config.tool_update_interval_minutes = value
+        self._persist()
+
+    def _on_detect_updates_changed(self, checked: bool) -> None:
+        self._config.detect_updates = checked
+        self._persist()
+
+    def _on_auto_start_changed(self, checked: bool) -> None:
+        self._config.auto_start = checked
+        save_config(self._config)
+        if checked:
+            register_startup(sys.executable)
+        else:
+            remove_startup()
+        self.settings_changed.emit()
+
+    @staticmethod
+    def _open_log() -> None:
+        """Open the log file in the system's default editor."""
+        path = log_path()
+        if not path.exists():
+            path.touch()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))

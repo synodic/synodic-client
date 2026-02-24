@@ -9,7 +9,6 @@ code focused on layout and behaviour rather than pixel tweaking.
 # ---------------------------------------------------------------------------
 INSTALL_PREVIEW_MIN_SIZE = (650, 400)
 MAIN_WINDOW_MIN_SIZE = (600, 400)
-UPDATE_SOURCE_DIALOG_MIN_WIDTH = 450
 
 # ---------------------------------------------------------------------------
 # Layout margins (left, top, right, bottom)
@@ -275,3 +274,15 @@ METADATA_SKELETON_STYLE = (
     '}'
 )
 """Muted card frame used as the metadata placeholder during loading."""
+
+# ---------------------------------------------------------------------------
+# Settings window
+# ---------------------------------------------------------------------------
+SETTINGS_WINDOW_MIN_SIZE = (500, 450)
+"""Minimum size (width, height) for the Settings window."""
+
+SETTINGS_GEAR_STYLE = (
+    'QPushButton { border: none; font-size: 16px; padding: 2px 6px; }'
+    'QPushButton:hover { background: palette(midlight); border-radius: 3px; }'
+)
+"""Gear button style for the MainWindow tab corner widget."""

@@ -2,43 +2,32 @@
 
 import asyncio
 import logging
-import sys
 from pathlib import Path
 
 from porringer.api import API
 from porringer.schema import SetupParameters, SyncStrategy
-from PySide6.QtCore import QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QDesktopServices
+from PySide6.QtCore import QThread, QTimer, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
-    QDialog,
-    QFileDialog,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
     QMenu,
     QMessageBox,
     QProgressDialog,
-    QPushButton,
     QSystemTrayIcon,
-    QVBoxLayout,
-    QWidget,
 )
 
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.screen import MainWindow
-from synodic_client.application.theme import UPDATE_SOURCE_DIALOG_MIN_WIDTH
+from synodic_client.application.screen.settings import SettingsWindow
 from synodic_client.client import Client
-from synodic_client.config import GlobalConfiguration, save_config
-from synodic_client.logging import log_path
+from synodic_client.config import GlobalConfiguration
 from synodic_client.resolution import (
     resolve_config,
     resolve_enabled_plugins,
     resolve_update_config,
     update_and_resolve,
 )
-from synodic_client.startup import is_startup_registered, register_startup, remove_startup
-from synodic_client.updater import GITHUB_REPO_URL, UpdateChannel, UpdateInfo
+from synodic_client.updater import UpdateChannel, UpdateInfo
 
 logger = logging.getLogger(__name__)
 
@@ -138,60 +127,6 @@ class ToolUpdateWorker(QThread):
             pass  # consume events to completion
 
 
-class UpdateSourceDialog(QDialog):
-    """Dialog for editing the Velopack update source URL or local path."""
-
-    def __init__(self, current_source: str | None, parent: QWidget | None = None) -> None:
-        """Initialise the dialog.
-
-        Args:
-            current_source: The current update source value (may be ``None``).
-            parent: Optional parent widget.
-        """
-        super().__init__(parent)
-        self.setWindowTitle('Update Source')
-        self.setMinimumWidth(UPDATE_SOURCE_DIALOG_MIN_WIDTH)
-
-        layout = QVBoxLayout(self)
-
-        label = QLabel(
-            'Enter a URL or local path for Velopack releases.\nLeave blank to use the default GitHub source.',
-        )
-        layout.addWidget(label)
-
-        self._source_edit = QLineEdit(current_source or '')
-        self._source_edit.setPlaceholderText(GITHUB_REPO_URL)
-
-        browse_button = QPushButton('Browse...')
-        browse_button.clicked.connect(self._browse)
-
-        row = QHBoxLayout()
-        row.addWidget(self._source_edit)
-        row.addWidget(browse_button)
-        layout.addLayout(row)
-
-        button_row = QHBoxLayout()
-        ok_button = QPushButton('OK')
-        cancel_button = QPushButton('Cancel')
-        button_row.addStretch()
-        button_row.addWidget(ok_button)
-        button_row.addWidget(cancel_button)
-        layout.addLayout(button_row)
-
-        ok_button.clicked.connect(self.accept)
-        cancel_button.clicked.connect(self.reject)
-
-    def _browse(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, 'Select Releases Directory')
-        if path:
-            self._source_edit.setText(path)
-
-    @property
-    def source(self) -> str | None:
-        """Return the trimmed source text, or ``None`` if blank."""
-        return self._source_edit.text().strip() or None
-
-
 class TrayScreen:
     """Tray screen for the application."""
 
@@ -231,6 +166,13 @@ class TrayScreen:
 
         self._build_menu(app, window)
 
+        # Settings window (created once, shown/hidden on demand)
+        self._settings_window = SettingsWindow(self._resolve_config())
+        self._settings_window.settings_changed.connect(self._on_settings_changed)
+
+        # MainWindow gear button → open settings
+        window.settings_requested.connect(self._show_settings)
+
         # Periodic auto-update checking
         self._auto_update_timer: QTimer | None = None
         self._start_auto_update_timer()
@@ -253,24 +195,15 @@ class TrayScreen:
         self.menu.addAction(self.open_action)
         self.open_action.triggered.connect(window.show)
 
-        # Settings submenu
-        self.settings_menu = QMenu('Settings', self.menu)
-        self.menu.addMenu(self.settings_menu)
+        self.menu.addSeparator()
 
-        self.update_action = QAction('Check for Updates...', self.settings_menu)
+        self.update_action = QAction('Check for Updates...', self.menu)
         self.update_action.triggered.connect(self._on_check_updates)
-        self.settings_menu.addAction(self.update_action)
-
-        self.settings_menu.addSeparator()
-
-        # Update Source action
-        self.update_source_action = QAction('Update Source...', self.settings_menu)
-        self.update_source_action.triggered.connect(self._on_update_source)
-        self.settings_menu.addAction(self.update_source_action)
+        self.menu.addAction(self.update_action)
 
         # Update Channel submenu
-        self.channel_menu = QMenu('Update Channel', self.settings_menu)
-        self.settings_menu.addMenu(self.channel_menu)
+        self.channel_menu = QMenu('Update Channel', self.menu)
+        self.menu.addMenu(self.channel_menu)
 
         self._channel_stable_action = QAction('Stable', self.channel_menu)
         self._channel_stable_action.setCheckable(True)
@@ -285,20 +218,11 @@ class TrayScreen:
         # Set initial channel check state from config
         self._sync_channel_checks()
 
-        self.settings_menu.addSeparator()
+        self.menu.addSeparator()
 
-        # Start with Windows toggle
-        self._auto_start_action = QAction('Start with Windows', self.settings_menu)
-        self._auto_start_action.setCheckable(True)
-        self._auto_start_action.setChecked(is_startup_registered())
-        self._auto_start_action.triggered.connect(self._on_auto_start_toggled)
-        self.settings_menu.addAction(self._auto_start_action)
-
-        self.settings_menu.addSeparator()
-
-        self.open_log_action = QAction('Open Log...', self.settings_menu)
-        self.open_log_action.triggered.connect(self._open_log)
-        self.settings_menu.addAction(self.open_log_action)
+        self.settings_action = QAction('Settings\u2026', self.menu)
+        self.settings_action.triggered.connect(self._show_settings)
+        self.menu.addAction(self.settings_action)
 
         self.menu.addSeparator()
 
@@ -309,14 +233,6 @@ class TrayScreen:
         self.tray.setContextMenu(self.menu)
 
     # -- Config helpers --
-
-    @staticmethod
-    def _open_log() -> None:
-        """Open the log file in the system's default editor."""
-        path = log_path()
-        if not path.exists():
-            path.touch()
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _resolve_config(self) -> GlobalConfiguration:
         """Return the injected config or resolve from disk."""
@@ -376,38 +292,26 @@ class TrayScreen:
             self._window.raise_()
             self._window.activateWindow()
 
-    def _on_update_source(self) -> None:
-        """Open a dialog to edit the update source URL or local path."""
+    def _show_settings(self) -> None:
+        """Show the settings window."""
+        self._settings_window.show()
+
+    def _on_settings_changed(self) -> None:
+        """React to a change made in the settings window."""
         config = self._resolve_config()
-
-        parent = self._window if self._window.isVisible() else None
-        dialog = UpdateSourceDialog(config.update_source, parent)
-
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            config.update_source = dialog.source
-            logger.info('Update source changed to: %s', dialog.source or '(default)')
-            self._reinitialize_updater(config)
+        self._reinitialize_updater(config)
+        self._sync_channel_checks()
 
     def _on_channel_changed(self, channel: UpdateChannel) -> None:
-        """Handle channel selection change."""
+        """Handle channel selection change from the tray submenu."""
         config = self._resolve_config()
         config.update_channel = 'dev' if channel == UpdateChannel.DEVELOPMENT else 'stable'
         logger.info('Update channel changed to: %s', config.update_channel)
         self._sync_channel_checks()
         self._reinitialize_updater(config)
-
-    def _on_auto_start_toggled(self, checked: bool) -> None:
-        """Handle Start with Windows toggle."""
-        config = self._resolve_config()
-        config.auto_start = checked
-        save_config(config)
-
-        if checked:
-            register_startup(sys.executable)
-        else:
-            remove_startup()
-
-        logger.info('Auto-startup %s', 'enabled' if checked else 'disabled')
+        # Keep the settings window in sync if it is visible
+        if self._settings_window.isVisible():
+            self._settings_window.sync_from_config()
 
     def _reinitialize_updater(self, config: GlobalConfiguration) -> None:
         """Re-derive update settings and restart the updater and timers."""

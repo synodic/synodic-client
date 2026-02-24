@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from synodic_client.application.screen.tray import TrayScreen
+from synodic_client.application.screen.settings import SettingsWindow
 from synodic_client.config import set_dev_mode
 from synodic_client.logging import (
     EagerRotatingFileHandler,
@@ -106,7 +106,7 @@ class TestConfigureLogging:
 
 
 class TestOpenLog:
-    """Tests for TrayScreen._open_log()."""
+    """Tests for SettingsWindow._open_log()."""
 
     @staticmethod
     def test_creates_file_if_missing(tmp_path: Path) -> None:
@@ -115,10 +115,10 @@ class TestOpenLog:
         assert not log_file.exists()
 
         with (
-            patch('synodic_client.application.screen.tray.log_path', return_value=log_file),
-            patch('synodic_client.application.screen.tray.QDesktopServices') as mock_ds,
+            patch('synodic_client.application.screen.settings.log_path', return_value=log_file),
+            patch('synodic_client.application.screen.settings.QDesktopServices') as mock_ds,
         ):
-            TrayScreen._open_log()
+            SettingsWindow._open_log()
             assert log_file.exists()
             mock_ds.openUrl.assert_called_once()
 
@@ -129,8 +129,8 @@ class TestOpenLog:
         log_file.write_text('existing content', encoding='utf-8')
 
         with (
-            patch('synodic_client.application.screen.tray.log_path', return_value=log_file),
-            patch('synodic_client.application.screen.tray.QDesktopServices') as mock_ds,
+            patch('synodic_client.application.screen.settings.log_path', return_value=log_file),
+            patch('synodic_client.application.screen.settings.QDesktopServices') as mock_ds,
         ):
-            TrayScreen._open_log()
+            SettingsWindow._open_log()
             mock_ds.openUrl.assert_called_once()
