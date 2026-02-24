@@ -92,6 +92,8 @@ def main(
             str(ICON_FILE),
             '--channel',
             velopack_channel,
+            '--shortcutLocations',
+            'StartMenuRoot',
             '-o',
             str(OUTPUT_DIR),
         ],
