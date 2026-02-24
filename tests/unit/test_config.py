@@ -166,6 +166,20 @@ class TestSaveConfig:
         assert data['update_channel'] == 'stable'
 
     @staticmethod
+    def test_sparse_serialization(tmp_path: Path) -> None:
+        """Verify save_config only writes user-set fields (exclude_unset)."""
+        config = GlobalConfiguration(update_channel='dev')
+
+        with patch('synodic_client.config.config_dir', return_value=tmp_path):
+            save_config(config)
+
+        data = json.loads((tmp_path / 'config.json').read_text(encoding='utf-8'))
+        # Only 'update_channel' should be in the file
+        assert data == {'update_channel': 'dev'}
+        assert 'update_source' not in data
+        assert 'auto_update_interval_minutes' not in data
+
+    @staticmethod
     def test_creates_directory(tmp_path: Path) -> None:
         """Verify save_config creates the directory if missing."""
         nested = tmp_path / 'nested' / 'dir'
@@ -189,3 +203,19 @@ class TestSaveConfig:
 
         data = json.loads(config_path.read_text(encoding='utf-8'))
         assert data['update_source'] == 'http://new-source'
+
+    @staticmethod
+    def test_save_load_round_trip(tmp_path: Path) -> None:
+        """Verify saved config can be loaded back with correct fields_set."""
+        original = GlobalConfiguration(update_channel='dev', auto_start=False)
+
+        with patch('synodic_client.config.config_dir', return_value=tmp_path):
+            save_config(original)
+
+        data = json.loads((tmp_path / 'config.json').read_text(encoding='utf-8'))
+        loaded = GlobalConfiguration.model_validate(data)
+        assert loaded.update_channel == 'dev'
+        assert loaded.auto_start is False
+        # Only saved fields should be in model_fields_set
+        assert loaded.model_fields_set == {'update_channel', 'auto_start'}
+        assert loaded.update_source is None

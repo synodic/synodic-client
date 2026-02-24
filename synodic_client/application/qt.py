@@ -44,11 +44,16 @@ def _init_services(logger: logging.Logger) -> tuple[Client, API, GlobalConfigura
     update_config = resolve_update_config(config)
     client.initialize_updater(update_config)
 
+    cached_dirs = porringer.cache.list_directories()
+
     logger.info(
-        'Synodic Client v%s started (channel: %s, source: %s)',
+        'Synodic Client v%s started (channel: %s, source: %s, '
+        'config_fields_set: %s, cached_projects: %d)',
         client.version,
         update_config.channel.name,
         update_config.repo_url,
+        sorted(config.model_fields_set),
+        len(cached_dirs),
     )
 
     return client, porringer, config

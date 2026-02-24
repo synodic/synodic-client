@@ -34,8 +34,8 @@ class TestMergeConfig:
 
     @staticmethod
     def test_local_overrides_global() -> None:
-        """Verify local fields override global values."""
-        global_cfg = GlobalConfiguration(update_source='/system', update_channel='stable')
+        """Verify local fields fill in values the user hasn't set."""
+        global_cfg = GlobalConfiguration(update_channel='stable')
         local_cfg = LocalConfiguration(update_source='/local')
         result = merge_config(global_cfg, local_cfg)
         assert result.update_source == '/local'
@@ -52,20 +52,56 @@ class TestMergeConfig:
 
     @staticmethod
     def test_full_override() -> None:
-        """Verify all local fields override when set."""
+        """Verify local fields are ignored when the user has saved both."""
         global_cfg = GlobalConfiguration(update_source='/system', update_channel='stable')
         local_cfg = LocalConfiguration(update_source='/local', update_channel='dev')
         result = merge_config(global_cfg, local_cfg)
-        assert result.update_source == '/local'
+        assert result.update_source == '/system'
+        assert result.update_channel == 'stable'
+
+    @staticmethod
+    def test_user_saved_wins_over_local() -> None:
+        """Verify a user-saved field takes priority over local config."""
+        global_cfg = GlobalConfiguration(update_channel='dev')
+        local_cfg = LocalConfiguration(update_channel='stable')
+        result = merge_config(global_cfg, local_cfg)
         assert result.update_channel == 'dev'
 
     @staticmethod
+    def test_local_fills_unsaved_fields() -> None:
+        """Verify local config fills in fields the user hasn't saved."""
+        global_cfg = GlobalConfiguration(update_channel='dev')
+        local_cfg = LocalConfiguration(update_source='/local/releases')
+        result = merge_config(global_cfg, local_cfg)
+        assert result.update_channel == 'dev'
+        assert result.update_source == '/local/releases'
+
+    @staticmethod
+    def test_preserves_model_fields_set() -> None:
+        """Verify merge preserves the global config's model_fields_set."""
+        global_cfg = GlobalConfiguration(update_channel='dev')
+        local_cfg = LocalConfiguration(update_source='/local')
+        result = merge_config(global_cfg, local_cfg)
+        # Only 'update_channel' was in the user's config file
+        assert result.model_fields_set == {'update_channel'}
+        # But the runtime value from local config is available
+        assert result.update_source == '/local'
+
+    @staticmethod
     def test_local_overrides_plugin_auto_update() -> None:
-        """Verify local plugin_auto_update overrides global."""
-        global_cfg = GlobalConfiguration(plugin_auto_update={'pip': False})
+        """Verify local plugin_auto_update fills in when user hasn't set it."""
+        global_cfg = GlobalConfiguration()
         local_cfg = LocalConfiguration(plugin_auto_update={'pip': True, 'pipx': False})
         result = merge_config(global_cfg, local_cfg)
         assert result.plugin_auto_update == {'pip': True, 'pipx': False}
+
+    @staticmethod
+    def test_user_plugin_auto_update_wins() -> None:
+        """Verify user-saved plugin_auto_update wins over local."""
+        global_cfg = GlobalConfiguration(plugin_auto_update={'pip': False})
+        local_cfg = LocalConfiguration(plugin_auto_update={'pip': True, 'pipx': False})
+        result = merge_config(global_cfg, local_cfg)
+        assert result.plugin_auto_update == {'pip': False}
 
 
 class TestResolveAutoStart:
@@ -169,7 +205,7 @@ class TestResolveConfig:
 
     @staticmethod
     def test_local_overrides_global_per_field(tmp_path: Path) -> None:
-        """Verify local config overrides global on a per-field basis."""
+        """Verify local config fills in fields the user hasn't saved."""
         local_data = {'update_source': '/local/releases'}
         local_path = tmp_path / 'local' / 'config.json'
         local_path.parent.mkdir()
@@ -177,7 +213,8 @@ class TestResolveConfig:
 
         system_dir = tmp_path / 'system'
         system_dir.mkdir()
-        system_data = {'update_source': '/system/releases', 'update_channel': 'stable'}
+        # User has only saved update_channel, not update_source
+        system_data = {'update_channel': 'stable'}
         (system_dir / 'config.json').write_text(json.dumps(system_data), encoding='utf-8')
 
         with (
@@ -186,7 +223,9 @@ class TestResolveConfig:
         ):
             config = resolve_config()
 
+        # Local fills in update_source since user didn't set it
         assert config.update_source == '/local/releases'
+        # User's saved update_channel is preserved
         assert config.update_channel == 'stable'
 
     @staticmethod
@@ -226,7 +265,28 @@ class TestResolveConfig:
 
     @staticmethod
     def test_portable_takes_precedence(tmp_path: Path) -> None:
-        """Verify portable config values override system config."""
+        """Verify portable config fills in fields user hasn't saved."""
+        portable_data = {'update_source': '/portable/releases', 'update_channel': 'dev'}
+        portable_path = tmp_path / 'config.json'
+        portable_path.write_text(json.dumps(portable_data), encoding='utf-8')
+
+        system_dir = tmp_path / 'system'
+        system_dir.mkdir()
+        # User has NOT saved any config (empty file or missing)
+        (system_dir / 'config.json').write_text('{}', encoding='utf-8')
+
+        with (
+            patch('synodic_client.config._portable_config_path', return_value=portable_path),
+            patch('synodic_client.config.config_dir', return_value=system_dir),
+        ):
+            config = resolve_config()
+
+        assert config.update_source == '/portable/releases'
+        assert config.update_channel == 'dev'
+
+    @staticmethod
+    def test_user_saved_wins_over_portable(tmp_path: Path) -> None:
+        """Verify user-saved values in global config win over portable."""
         portable_data = {'update_source': '/portable/releases', 'update_channel': 'dev'}
         portable_path = tmp_path / 'config.json'
         portable_path.write_text(json.dumps(portable_data), encoding='utf-8')
@@ -242,8 +302,8 @@ class TestResolveConfig:
         ):
             config = resolve_config()
 
-        assert config.update_source == '/portable/releases'
-        assert config.update_channel == 'dev'
+        assert config.update_source == '/system/releases'
+        assert config.update_channel == 'stable'
 
 
 class TestResolveUpdateConfig:
@@ -339,7 +399,9 @@ class TestUpdateAndResolve:
         assert result.channel == UpdateChannel.DEVELOPMENT
         assert result.repo_url == '/my/source'
 
-        # Verify file was saved
+        # Verify file was saved (sparse — only user-set fields)
         saved = json.loads((tmp_path / 'config.json').read_text(encoding='utf-8'))
         assert saved['update_source'] == '/my/source'
         assert saved['update_channel'] == 'dev'
+        # Unset fields should not appear in the sparse output
+        assert 'auto_update_interval_minutes' not in saved

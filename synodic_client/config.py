@@ -194,6 +194,12 @@ def _load_global_config() -> GlobalConfiguration:
 def save_config(config: GlobalConfiguration) -> None:
     """Save configuration to the global (system) config directory.
 
+    Only fields that have been explicitly set (either loaded from the
+    existing config file or changed at runtime) are written.  This
+    sparse serialisation ensures that build-time local-config values
+    do not leak into the user's global config and that future defaults
+    can take effect for fields the user has not customised.
+
     Args:
         config: The configuration to persist.
     """
@@ -202,7 +208,10 @@ def save_config(config: GlobalConfiguration) -> None:
     path = directory / _CONFIG_FILENAME
 
     try:
-        path.write_text(config.model_dump_json(indent=2), encoding='utf-8')
+        path.write_text(
+            config.model_dump_json(indent=2, exclude_unset=True),
+            encoding='utf-8',
+        )
         logger.info('Saved config to %s', path)
     except Exception:
         logger.exception('Failed to save config to %s', path)

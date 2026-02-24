@@ -32,8 +32,13 @@ def merge_config(
 ) -> GlobalConfiguration:
     """Merge local overrides into a global configuration.
 
-    Fields explicitly set (not None) in the local config override the
-    corresponding global values.
+    Fields that the user has explicitly saved (present in the global
+    config file) take priority over local overrides.  Local config
+    fields only fill in values the user has **not** set.
+
+    The returned object preserves the global config's
+    ``model_fields_set`` so that :func:`save_config` can use
+    ``exclude_unset=True`` to write only user-changed fields.
 
     Args:
         global_config: The user-scoped global configuration.
@@ -45,12 +50,13 @@ def merge_config(
     if local_config is None:
         return global_config
 
+    user_set = global_config.model_fields_set
     merged = global_config.model_dump()
     for field_name, value in local_config.model_dump().items():
-        if value is not None:
+        if value is not None and field_name not in user_set:
             merged[field_name] = value
 
-    return GlobalConfiguration.model_validate(merged)
+    return GlobalConfiguration.model_construct(_fields_set=set(user_set), **merged)
 
 
 def resolve_config() -> GlobalConfiguration:
