@@ -842,6 +842,158 @@ class TestNormalizeManifestKey:
         assert Path(result).is_absolute()
 
 
+class TestPreviewWorkerProjectDirectory:
+    """Tests for project_directory forwarding to the dry-run."""
+
+    @staticmethod
+    def test_file_path_forwards_parent_as_project_directory(tmp_path: Path) -> None:
+        """When a manifest *file* is selected, its parent dir is forwarded."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+        preview = SetupResults(actions=[])
+        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+
+        captured_params: list[Any] = []
+
+        async def mock_stream(params: Any) -> Any:
+            captured_params.append(params)
+            yield manifest_event
+
+        porringer.sync.execute_stream = mock_stream
+
+        worker = PreviewWorker(
+            porringer,
+            str(manifest),
+            project_directory=manifest.parent,
+        )
+        worker.run()
+
+        assert len(captured_params) == 1
+        assert captured_params[0].project_directory == tmp_path
+
+    @staticmethod
+    def test_directory_path_forwarded_directly(tmp_path: Path) -> None:
+        """When a directory is selected its path is forwarded as-is."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+        preview = SetupResults(actions=[])
+        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+
+        captured_params: list[Any] = []
+
+        async def mock_stream(params: Any) -> Any:
+            captured_params.append(params)
+            yield manifest_event
+
+        porringer.sync.execute_stream = mock_stream
+
+        worker = PreviewWorker(
+            porringer,
+            str(tmp_path),
+            project_directory=tmp_path,
+        )
+        worker.run()
+
+        assert len(captured_params) == 1
+        assert captured_params[0].project_directory == tmp_path
+
+
+class TestSCMPreviewActions:
+    """Tests for SCM (git clone) actions in the preview dry-run flow."""
+
+    @staticmethod
+    def _make_scm_action(description: str = 'Clone repo') -> MagicMock:
+        action = MagicMock()
+        action.kind = PluginKind.SCM
+        action.description = description
+        action.installer = 'git'
+        action.package = None
+        action.command = None
+        action.cli_command = None
+        return action
+
+    def test_scm_already_installed_emits_correct_result(self, tmp_path: Path) -> None:
+        """An SCM action with ALREADY_INSTALLED is surfaced via action_checked."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+        action = self._make_scm_action()
+        preview = SetupResults(actions=[action])
+
+        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        result = SetupActionResult(
+            action=action,
+            success=True,
+            skipped=True,
+            skip_reason=SkipReason.ALREADY_INSTALLED,
+        )
+        completed_event = ProgressEvent(
+            kind=ProgressEventKind.ACTION_COMPLETED,
+            action=action,
+            result=result,
+        )
+
+        async def mock_stream(*args: Any, **kwargs: Any) -> Any:
+            yield manifest_event
+            yield completed_event
+
+        porringer.sync.execute_stream = mock_stream
+
+        worker = PreviewWorker(porringer, str(manifest), project_directory=tmp_path)
+
+        checked: list[tuple[int, SetupActionResult]] = []
+        worker.action_checked.connect(lambda row, r: checked.append((row, r)))
+        worker.run()
+
+        assert len(checked) == 1
+        assert checked[0] == (0, result)
+        assert checked[0][1].skipped is True
+        assert checked[0][1].skip_reason == SkipReason.ALREADY_INSTALLED
+
+    def test_scm_needed_emits_correct_result(self, tmp_path: Path) -> None:
+        """An SCM action that is *not* installed is surfaced as Needed."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text('{}')
+
+        porringer = MagicMock()
+        action = self._make_scm_action()
+        preview = SetupResults(actions=[action])
+
+        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        result = SetupActionResult(
+            action=action,
+            success=True,
+            skipped=False,
+            skip_reason=None,
+        )
+        completed_event = ProgressEvent(
+            kind=ProgressEventKind.ACTION_COMPLETED,
+            action=action,
+            result=result,
+        )
+
+        async def mock_stream(*args: Any, **kwargs: Any) -> Any:
+            yield manifest_event
+            yield completed_event
+
+        porringer.sync.execute_stream = mock_stream
+
+        worker = PreviewWorker(porringer, str(manifest), project_directory=tmp_path)
+
+        checked: list[tuple[int, SetupActionResult]] = []
+        worker.action_checked.connect(lambda row, r: checked.append((row, r)))
+        worker.run()
+
+        assert len(checked) == 1
+        assert checked[0][1].skipped is False
+        assert checked[0][1].skip_reason is None
+
+
 class TestPrereleaseCheckboxLock:
     """Tests for the pre-release checkbox lock/unlock decision logic.
 

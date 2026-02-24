@@ -19,6 +19,7 @@ from typing import Annotated
 import typer
 
 from synodic_client import __version__
+from synodic_client.updater import platform_suffix
 from tool.scripts.common import ICON_FILE, MAIN_EXE, OUTPUT_DIR, PACK_DIR, PACK_ID, build, kill_running_instances, run
 
 app = typer.Typer(help='Package Synodic Client with PyInstaller and Velopack.')
@@ -43,7 +44,8 @@ def main(
     ] = False,
 ) -> None:
     """Entry point for the packaging script."""
-    print(f'Packaging Synodic Client v{__version__} (channel: {channel.value})')
+    velopack_channel = f'{channel.value}-{platform_suffix()}'
+    print(f'Packaging Synodic Client v{__version__} (channel: {velopack_channel})')
 
     # Step 1: PyInstaller
     if not skip_pyinstaller:
@@ -89,7 +91,7 @@ def main(
             '--icon',
             str(ICON_FILE),
             '--channel',
-            channel.value,
+            velopack_channel,
             '-o',
             str(OUTPUT_DIR),
         ],
@@ -111,7 +113,7 @@ def main(
                 '-o',
                 str(OUTPUT_DIR),
                 '--channel',
-                channel.value,
+                velopack_channel,
             ],
             description=f'Uploading to local source: {local_path}',
         )

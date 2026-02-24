@@ -753,12 +753,14 @@ class ProjectsView(QWidget):
         manifest_key = normalize_manifest_key(str(selected_path))
         overrides = set((self._config.prerelease_packages or {}).get(manifest_key, []))
 
-        # Defer project directory assignment until the preview result
-        # provides root_directory — handles both file and directory inputs.
+        # For file paths, use the parent directory so the dry-run
+        # can detect already-cloned repositories on disk.  The final
+        # project directory may still be overridden once porringer
+        # returns ``root_directory`` in the preview result.
         preview_worker = PreviewWorker(
             self._porringer,
             str(selected_path),
-            project_directory=selected_path if selected_path.is_dir() else None,
+            project_directory=selected_path if selected_path.is_dir() else selected_path.parent,
             detect_updates=self._config.detect_updates,
             prerelease_packages=overrides or None,
         )

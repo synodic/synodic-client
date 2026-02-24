@@ -290,7 +290,13 @@ class ActionCard(QFrame):
         outer.setContentsMargins(6, 6, 6, 6)
         outer.setSpacing(2)
 
-        # --- Top row: type badge | package name ... version | status/spinner | prerelease ---
+        outer.addLayout(self._build_top_row())
+        outer.addWidget(self._build_description_row())
+        outer.addWidget(self._build_command_row())
+        outer.addWidget(self._build_log_output())
+
+    def _build_top_row(self) -> QHBoxLayout:
+        """Build the top row: type badge | package name ... version | status/spinner | prerelease."""
         top = QHBoxLayout()
         top.setSpacing(8)
 
@@ -323,15 +329,17 @@ class ActionCard(QFrame):
         self._prerelease_cb.hide()
         top.addWidget(self._prerelease_cb)
 
-        outer.addLayout(top)
+        return top
 
-        # --- Description row ---
+    def _build_description_row(self) -> QLabel:
+        """Build the description label."""
         self._desc_label = QLabel()
         self._desc_label.setStyleSheet(ACTION_CARD_DESC_STYLE)
         self._desc_label.setWordWrap(True)
-        outer.addWidget(self._desc_label)
+        return self._desc_label
 
-        # --- CLI command row (always visible, muted monospace) ---
+    def _build_command_row(self) -> QWidget:
+        """Build the CLI command row with copy button."""
         self._command_row = QWidget()
         cmd_layout = QHBoxLayout(self._command_row)
         cmd_layout.setContentsMargins(0, 0, 0, 0)
@@ -356,9 +364,10 @@ class ActionCard(QFrame):
         cmd_layout.addStretch()
 
         self._command_row.hide()
-        outer.addWidget(self._command_row)
+        return self._command_row
 
-        # --- Inline log body (hidden by default) ---
+    def _build_log_output(self) -> QTextEdit:
+        """Build the inline log body (hidden by default)."""
         self._log_output = QTextEdit()
         self._log_output.setReadOnly(True)
         self._log_output.setFont(QFont(MONOSPACE_FAMILY, MONOSPACE_SIZE))
@@ -367,7 +376,7 @@ class ActionCard(QFrame):
         self._log_output.setMaximumHeight(250)
         self._log_output.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._log_output.hide()
-        outer.addWidget(self._log_output)
+        return self._log_output
 
     # ------------------------------------------------------------------
     # Mouse events (toggle log)
