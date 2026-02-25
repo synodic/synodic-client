@@ -306,3 +306,51 @@ class TestSyncDoesNotEmit:
         window.sync_from_config()
 
         signal_spy.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Check for Updates button
+# ---------------------------------------------------------------------------
+
+
+class TestCheckForUpdatesButton:
+    """Verify the Check for Updates button and inline status label."""
+
+    @staticmethod
+    def test_button_and_label_exist() -> None:
+        """Window has the check-updates button and status label."""
+        window = _make_window()
+        assert hasattr(window, '_check_updates_btn')
+        assert hasattr(window, '_update_status_label')
+        assert window._check_updates_btn.text() == 'Check for Updates\u2026'
+        assert window._update_status_label.text() == ''
+
+    @staticmethod
+    def test_click_emits_signal_and_disables() -> None:
+        """Clicking the button emits check_updates_requested and disables it."""
+        window = _make_window()
+        signal_spy = MagicMock()
+        window.check_updates_requested.connect(signal_spy)
+
+        window._check_updates_btn.click()
+
+        signal_spy.assert_called_once()
+        assert window._check_updates_btn.isEnabled() is False
+        assert window._update_status_label.text() == 'Checking\u2026'
+
+    @staticmethod
+    def test_set_update_status() -> None:
+        """set_update_status sets the label text."""
+        window = _make_window()
+        window.set_update_status('Up to date (v1.0.0)')
+        assert window._update_status_label.text() == 'Up to date (v1.0.0)'
+
+    @staticmethod
+    def test_reset_check_updates_button() -> None:
+        """reset_check_updates_button re-enables the button."""
+        window = _make_window()
+        window._check_updates_btn.setEnabled(False)
+
+        window.reset_check_updates_button()
+
+        assert window._check_updates_btn.isEnabled() is True

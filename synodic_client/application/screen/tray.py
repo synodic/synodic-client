@@ -2,11 +2,10 @@
 
 import asyncio
 import logging
-from pathlib import Path
+from collections.abc import Callable
 
 from porringer.api import API
-from porringer.schema import SetupParameters, SyncStrategy
-from PySide6.QtCore import QThread, QTimer, Signal
+from PySide6.QtCore import QThread, QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.screen import MainWindow
 from synodic_client.application.screen.settings import SettingsWindow
+from synodic_client.application.workers import ToolUpdateWorker, UpdateCheckWorker, UpdateDownloadWorker
 from synodic_client.client import Client
 from synodic_client.config import GlobalConfiguration
 from synodic_client.resolution import (
@@ -27,104 +27,9 @@ from synodic_client.resolution import (
     resolve_update_config,
     update_and_resolve,
 )
-from synodic_client.updater import UpdateChannel, UpdateInfo
+from synodic_client.updater import UpdateInfo
 
 logger = logging.getLogger(__name__)
-
-
-class UpdateCheckWorker(QThread):
-    """Worker for checking updates in a background thread."""
-
-    finished = Signal(object)  # UpdateInfo
-    error = Signal(str)
-
-    def __init__(self, client: Client) -> None:
-        """Initialize the worker."""
-        super().__init__()
-        self._client = client
-
-    def run(self) -> None:
-        """Run the update check."""
-        try:
-            result = self._client.check_for_update()
-            self.finished.emit(result)
-        except Exception as e:
-            logger.exception('Update check failed')
-            self.error.emit(str(e))
-
-
-class UpdateDownloadWorker(QThread):
-    """Worker for downloading updates in a background thread."""
-
-    finished = Signal(bool)  # success status
-    progress = Signal(int)  # percentage (0-100)
-    error = Signal(str)
-
-    def __init__(self, client: Client) -> None:
-        """Initialize the worker."""
-        super().__init__()
-        self._client = client
-
-    def run(self) -> None:
-        """Run the update download."""
-        try:
-
-            def progress_callback(percentage: int) -> None:
-                self.progress.emit(percentage)
-
-            success = self._client.download_update(progress_callback)
-            self.finished.emit(success)
-        except Exception as e:
-            logger.exception('Update download failed')
-            self.error.emit(str(e))
-
-
-class ToolUpdateWorker(QThread):
-    """Worker for re-syncing manifest-declared tools in a background thread."""
-
-    finished = Signal(int)  # number of manifests processed
-    error = Signal(str)
-
-    def __init__(self, porringer: API, plugins: list[str] | None = None) -> None:
-        """Initialize the worker.
-
-        Args:
-            porringer: The porringer API instance.
-            plugins: Optional include-list of plugin names.  When set, only
-                actions handled by these plugins are executed.  ``None``
-                means all plugins.
-        """
-        super().__init__()
-        self._porringer = porringer
-        self._plugins = plugins
-
-    def run(self) -> None:
-        """Re-sync all cached project manifests."""
-        try:
-            directories = self._porringer.cache.list_directories()
-            count = 0
-            for directory in directories:
-                path = Path(directory.path)
-                if not self._porringer.sync.has_manifest(path):
-                    logger.debug('Skipping path without manifest: %s', path)
-                    continue
-                params = SetupParameters(
-                    paths=[path],
-                    project_directory=path if path.is_dir() else None,
-                    strategy=SyncStrategy.LATEST,
-                    plugins=self._plugins,
-                )
-                asyncio.run(self._sync(params))
-                count += 1
-            self.finished.emit(count)
-        except Exception as e:
-            logger.exception('Tool update failed')
-            self.error.emit(str(e))
-
-    async def _sync(self, params: SetupParameters) -> None:
-        """Execute a sync stream for the given parameters."""
-        async for _event in self._porringer.sync.execute_stream(params):
-            pass  # consume events to completion
 
 
 class TrayScreen:
@@ -169,17 +74,18 @@ class TrayScreen:
         # Settings window (created once, shown/hidden on demand)
         self._settings_window = SettingsWindow(self._resolve_config())
         self._settings_window.settings_changed.connect(self._on_settings_changed)
+        self._settings_window.check_updates_requested.connect(self._on_check_updates)
 
         # MainWindow gear button → open settings
         window.settings_requested.connect(self._show_settings)
 
         # Periodic auto-update checking
         self._auto_update_timer: QTimer | None = None
-        self._start_auto_update_timer()
+        self._restart_auto_update_timer()
 
         # Periodic tool update checking
         self._tool_update_timer: QTimer | None = None
-        self._start_tool_update_timer()
+        self._restart_tool_update_timer()
 
         # Connect PluginsView signals when available
         plugins_view = window.plugins_view
@@ -200,23 +106,6 @@ class TrayScreen:
         self.update_action = QAction('Check for Updates...', self.menu)
         self.update_action.triggered.connect(self._on_check_updates)
         self.menu.addAction(self.update_action)
-
-        # Update Channel submenu
-        self.channel_menu = QMenu('Update Channel', self.menu)
-        self.menu.addMenu(self.channel_menu)
-
-        self._channel_stable_action = QAction('Stable', self.channel_menu)
-        self._channel_stable_action.setCheckable(True)
-        self._channel_stable_action.triggered.connect(lambda: self._on_channel_changed(UpdateChannel.STABLE))
-        self.channel_menu.addAction(self._channel_stable_action)
-
-        self._channel_dev_action = QAction('Development', self.channel_menu)
-        self._channel_dev_action.setCheckable(True)
-        self._channel_dev_action.triggered.connect(lambda: self._on_channel_changed(UpdateChannel.DEVELOPMENT))
-        self.channel_menu.addAction(self._channel_dev_action)
-
-        # Set initial channel check state from config
-        self._sync_channel_checks()
 
         self.menu.addSeparator()
 
@@ -240,50 +129,57 @@ class TrayScreen:
             return self._config
         return resolve_config()
 
-    def _start_auto_update_timer(self) -> None:
+    def _restart_timer(
+        self,
+        current: QTimer | None,
+        interval_minutes: int,
+        slot: Callable[[], None],
+        label: str,
+    ) -> QTimer | None:
+        """Stop *current* and return a new periodic timer, or ``None``.
+
+        Args:
+            current: The existing timer to stop (may be ``None``).
+            interval_minutes: Interval in minutes.  ``0`` disables.
+            slot: The callable to invoke on each tick.
+            label: Human-readable name for log messages.
+
+        Returns:
+            A running ``QTimer``, or ``None`` when disabled.
+        """
+        if current is not None:
+            current.stop()
+
+        if interval_minutes <= 0:
+            logger.info('%s is disabled', label)
+            return None
+
+        timer = QTimer()
+        timer.setInterval(interval_minutes * 60 * 1000)
+        timer.timeout.connect(slot)
+        timer.start()
+        logger.info('%s enabled (every %d minute(s))', label, interval_minutes)
+        return timer
+
+    def _restart_auto_update_timer(self) -> None:
         """Start (or restart) the periodic auto-update timer from config."""
-        if self._auto_update_timer is not None:
-            self._auto_update_timer.stop()
-            self._auto_update_timer = None
-
         config = resolve_update_config(self._resolve_config())
-        interval_minutes = config.auto_update_interval_minutes
-        if interval_minutes <= 0:
-            logger.info('Automatic update checking is disabled')
-            return
+        self._auto_update_timer = self._restart_timer(
+            self._auto_update_timer,
+            config.auto_update_interval_minutes,
+            self._on_auto_check_updates,
+            'Automatic update checking',
+        )
 
-        interval_ms = interval_minutes * 60 * 1000
-        self._auto_update_timer = QTimer()
-        self._auto_update_timer.setInterval(interval_ms)
-        self._auto_update_timer.timeout.connect(self._on_auto_check_updates)
-        self._auto_update_timer.start()
-        logger.info('Automatic update checking enabled (every %d minute(s))', interval_minutes)
-
-    def _start_tool_update_timer(self) -> None:
+    def _restart_tool_update_timer(self) -> None:
         """Start (or restart) the periodic tool update timer from config."""
-        if self._tool_update_timer is not None:
-            self._tool_update_timer.stop()
-            self._tool_update_timer = None
-
         config = resolve_update_config(self._resolve_config())
-        interval_minutes = config.tool_update_interval_minutes
-        if interval_minutes <= 0:
-            logger.info('Automatic tool updating is disabled')
-            return
-
-        interval_ms = interval_minutes * 60 * 1000
-        self._tool_update_timer = QTimer()
-        self._tool_update_timer.setInterval(interval_ms)
-        self._tool_update_timer.timeout.connect(self._on_tool_update)
-        self._tool_update_timer.start()
-        logger.info('Automatic tool updating enabled (every %d minute(s))', interval_minutes)
-
-    def _sync_channel_checks(self) -> None:
-        """Synchronize channel checkmarks with the current config."""
-        config = self._resolve_config()
-        is_dev = config.update_channel == 'dev'
-        self._channel_stable_action.setChecked(not is_dev)
-        self._channel_dev_action.setChecked(is_dev)
+        self._tool_update_timer = self._restart_timer(
+            self._tool_update_timer,
+            config.tool_update_interval_minutes,
+            self._on_tool_update,
+            'Automatic tool updating',
+        )
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         """Handle tray icon activation (e.g. double-click)."""
@@ -300,25 +196,13 @@ class TrayScreen:
         """React to a change made in the settings window."""
         config = self._resolve_config()
         self._reinitialize_updater(config)
-        self._sync_channel_checks()
-
-    def _on_channel_changed(self, channel: UpdateChannel) -> None:
-        """Handle channel selection change from the tray submenu."""
-        config = self._resolve_config()
-        config.update_channel = 'dev' if channel == UpdateChannel.DEVELOPMENT else 'stable'
-        logger.info('Update channel changed to: %s', config.update_channel)
-        self._sync_channel_checks()
-        self._reinitialize_updater(config)
-        # Keep the settings window in sync if it is visible
-        if self._settings_window.isVisible():
-            self._settings_window.sync_from_config()
 
     def _reinitialize_updater(self, config: GlobalConfiguration) -> None:
         """Re-derive update settings and restart the updater and timers."""
         update_cfg = update_and_resolve(config)
         self._client.initialize_updater(update_cfg)
-        self._start_auto_update_timer()
-        self._start_tool_update_timer()
+        self._restart_auto_update_timer()
+        self._restart_tool_update_timer()
         logger.info('Updater re-initialized (channel: %s, source: %s)', update_cfg.channel.name, update_cfg.repo_url)
 
     def _reset_update_action(self) -> None:
@@ -361,9 +245,11 @@ class TrayScreen:
                 )
             return
 
-        # Disable the action while checking
+        # Disable both the tray action and the settings button while checking
         self.update_action.setEnabled(False)
         self.update_action.setText('Checking for Updates...')
+        self._settings_window._check_updates_btn.setEnabled(False)
+        self._settings_window.set_update_status('Checking\u2026')
 
         worker = UpdateCheckWorker(self._client)
         worker.finished.connect(lambda result: self._on_update_check_finished(result, silent=silent))
@@ -375,8 +261,10 @@ class TrayScreen:
     def _on_update_check_finished(self, result: UpdateInfo | None, *, silent: bool = False) -> None:
         """Handle update check completion."""
         self._reset_update_action()
+        self._settings_window.reset_check_updates_button()
 
         if result is None:
+            self._settings_window.set_update_status('Check failed')
             if not silent:
                 self.tray.showMessage(
                     'Update Check Failed',
@@ -388,6 +276,7 @@ class TrayScreen:
             return
 
         if result.error:
+            self._settings_window.set_update_status(result.error)
             if not silent:
                 # Distinguish informational messages (no releases for channel)
                 # from genuine failures.
@@ -402,6 +291,9 @@ class TrayScreen:
             return
 
         if not result.available:
+            self._settings_window.set_update_status(
+                f'Up to date ({result.current_version})',
+            )
             if not silent:
                 self.tray.showMessage(
                     'No Updates Available',
@@ -414,6 +306,9 @@ class TrayScreen:
 
         # Update available - always show notification, clicking it starts download
         self._pending_update_info = result
+        self._settings_window.set_update_status(
+            f'Update available: {result.latest_version}',
+        )
         self.tray.showMessage(
             'Update Available',
             f'Version {result.latest_version} is available (current: {result.current_version}).\nClick to download.',
@@ -423,6 +318,8 @@ class TrayScreen:
     def _on_update_check_error(self, error: str, *, silent: bool = False) -> None:
         """Handle update check error."""
         self._reset_update_action()
+        self._settings_window.reset_check_updates_button()
+        self._settings_window.set_update_status(f'Error: {error}')
 
         if not silent:
             self.tray.showMessage(

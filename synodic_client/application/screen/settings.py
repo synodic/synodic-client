@@ -1,8 +1,8 @@
 """Settings window for the Synodic Client application.
 
 Provides a single-page window with grouped sections for all application
-settings.  Quick-access items (Channel, Check for Updates) remain in the
-tray menu; the full set is available here.
+settings including update-channel selection and a manual *Check for
+Updates* button with inline status feedback.
 """
 
 import logging
@@ -51,6 +51,9 @@ class SettingsWindow(QMainWindow):
 
     settings_changed = Signal()
     """Emitted whenever a setting is changed and persisted."""
+
+    check_updates_requested = Signal()
+    """Emitted when the user clicks the *Check for Updates* button."""
 
     def __init__(
         self,
@@ -155,6 +158,16 @@ class SettingsWindow(QMainWindow):
         self._detect_updates_check.toggled.connect(self._on_detect_updates_changed)
         content.addWidget(self._detect_updates_check)
 
+        # Check for Updates
+        row = QHBoxLayout()
+        self._check_updates_btn = QPushButton('Check for Updates\u2026')
+        self._check_updates_btn.clicked.connect(self._on_check_updates_clicked)
+        row.addWidget(self._check_updates_btn)
+        self._update_status_label = QLabel('')
+        row.addWidget(self._update_status_label)
+        row.addStretch()
+        content.addLayout(row)
+
         return card
 
     def _build_startup_section(self) -> CardFrame:
@@ -209,6 +222,14 @@ class SettingsWindow(QMainWindow):
             self._detect_updates_check.setChecked(config.detect_updates)
             self._auto_start_check.setChecked(is_startup_registered())
 
+    def set_update_status(self, text: str) -> None:
+        """Set the inline status text next to the *Check for Updates* button."""
+        self._update_status_label.setText(text)
+
+    def reset_check_updates_button(self) -> None:
+        """Re-enable the *Check for Updates* button after a check completes."""
+        self._check_updates_btn.setEnabled(True)
+
     def show(self) -> None:
         """Sync controls from config, then show the window."""
         self.sync_from_config()
@@ -235,6 +256,7 @@ class SettingsWindow(QMainWindow):
             self._tool_update_spin,
             self._detect_updates_check,
             self._auto_start_check,
+            self._check_updates_btn,
         )
         for w in widgets:
             w.blockSignals(True)
@@ -243,6 +265,12 @@ class SettingsWindow(QMainWindow):
         finally:
             for w in widgets:
                 w.blockSignals(False)
+
+    def _on_check_updates_clicked(self) -> None:
+        """Handle the *Check for Updates* button click."""
+        self._check_updates_btn.setEnabled(False)
+        self._update_status_label.setText('Checking\u2026')
+        self.check_updates_requested.emit()
 
     def _on_channel_changed(self, index: int) -> None:
         self._config.update_channel = 'dev' if index == 1 else 'stable'
