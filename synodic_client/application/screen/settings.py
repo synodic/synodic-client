@@ -127,6 +127,12 @@ class SettingsWindow(QMainWindow):
         row.addWidget(browse_btn)
         content.addLayout(row)
 
+        self._add_update_controls(content)
+
+        return card
+
+    def _add_update_controls(self, content: QVBoxLayout) -> None:
+        """Add interval spinners, detect-updates checkbox, and update button."""
         # Auto-update interval
         row = QHBoxLayout()
         label = QLabel('App update interval (min)')
@@ -167,8 +173,6 @@ class SettingsWindow(QMainWindow):
         row.addWidget(self._update_status_label)
         row.addStretch()
         content.addLayout(row)
-
-        return card
 
     def _build_startup_section(self) -> CardFrame:
         """Construct the *Startup* settings card."""

@@ -323,7 +323,7 @@ class TestCheckForUpdatesButton:
         assert hasattr(window, '_check_updates_btn')
         assert hasattr(window, '_update_status_label')
         assert window._check_updates_btn.text() == 'Check for Updates\u2026'
-        assert window._update_status_label.text() == ''
+        assert not window._update_status_label.text()
 
     @staticmethod
     def test_click_emits_signal_and_disables() -> None:

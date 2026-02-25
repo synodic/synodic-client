@@ -129,8 +129,8 @@ class TrayScreen:
             return self._config
         return resolve_config()
 
+    @staticmethod
     def _restart_timer(
-        self,
         current: QTimer | None,
         interval_minutes: int,
         slot: Callable[[], None],
