@@ -28,6 +28,7 @@ from synodic_client.resolution import (
     ResolvedConfig,
     resolve_config,
     resolve_update_config,
+    resolve_version,
     seed_user_config_from_build,
 )
 from synodic_client.startup import register_startup, remove_startup
@@ -53,7 +54,7 @@ def _init_services(logger: logging.Logger) -> tuple[Client, API, ResolvedConfig]
 
     logger.info(
         'Synodic Client v%s started (channel: %s, source: %s, cached_projects: %d)',
-        client.version,
+        resolve_version(client),
         update_config.channel.name,
         update_config.repo_url,
         len(cached_dirs),

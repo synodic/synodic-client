@@ -197,7 +197,14 @@ class TrayScreen:
         self._reinitialize_updater(config)
 
     def _reinitialize_updater(self, config: ResolvedConfig) -> None:
-        """Re-derive update settings and restart the updater and timers."""
+        """Re-derive update settings and restart the updater and timers.
+
+        The new ``Updater`` starts with the ``importlib.metadata``
+        version which may be stale after a Velopack update.  The
+        authoritative Velopack version is recovered automatically on
+        the first ``_get_velopack_manager()`` call (i.e. the next
+        update check), so no special handling is required here.
+        """
         update_cfg = resolve_update_config(config)
         self._client.initialize_updater(update_cfg)
         self._restart_auto_update_timer()

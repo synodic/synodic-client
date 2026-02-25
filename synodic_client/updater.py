@@ -172,6 +172,15 @@ class Updater:
         )
 
     @property
+    def current_version(self) -> Version:
+        """Best-known application version.
+
+        Returns the Velopack-installed version when available, otherwise
+        the version from Python package metadata passed at construction.
+        """
+        return self._current_version
+
+    @property
     def state(self) -> UpdateState:
         """Current state of the update process."""
         return self._state
@@ -405,10 +414,17 @@ class Updater:
                 self._config.repo_url,
                 options,
             )
+
+            # The Velopack-installed version is authoritative; Python
+            # package metadata may be stale after an in-place update.
+            self._current_version = Version(
+                self._velopack_manager.get_current_version(),
+            )
+
             logger.debug(
                 'Velopack manager created: app_id=%s, version=%s, portable=%s',
                 self._velopack_manager.get_app_id(),
-                self._velopack_manager.get_current_version(),
+                self._current_version,
                 self._velopack_manager.get_is_portable(),
             )
             return self._velopack_manager

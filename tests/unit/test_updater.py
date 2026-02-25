@@ -95,6 +95,11 @@ class TestUpdater:
         assert updater.state == UpdateState.NO_UPDATE
 
     @staticmethod
+    def test_current_version_returns_init_value(updater: Updater) -> None:
+        """Verify current_version starts as the value passed to __init__."""
+        assert updater.current_version == Version('1.0.0')
+
+    @staticmethod
     def test_initial_update_info_is_none(updater: Updater) -> None:
         """Verify initial update info is None."""
         assert updater._update_info is None
@@ -473,6 +478,7 @@ class TestGetVelopackManager:
     def test_success_caches_manager(updater: Updater) -> None:
         """Verify successful manager creation is cached."""
         mock_manager = MagicMock()
+        mock_manager.get_current_version.return_value = '9.8.7'
         with (
             TestGetVelopackManager._PATCH_OPTIONS,
             patch('synodic_client.updater.velopack.UpdateManager', return_value=mock_manager) as mock_cls,
@@ -482,3 +488,17 @@ class TestGetVelopackManager:
             assert result1 is mock_manager
             assert result2 is mock_manager
             mock_cls.assert_called_once()
+
+    @staticmethod
+    def test_success_promotes_version(updater: Updater) -> None:
+        """Verify _current_version is overwritten with the Velopack version."""
+        mock_manager = MagicMock()
+        mock_manager.get_current_version.return_value = '9.8.7'
+        with (
+            TestGetVelopackManager._PATCH_OPTIONS,
+            patch('synodic_client.updater.velopack.UpdateManager', return_value=mock_manager),
+        ):
+            updater._get_velopack_manager()
+
+        assert updater._current_version == Version('9.8.7')
+        assert updater.current_version == Version('9.8.7')

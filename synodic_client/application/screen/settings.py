@@ -10,7 +10,7 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from PySide6.QtCore import QUrl, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -169,6 +169,7 @@ class SettingsWindow(QMainWindow):
         self._check_updates_btn.clicked.connect(self._on_check_updates_clicked)
         row.addWidget(self._check_updates_btn)
         self._update_status_label = QLabel('')
+        self._update_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         row.addWidget(self._update_status_label)
         row.addStretch()
         content.addLayout(row)

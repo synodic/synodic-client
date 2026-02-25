@@ -2,9 +2,10 @@
 
 import dataclasses
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
+from packaging.version import Version
 
 from synodic_client.config import BuildConfig, UserConfig
 from synodic_client.resolution import (
@@ -12,6 +13,7 @@ from synodic_client.resolution import (
     resolve_config,
     resolve_enabled_plugins,
     resolve_update_config,
+    resolve_version,
     seed_user_config_from_build,
     update_user_config,
 )
@@ -348,3 +350,58 @@ class TestResolveUpdateConfig:
         result = resolve_update_config(config)
         assert result.auto_update_interval_minutes == 0
         assert result.tool_update_interval_minutes == 0
+
+
+# ---------------------------------------------------------------------------
+# resolve_version
+# ---------------------------------------------------------------------------
+
+
+class TestResolveVersion:
+    """Tests for resolve_version."""
+
+    @staticmethod
+    def test_returns_velopack_version_when_installed() -> None:
+        """Verify the Velopack version is preferred when a manager is present."""
+        mock_updater = MagicMock()
+        mock_updater.is_installed = True
+        mock_updater.current_version = Version('5.6.7')
+
+        mock_client = MagicMock()
+        mock_client.updater = mock_updater
+        mock_client.version = Version('1.0.0.dev1')
+
+        assert resolve_version(mock_client) == Version('5.6.7')
+
+    @staticmethod
+    def test_falls_back_when_not_installed() -> None:
+        """Verify importlib.metadata version is used when not Velopack-installed."""
+        mock_updater = MagicMock()
+        mock_updater.is_installed = False
+
+        mock_client = MagicMock()
+        mock_client.updater = mock_updater
+        mock_client.version = Version('1.0.0.dev1')
+
+        assert resolve_version(mock_client) == Version('1.0.0.dev1')
+
+    @staticmethod
+    def test_falls_back_when_no_updater() -> None:
+        """Verify importlib.metadata version is used when updater is None."""
+        mock_client = MagicMock()
+        mock_client.updater = None
+        mock_client.version = Version('2.3.4')
+
+        assert resolve_version(mock_client) == Version('2.3.4')
+
+    @staticmethod
+    def test_falls_back_on_exception() -> None:
+        """Verify graceful fallback when querying the updater raises."""
+        mock_updater = MagicMock()
+        type(mock_updater).is_installed = PropertyMock(side_effect=RuntimeError('boom'))
+
+        mock_client = MagicMock()
+        mock_client.updater = mock_updater
+        mock_client.version = Version('3.0.0')
+
+        assert resolve_version(mock_client) == Version('3.0.0')
