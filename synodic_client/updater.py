@@ -210,7 +210,7 @@ class Updater:
             velopack_info = manager.check_for_updates()
 
             if velopack_info is not None:
-                latest = Version(velopack_info.target_full_release.version)
+                latest = Version(velopack_info.TargetFullRelease.Version)
 
                 self._update_info = UpdateInfo(
                     available=True,

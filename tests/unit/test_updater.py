@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
+import velopack
 from packaging.version import Version
 
 from synodic_client.updater import (
@@ -119,7 +120,7 @@ class TestUpdater:
     @staticmethod
     def test_is_installed_with_velopack(updater: Updater) -> None:
         """Verify is_installed returns True when Velopack manager available."""
-        mock_manager = MagicMock()
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
         with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
             assert updater.is_installed is True
 
@@ -146,7 +147,7 @@ class TestUpdaterCheckForUpdate:
     @staticmethod
     def test_check_no_update(updater: Updater) -> None:
         """Verify check_for_update handles no update available."""
-        mock_manager = MagicMock()
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
         mock_manager.check_for_updates.return_value = None
 
         with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
@@ -159,10 +160,12 @@ class TestUpdaterCheckForUpdate:
     @staticmethod
     def test_check_update_available(updater: Updater) -> None:
         """Verify check_for_update handles update available."""
-        mock_velopack_info = MagicMock()
-        mock_velopack_info.target_full_release.version = '2.0.0'
+        mock_target = MagicMock(spec=velopack.VelopackAsset)
+        mock_target.Version = '2.0.0'
+        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
+        mock_velopack_info.TargetFullRelease = mock_target
 
-        mock_manager = MagicMock()
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
         mock_manager.check_for_updates.return_value = mock_velopack_info
 
         with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
@@ -176,7 +179,7 @@ class TestUpdaterCheckForUpdate:
     @staticmethod
     def test_check_error(updater: Updater) -> None:
         """Verify check_for_update handles errors gracefully."""
-        mock_manager = MagicMock()
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
         mock_manager.check_for_updates.side_effect = Exception('Network error')
 
         with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
@@ -189,7 +192,7 @@ class TestUpdaterCheckForUpdate:
     @staticmethod
     def test_check_404_returns_friendly_message(updater: Updater) -> None:
         """Verify a 404 from GitHub returns a friendly no-releases message."""
-        mock_manager = MagicMock()
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
         mock_manager.check_for_updates.side_effect = RuntimeError('Network error: Http error: http status: 404')
 
         with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
@@ -205,7 +208,7 @@ class TestUpdaterCheckForUpdate:
     @staticmethod
     def test_check_non_404_http_error_is_failed(updater: Updater) -> None:
         """Verify non-404 HTTP errors still produce FAILED state."""
-        mock_manager = MagicMock()
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
         mock_manager.check_for_updates.side_effect = RuntimeError('Network error: Http error: http status: 500')
 
         with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
@@ -238,7 +241,7 @@ class TestUpdaterDownloadUpdate:
     @staticmethod
     def test_download_success(updater: Updater) -> None:
         """Verify download_update succeeds with valid update info."""
-        mock_velopack_info = MagicMock()
+        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
         updater._update_info = UpdateInfo(
             available=True,
             current_version=Version('1.0.0'),
@@ -247,7 +250,7 @@ class TestUpdaterDownloadUpdate:
         )
         updater._state = UpdateState.UPDATE_AVAILABLE
 
-        mock_manager = MagicMock()
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
 
         with (
             patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
@@ -262,7 +265,7 @@ class TestUpdaterDownloadUpdate:
     @staticmethod
     def test_download_with_progress_callback(updater: Updater) -> None:
         """Verify download_update passes progress callback."""
-        mock_velopack_info = MagicMock()
+        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
         updater._update_info = UpdateInfo(
             available=True,
             current_version=Version('1.0.0'),
@@ -271,7 +274,7 @@ class TestUpdaterDownloadUpdate:
         )
         updater._state = UpdateState.UPDATE_AVAILABLE
 
-        mock_manager = MagicMock()
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
         progress_cb = MagicMock()
 
         with (
@@ -286,7 +289,7 @@ class TestUpdaterDownloadUpdate:
     @staticmethod
     def test_download_error(updater: Updater) -> None:
         """Verify download_update handles errors gracefully."""
-        mock_velopack_info = MagicMock()
+        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
         updater._update_info = UpdateInfo(
             available=True,
             current_version=Version('1.0.0'),
@@ -295,7 +298,7 @@ class TestUpdaterDownloadUpdate:
         )
         updater._state = UpdateState.UPDATE_AVAILABLE
 
-        mock_manager = MagicMock()
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
         mock_manager.download_updates.side_effect = Exception('Download failed')
 
         with (
@@ -351,7 +354,7 @@ class TestUpdaterApplyUpdate:
     @staticmethod
     def test_apply_on_exit_success(updater: Updater) -> None:
         """Verify apply_update_on_exit schedules update."""
-        mock_velopack_info = MagicMock()
+        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
         updater._update_info = UpdateInfo(
             available=True,
             current_version=Version('1.0.0'),
@@ -360,7 +363,7 @@ class TestUpdaterApplyUpdate:
         )
         updater._state = UpdateState.DOWNLOADED
 
-        mock_manager = MagicMock()
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
 
         with (
             patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
@@ -374,7 +377,7 @@ class TestUpdaterApplyUpdate:
     @staticmethod
     def test_apply_on_exit_no_restart(updater: Updater) -> None:
         """Verify apply_update_on_exit can disable restart (note: not supported by Velopack)."""
-        mock_velopack_info = MagicMock()
+        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
         updater._update_info = UpdateInfo(
             available=True,
             current_version=Version('1.0.0'),
@@ -383,7 +386,7 @@ class TestUpdaterApplyUpdate:
         )
         updater._state = UpdateState.DOWNLOADED
 
-        mock_manager = MagicMock()
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
 
         with (
             patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
@@ -401,7 +404,7 @@ class TestInitializeVelopack:
     @staticmethod
     def test_initialize_success() -> None:
         """Verify initialize_velopack calls App().run()."""
-        mock_app = MagicMock()
+        mock_app = MagicMock(spec=velopack.App)
         with patch('synodic_client.updater.velopack.App', return_value=mock_app) as mock_app_class:
             initialize_velopack()
             mock_app_class.assert_called_once()
@@ -410,7 +413,7 @@ class TestInitializeVelopack:
     @staticmethod
     def test_initialize_handles_exception() -> None:
         """Verify initialize_velopack handles exceptions gracefully."""
-        mock_app = MagicMock()
+        mock_app = MagicMock(spec=velopack.App)
         mock_app.run.side_effect = Exception('Test')
         with patch('synodic_client.updater.velopack.App', return_value=mock_app):
             # Should not raise
