@@ -7,45 +7,39 @@ from unittest.mock import patch
 import pytest
 
 from synodic_client.config import (
-    GlobalConfiguration,
-    LocalConfiguration,
+    BuildConfig,
+    UserConfig,
     config_dir,
-    save_config,
+    save_user_config,
     set_dev_mode,
 )
 
 
-class TestLocalConfiguration:
-    """Tests for the LocalConfiguration model."""
+class TestBuildConfig:
+    """Tests for the BuildConfig model."""
 
     @staticmethod
     def test_defaults() -> None:
         """Verify default values for a fresh config."""
-        config = LocalConfiguration()
+        config = BuildConfig()
         assert config.update_source is None
         assert config.update_channel is None
-        assert config.auto_update_interval_minutes is None
-        assert config.tool_update_interval_minutes is None
-        assert config.plugin_auto_update is None
-        assert config.detect_updates is True
-        assert config.prerelease_packages is None
-        assert config.auto_start is None
 
     @staticmethod
     def test_with_values() -> None:
         """Verify config accepts explicit values."""
-        config = LocalConfiguration(update_source='/path/to/releases', update_channel='dev')
+        config = BuildConfig(update_source='/path/to/releases', update_channel='dev')
         assert config.update_source == '/path/to/releases'
         assert config.update_channel == 'dev'
 
 
-class TestGlobalConfiguration:
-    """Tests for the GlobalConfiguration model."""
+class TestUserConfig:
+    """Tests for the UserConfig model."""
 
     @staticmethod
     def test_defaults() -> None:
         """Verify default values for a fresh config."""
-        config = GlobalConfiguration()
+        config = UserConfig()
         assert config.update_source is None
         assert config.update_channel is None
         assert config.auto_update_interval_minutes is None
@@ -58,7 +52,7 @@ class TestGlobalConfiguration:
     @staticmethod
     def test_with_values() -> None:
         """Verify config accepts explicit values."""
-        config = GlobalConfiguration(update_source='/path/to/releases', update_channel='dev')
+        config = UserConfig(update_source='/path/to/releases', update_channel='dev')
         assert config.update_source == '/path/to/releases'
         assert config.update_channel == 'dev'
 
@@ -66,43 +60,43 @@ class TestGlobalConfiguration:
     def test_prerelease_packages_round_trip() -> None:
         """Verify prerelease_packages survives JSON round-trip."""
         packages = {'/some/path': ['alpha', 'beta'], 'https://example.com/manifest.json': ['gamma']}
-        original = GlobalConfiguration(prerelease_packages=packages)
+        original = UserConfig(prerelease_packages=packages)
         data = json.loads(original.model_dump_json())
-        restored = GlobalConfiguration.model_validate(data)
+        restored = UserConfig.model_validate(data)
         assert restored.prerelease_packages == packages
 
     @staticmethod
     def test_plugin_auto_update_round_trip() -> None:
         """Verify plugin_auto_update survives JSON round-trip."""
         mapping = {'pipx': False, 'pip': True}
-        original = GlobalConfiguration(plugin_auto_update=mapping)
+        original = UserConfig(plugin_auto_update=mapping)
         data = json.loads(original.model_dump_json())
-        restored = GlobalConfiguration.model_validate(data)
+        restored = UserConfig.model_validate(data)
         assert restored.plugin_auto_update == mapping
 
     @staticmethod
     def test_auto_start_round_trip() -> None:
         """Verify auto_start survives JSON round-trip."""
         for value in (True, False, None):
-            original = GlobalConfiguration(auto_start=value)
+            original = UserConfig(auto_start=value)
             data = json.loads(original.model_dump_json())
-            restored = GlobalConfiguration.model_validate(data)
+            restored = UserConfig.model_validate(data)
             assert restored.auto_start is value
 
     @staticmethod
     def test_json_round_trip() -> None:
         """Verify config can round-trip through JSON."""
-        original = GlobalConfiguration(update_source='https://example.com', update_channel='stable')
+        original = UserConfig(update_source='https://example.com', update_channel='stable')
         data = json.loads(original.model_dump_json())
-        restored = GlobalConfiguration.model_validate(data)
+        restored = UserConfig.model_validate(data)
         assert restored == original
 
     @staticmethod
     def test_json_round_trip_defaults() -> None:
         """Verify default config round-trips cleanly."""
-        original = GlobalConfiguration()
+        original = UserConfig()
         data = json.loads(original.model_dump_json())
-        restored = GlobalConfiguration.model_validate(data)
+        restored = UserConfig.model_validate(data)
         assert restored.update_source is None
         assert restored.update_channel is None
 
@@ -110,7 +104,7 @@ class TestGlobalConfiguration:
     def test_extra_fields_ignored() -> None:
         """Verify unrecognized fields do not cause errors."""
         data = {'update_source': None, 'update_channel': None, 'unknown_field': 42}
-        config = GlobalConfiguration.model_validate(data)
+        config = UserConfig.model_validate(data)
         assert config.update_source is None
 
 
@@ -147,16 +141,16 @@ class TestConfigDir:
             set_dev_mode(False)
 
 
-class TestSaveConfig:
-    """Tests for save_config."""
+class TestSaveUserConfig:
+    """Tests for save_user_config."""
 
     @staticmethod
     def test_creates_file(tmp_path: Path) -> None:
         """Verify config is saved to disk."""
-        config = GlobalConfiguration(update_source='/my/releases', update_channel='stable')
+        config = UserConfig(update_source='/my/releases', update_channel='stable')
 
         with patch('synodic_client.config.config_dir', return_value=tmp_path):
-            save_config(config)
+            save_user_config(config)
 
         saved_path = tmp_path / 'config.json'
         assert saved_path.exists()
@@ -166,56 +160,55 @@ class TestSaveConfig:
         assert data['update_channel'] == 'stable'
 
     @staticmethod
-    def test_sparse_serialization(tmp_path: Path) -> None:
-        """Verify save_config only writes user-set fields (exclude_unset)."""
-        config = GlobalConfiguration(update_channel='dev')
+    def test_saves_all_fields(tmp_path: Path) -> None:
+        """Verify save_user_config writes all fields (no sparse serialization)."""
+        config = UserConfig(update_channel='dev')
 
         with patch('synodic_client.config.config_dir', return_value=tmp_path):
-            save_config(config)
+            save_user_config(config)
 
         data = json.loads((tmp_path / 'config.json').read_text(encoding='utf-8'))
-        # Only 'update_channel' should be in the file
-        assert data == {'update_channel': 'dev'}
-        assert 'update_source' not in data
-        assert 'auto_update_interval_minutes' not in data
+        # All fields should be present, not just user-set ones
+        assert data['update_channel'] == 'dev'
+        assert 'update_source' in data
+        assert 'auto_update_interval_minutes' in data
+        assert 'detect_updates' in data
 
     @staticmethod
     def test_creates_directory(tmp_path: Path) -> None:
-        """Verify save_config creates the directory if missing."""
+        """Verify save_user_config creates the directory if missing."""
         nested = tmp_path / 'nested' / 'dir'
-        config = GlobalConfiguration()
+        config = UserConfig()
 
         with patch('synodic_client.config.config_dir', return_value=nested):
-            save_config(config)
+            save_user_config(config)
 
         assert (nested / 'config.json').exists()
 
     @staticmethod
     def test_overwrites_existing(tmp_path: Path) -> None:
-        """Verify save_config overwrites an existing file."""
+        """Verify save_user_config overwrites an existing file."""
         config_path = tmp_path / 'config.json'
         config_path.write_text('{}', encoding='utf-8')
 
-        config = GlobalConfiguration(update_source='http://new-source')
+        config = UserConfig(update_source='http://new-source')
 
         with patch('synodic_client.config.config_dir', return_value=tmp_path):
-            save_config(config)
+            save_user_config(config)
 
         data = json.loads(config_path.read_text(encoding='utf-8'))
         assert data['update_source'] == 'http://new-source'
 
     @staticmethod
     def test_save_load_round_trip(tmp_path: Path) -> None:
-        """Verify saved config can be loaded back with correct fields_set."""
-        original = GlobalConfiguration(update_channel='dev', auto_start=False)
+        """Verify saved config can be loaded back identically."""
+        original = UserConfig(update_channel='dev', auto_start=False)
 
         with patch('synodic_client.config.config_dir', return_value=tmp_path):
-            save_config(original)
+            save_user_config(original)
 
         data = json.loads((tmp_path / 'config.json').read_text(encoding='utf-8'))
-        loaded = GlobalConfiguration.model_validate(data)
+        loaded = UserConfig.model_validate(data)
         assert loaded.update_channel == 'dev'
         assert loaded.auto_start is False
-        # Only saved fields should be in model_fields_set
-        assert loaded.model_fields_set == {'update_channel', 'auto_start'}
         assert loaded.update_source is None

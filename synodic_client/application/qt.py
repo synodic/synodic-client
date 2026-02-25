@@ -21,15 +21,21 @@ from synodic_client.application.screen.screen import Screen
 from synodic_client.application.screen.tray import TrayScreen
 from synodic_client.application.uri import parse_uri
 from synodic_client.client import Client
-from synodic_client.config import GlobalConfiguration, set_dev_mode
+from synodic_client.config import set_dev_mode
 from synodic_client.logging import configure_logging
 from synodic_client.protocol import register_protocol
-from synodic_client.resolution import resolve_auto_start, resolve_config, resolve_update_config
+from synodic_client.resolution import (
+    ResolvedConfig,
+    resolve_auto_start,
+    resolve_config,
+    resolve_update_config,
+    seed_user_config_from_build,
+)
 from synodic_client.startup import register_startup, remove_startup
 from synodic_client.updater import initialize_velopack
 
 
-def _init_services(logger: logging.Logger) -> tuple[Client, API, GlobalConfiguration]:
+def _init_services(logger: logging.Logger) -> tuple[Client, API, ResolvedConfig]:
     """Create and configure core services.
 
     Returns:
@@ -47,11 +53,10 @@ def _init_services(logger: logging.Logger) -> tuple[Client, API, GlobalConfigura
     cached_dirs = porringer.cache.list_directories()
 
     logger.info(
-        'Synodic Client v%s started (channel: %s, source: %s, config_fields_set: %s, cached_projects: %d)',
+        'Synodic Client v%s started (channel: %s, source: %s, cached_projects: %d)',
         client.version,
         update_config.channel.name,
         update_config.repo_url,
-        sorted(config.model_fields_set),
         len(cached_dirs),
     )
 
@@ -139,6 +144,9 @@ def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
         # PyInstaller runtime hook (rthook_no_console.py).
         initialize_velopack()
         register_protocol(sys.executable)
+
+        # Seed user config from build config (one-time propagation).
+        seed_user_config_from_build()
 
         startup_config = resolve_config()
         if resolve_auto_start(startup_config):

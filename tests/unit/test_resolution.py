@@ -1,17 +1,20 @@
 """Tests for the configuration resolution module."""
 
-import json
+import dataclasses
 from pathlib import Path
 from unittest.mock import patch
 
-from synodic_client.config import GlobalConfiguration, LocalConfiguration
+import pytest
+
+from synodic_client.config import BuildConfig, UserConfig
 from synodic_client.resolution import (
-    merge_config,
+    ResolvedConfig,
     resolve_auto_start,
     resolve_config,
     resolve_enabled_plugins,
     resolve_update_config,
-    update_and_resolve,
+    seed_user_config_from_build,
+    update_user_config,
 )
 from synodic_client.updater import (
     DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
@@ -20,110 +23,236 @@ from synodic_client.updater import (
     UpdateChannel,
 )
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-class TestMergeConfig:
-    """Tests for merge_config."""
 
-    @staticmethod
-    def test_returns_global_when_no_local() -> None:
-        """Verify global config is returned unchanged when local is None."""
-        global_cfg = GlobalConfiguration(update_source='/system', update_channel='stable')
-        result = merge_config(global_cfg, None)
-        assert result.update_source == '/system'
-        assert result.update_channel == 'stable'
+def _make_resolved(**overrides: object) -> ResolvedConfig:
+    """Create a ``ResolvedConfig`` with sensible defaults and optional overrides."""
+    defaults: dict[str, object] = {
+        'update_source': None,
+        'update_channel': 'stable',
+        'auto_update_interval_minutes': DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
+        'tool_update_interval_minutes': DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
+        'plugin_auto_update': None,
+        'detect_updates': True,
+        'prerelease_packages': None,
+        'auto_start': True,
+    }
+    defaults.update(overrides)
+    return ResolvedConfig(**defaults)  # type: ignore[arg-type]
 
-    @staticmethod
-    def test_local_overrides_global() -> None:
-        """Verify local fields fill in values the user hasn't set."""
-        global_cfg = GlobalConfiguration(update_channel='stable')
-        local_cfg = LocalConfiguration(update_source='/local')
-        result = merge_config(global_cfg, local_cfg)
-        assert result.update_source == '/local'
-        assert result.update_channel == 'stable'
 
-    @staticmethod
-    def test_local_none_fields_do_not_override() -> None:
-        """Verify local None fields preserve global values."""
-        global_cfg = GlobalConfiguration(update_source='/system', update_channel='stable')
-        local_cfg = LocalConfiguration()
-        result = merge_config(global_cfg, local_cfg)
-        assert result.update_source == '/system'
-        assert result.update_channel == 'stable'
+# ---------------------------------------------------------------------------
+# seed_user_config_from_build
+# ---------------------------------------------------------------------------
 
-    @staticmethod
-    def test_full_override() -> None:
-        """Verify local fields are ignored when the user has saved both."""
-        global_cfg = GlobalConfiguration(update_source='/system', update_channel='stable')
-        local_cfg = LocalConfiguration(update_source='/local', update_channel='dev')
-        result = merge_config(global_cfg, local_cfg)
-        assert result.update_source == '/system'
-        assert result.update_channel == 'stable'
+
+class TestSeedUserConfigFromBuild:
+    """Tests for seed_user_config_from_build."""
 
     @staticmethod
-    def test_user_saved_wins_over_local() -> None:
-        """Verify a user-saved field takes priority over local config."""
-        global_cfg = GlobalConfiguration(update_channel='dev')
-        local_cfg = LocalConfiguration(update_channel='stable')
-        result = merge_config(global_cfg, local_cfg)
+    def test_no_build_config_is_noop(tmp_path: Path) -> None:
+        """Verify nothing happens when there is no build config."""
+        with (
+            patch('synodic_client.resolution.load_build_config', return_value=None),
+            patch('synodic_client.resolution.save_user_config') as mock_save,
+        ):
+            seed_user_config_from_build()
+        mock_save.assert_not_called()
+
+    @staticmethod
+    def test_seeds_both_fields(tmp_path: Path) -> None:
+        """Verify build config fields are seeded into user config."""
+        build = BuildConfig(update_source='/local', update_channel='dev')
+        user = UserConfig()  # all defaults
+
+        with (
+            patch('synodic_client.resolution.load_build_config', return_value=build),
+            patch('synodic_client.resolution.load_user_config', return_value=user),
+            patch('synodic_client.resolution.save_user_config') as mock_save,
+        ):
+            seed_user_config_from_build()
+
+        mock_save.assert_called_once()
+        saved = mock_save.call_args.args[0]
+        assert saved.update_source == '/local'
+        assert saved.update_channel == 'dev'
+
+    @staticmethod
+    def test_does_not_overwrite_user_values() -> None:
+        """Verify user-customised values are not overwritten by build."""
+        build = BuildConfig(update_source='/local', update_channel='dev')
+        user = UserConfig(update_source='/user-source', update_channel='stable')
+
+        with (
+            patch('synodic_client.resolution.load_build_config', return_value=build),
+            patch('synodic_client.resolution.load_user_config', return_value=user),
+            patch('synodic_client.resolution.save_user_config') as mock_save,
+        ):
+            seed_user_config_from_build()
+
+        # User values should be preserved — nothing to save
+        mock_save.assert_not_called()
+
+    @staticmethod
+    def test_partial_seed() -> None:
+        """Verify only missing fields are seeded."""
+        build = BuildConfig(update_source='/local', update_channel='dev')
+        user = UserConfig(update_channel='stable')  # channel set, source not
+
+        with (
+            patch('synodic_client.resolution.load_build_config', return_value=build),
+            patch('synodic_client.resolution.load_user_config', return_value=user),
+            patch('synodic_client.resolution.save_user_config') as mock_save,
+        ):
+            seed_user_config_from_build()
+
+        mock_save.assert_called_once()
+        saved = mock_save.call_args.args[0]
+        assert saved.update_source == '/local'
+        assert saved.update_channel == 'stable'  # user's value preserved
+
+
+# ---------------------------------------------------------------------------
+# resolve_config
+# ---------------------------------------------------------------------------
+
+
+class TestResolveConfig:
+    """Tests for resolve_config (returns ResolvedConfig)."""
+
+    @staticmethod
+    def test_returns_defaults_when_no_files(tmp_path: Path) -> None:
+        """Verify defaults when no config files exist."""
+        with patch('synodic_client.resolution.load_user_config', return_value=UserConfig()):
+            config = resolve_config()
+
+        assert isinstance(config, ResolvedConfig)
+        assert config.update_source is None
+        assert config.auto_update_interval_minutes == DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES
+
+    @staticmethod
+    def test_loads_user_values() -> None:
+        """Verify user config values are reflected in resolved config."""
+        user = UserConfig(update_source='https://example.com/releases', update_channel='dev')
+
+        with patch('synodic_client.resolution.load_user_config', return_value=user):
+            config = resolve_config()
+
+        assert config.update_source == 'https://example.com/releases'
+        assert config.update_channel == 'dev'
+
+    @staticmethod
+    def test_none_channel_resolves_to_default() -> None:
+        """Verify None channel resolves based on frozen state."""
+        user = UserConfig()  # update_channel is None
+
+        with (
+            patch('synodic_client.resolution.load_user_config', return_value=user),
+            patch('synodic_client.resolution.sys') as mock_sys,
+        ):
+            del mock_sys.frozen  # Not frozen → dev
+            config = resolve_config()
+
+        assert config.update_channel == 'dev'
+
+    @staticmethod
+    def test_none_intervals_resolve_to_defaults() -> None:
+        """Verify None intervals resolve to module defaults."""
+        user = UserConfig()
+
+        with patch('synodic_client.resolution.load_user_config', return_value=user):
+            config = resolve_config()
+
+        assert config.auto_update_interval_minutes == DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES
+        assert config.tool_update_interval_minutes == DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
+
+    @staticmethod
+    def test_none_auto_start_resolves_to_true() -> None:
+        """Verify None auto_start resolves to True."""
+        user = UserConfig()
+
+        with patch('synodic_client.resolution.load_user_config', return_value=user):
+            config = resolve_config()
+
+        assert config.auto_start is True
+
+    @staticmethod
+    def test_config_is_frozen() -> None:
+        """Verify ResolvedConfig is immutable."""
+        with patch('synodic_client.resolution.load_user_config', return_value=UserConfig()):
+            config = resolve_config()
+
+        assert dataclasses.is_dataclass(config)
+
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            config.update_channel = 'dev'  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# update_user_config
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateUserConfig:
+    """Tests for update_user_config."""
+
+    @staticmethod
+    def test_returns_resolved_config(tmp_path: Path) -> None:
+        """Verify update_user_config returns a ResolvedConfig."""
+        user = UserConfig(update_channel='stable')
+
+        with (
+            patch('synodic_client.resolution.load_user_config', return_value=user),
+            patch('synodic_client.resolution.save_user_config') as mock_save,
+        ):
+            result = update_user_config(update_channel='dev')
+
+        assert isinstance(result, ResolvedConfig)
         assert result.update_channel == 'dev'
+        mock_save.assert_called_once()
 
     @staticmethod
-    def test_local_fills_unsaved_fields() -> None:
-        """Verify local config fills in fields the user hasn't saved."""
-        global_cfg = GlobalConfiguration(update_channel='dev')
-        local_cfg = LocalConfiguration(update_source='/local/releases')
-        result = merge_config(global_cfg, local_cfg)
-        assert result.update_channel == 'dev'
-        assert result.update_source == '/local/releases'
+    def test_saves_changed_field() -> None:
+        """Verify the changed field is persisted."""
+        user = UserConfig(update_channel='stable')
 
-    @staticmethod
-    def test_preserves_model_fields_set() -> None:
-        """Verify merge preserves the global config's model_fields_set."""
-        global_cfg = GlobalConfiguration(update_channel='dev')
-        local_cfg = LocalConfiguration(update_source='/local')
-        result = merge_config(global_cfg, local_cfg)
-        # Only 'update_channel' was in the user's config file
-        assert result.model_fields_set == {'update_channel'}
-        # But the runtime value from local config is available
-        assert result.update_source == '/local'
+        with (
+            patch('synodic_client.resolution.load_user_config', return_value=user),
+            patch('synodic_client.resolution.save_user_config') as mock_save,
+        ):
+            update_user_config(update_channel='dev')
 
-    @staticmethod
-    def test_local_overrides_plugin_auto_update() -> None:
-        """Verify local plugin_auto_update fills in when user hasn't set it."""
-        global_cfg = GlobalConfiguration()
-        local_cfg = LocalConfiguration(plugin_auto_update={'pip': True, 'pipx': False})
-        result = merge_config(global_cfg, local_cfg)
-        assert result.plugin_auto_update == {'pip': True, 'pipx': False}
+        saved = mock_save.call_args.args[0]
+        assert saved.update_channel == 'dev'
 
-    @staticmethod
-    def test_user_plugin_auto_update_wins() -> None:
-        """Verify user-saved plugin_auto_update wins over local."""
-        global_cfg = GlobalConfiguration(plugin_auto_update={'pip': False})
-        local_cfg = LocalConfiguration(plugin_auto_update={'pip': True, 'pipx': False})
-        result = merge_config(global_cfg, local_cfg)
-        assert result.plugin_auto_update == {'pip': False}
+
+# ---------------------------------------------------------------------------
+# resolve_auto_start
+# ---------------------------------------------------------------------------
 
 
 class TestResolveAutoStart:
     """Tests for resolve_auto_start."""
 
     @staticmethod
-    def test_none_defaults_to_true() -> None:
-        """Verify None (default) resolves to True."""
-        config = GlobalConfiguration()
+    def test_true_when_auto_start_true() -> None:
+        """Verify True is returned."""
+        config = _make_resolved(auto_start=True)
         assert resolve_auto_start(config) is True
 
     @staticmethod
-    def test_explicit_true() -> None:
-        """Verify explicit True is returned."""
-        config = GlobalConfiguration(auto_start=True)
-        assert resolve_auto_start(config) is True
-
-    @staticmethod
-    def test_explicit_false() -> None:
-        """Verify explicit False is returned."""
-        config = GlobalConfiguration(auto_start=False)
+    def test_false_when_auto_start_false() -> None:
+        """Verify False is returned."""
+        config = _make_resolved(auto_start=False)
         assert resolve_auto_start(config) is False
+
+
+# ---------------------------------------------------------------------------
+# resolve_enabled_plugins
+# ---------------------------------------------------------------------------
 
 
 class TestResolveEnabledPlugins:
@@ -132,21 +261,21 @@ class TestResolveEnabledPlugins:
     @staticmethod
     def test_none_when_no_mapping() -> None:
         """Verify None is returned when plugin_auto_update is unset."""
-        config = GlobalConfiguration()
+        config = _make_resolved()
         result = resolve_enabled_plugins(config, ['pip', 'pipx', 'git'])
         assert result is None
 
     @staticmethod
     def test_none_when_all_enabled() -> None:
         """Verify None when all entries are True."""
-        config = GlobalConfiguration(plugin_auto_update={'pip': True, 'pipx': True})
+        config = _make_resolved(plugin_auto_update={'pip': True, 'pipx': True})
         result = resolve_enabled_plugins(config, ['pip', 'pipx', 'git'])
         assert result is None
 
     @staticmethod
     def test_filters_disabled_plugins() -> None:
         """Verify disabled plugins are excluded from the list."""
-        config = GlobalConfiguration(plugin_auto_update={'pipx': False})
+        config = _make_resolved(plugin_auto_update={'pipx': False})
         result = resolve_enabled_plugins(config, ['pip', 'pipx', 'git'])
         assert result is not None
         assert 'pipx' not in result
@@ -156,154 +285,14 @@ class TestResolveEnabledPlugins:
     @staticmethod
     def test_empty_mapping_returns_none() -> None:
         """Verify an empty dict behaves like None."""
-        config = GlobalConfiguration(plugin_auto_update={})
+        config = _make_resolved(plugin_auto_update={})
         result = resolve_enabled_plugins(config, ['pip'])
         assert result is None
 
 
-class TestResolveConfig:
-    """Tests for resolve_config (loads and merges both layers)."""
-
-    @staticmethod
-    def test_returns_defaults_when_no_files(tmp_path: Path) -> None:
-        """Verify defaults when no config files exist."""
-        with (
-            patch('synodic_client.config._portable_config_path', return_value=None),
-            patch('synodic_client.config.config_dir', return_value=tmp_path),
-        ):
-            config = resolve_config()
-        assert config.update_source is None
-        assert config.update_channel is None
-
-    @staticmethod
-    def test_loads_global_file(tmp_path: Path) -> None:
-        """Verify loading a valid global config file."""
-        data = {'update_source': 'https://example.com/releases', 'update_channel': 'dev'}
-        (tmp_path / 'config.json').write_text(json.dumps(data), encoding='utf-8')
-
-        with (
-            patch('synodic_client.config._portable_config_path', return_value=None),
-            patch('synodic_client.config.config_dir', return_value=tmp_path),
-        ):
-            config = resolve_config()
-
-        assert config.update_source == 'https://example.com/releases'
-        assert config.update_channel == 'dev'
-
-    @staticmethod
-    def test_returns_defaults_on_corrupt_json(tmp_path: Path) -> None:
-        """Verify defaults when config file contains invalid JSON."""
-        (tmp_path / 'config.json').write_text('not json', encoding='utf-8')
-
-        with (
-            patch('synodic_client.config._portable_config_path', return_value=None),
-            patch('synodic_client.config.config_dir', return_value=tmp_path),
-        ):
-            config = resolve_config()
-
-        assert config == GlobalConfiguration()
-
-    @staticmethod
-    def test_local_overrides_global_per_field(tmp_path: Path) -> None:
-        """Verify local config fills in fields the user hasn't saved."""
-        local_data = {'update_source': '/local/releases'}
-        local_path = tmp_path / 'local' / 'config.json'
-        local_path.parent.mkdir()
-        local_path.write_text(json.dumps(local_data), encoding='utf-8')
-
-        system_dir = tmp_path / 'system'
-        system_dir.mkdir()
-        # User has only saved update_channel, not update_source
-        system_data = {'update_channel': 'stable'}
-        (system_dir / 'config.json').write_text(json.dumps(system_data), encoding='utf-8')
-
-        with (
-            patch('synodic_client.config._portable_config_path', return_value=local_path),
-            patch('synodic_client.config.config_dir', return_value=system_dir),
-        ):
-            config = resolve_config()
-
-        # Local fills in update_source since user didn't set it
-        assert config.update_source == '/local/releases'
-        # User's saved update_channel is preserved
-        assert config.update_channel == 'stable'
-
-    @staticmethod
-    def test_falls_back_to_global_when_no_portable(tmp_path: Path) -> None:
-        """Verify global config is used when no portable config exists."""
-        system_data = {'update_source': '/system/releases', 'update_channel': 'stable'}
-        (tmp_path / 'config.json').write_text(json.dumps(system_data), encoding='utf-8')
-
-        with (
-            patch('synodic_client.config._portable_config_path', return_value=None),
-            patch('synodic_client.config.config_dir', return_value=tmp_path),
-        ):
-            config = resolve_config()
-
-        assert config.update_source == '/system/releases'
-        assert config.update_channel == 'stable'
-
-    @staticmethod
-    def test_falls_back_to_global_on_corrupt_portable(tmp_path: Path) -> None:
-        """Verify global config is used when portable config is corrupt."""
-        portable_path = tmp_path / 'portable' / 'config.json'
-        portable_path.parent.mkdir()
-        portable_path.write_text('not valid json', encoding='utf-8')
-
-        system_dir = tmp_path / 'system'
-        system_dir.mkdir()
-        system_data = {'update_source': '/system/releases'}
-        (system_dir / 'config.json').write_text(json.dumps(system_data), encoding='utf-8')
-
-        with (
-            patch('synodic_client.config._portable_config_path', return_value=portable_path),
-            patch('synodic_client.config.config_dir', return_value=system_dir),
-        ):
-            config = resolve_config()
-
-        assert config.update_source == '/system/releases'
-
-    @staticmethod
-    def test_portable_takes_precedence(tmp_path: Path) -> None:
-        """Verify portable config fills in fields user hasn't saved."""
-        portable_data = {'update_source': '/portable/releases', 'update_channel': 'dev'}
-        portable_path = tmp_path / 'config.json'
-        portable_path.write_text(json.dumps(portable_data), encoding='utf-8')
-
-        system_dir = tmp_path / 'system'
-        system_dir.mkdir()
-        # User has NOT saved any config (empty file or missing)
-        (system_dir / 'config.json').write_text('{}', encoding='utf-8')
-
-        with (
-            patch('synodic_client.config._portable_config_path', return_value=portable_path),
-            patch('synodic_client.config.config_dir', return_value=system_dir),
-        ):
-            config = resolve_config()
-
-        assert config.update_source == '/portable/releases'
-        assert config.update_channel == 'dev'
-
-    @staticmethod
-    def test_user_saved_wins_over_portable(tmp_path: Path) -> None:
-        """Verify user-saved values in global config win over portable."""
-        portable_data = {'update_source': '/portable/releases', 'update_channel': 'dev'}
-        portable_path = tmp_path / 'config.json'
-        portable_path.write_text(json.dumps(portable_data), encoding='utf-8')
-
-        system_dir = tmp_path / 'system'
-        system_dir.mkdir()
-        system_data = {'update_source': '/system/releases', 'update_channel': 'stable'}
-        (system_dir / 'config.json').write_text(json.dumps(system_data), encoding='utf-8')
-
-        with (
-            patch('synodic_client.config._portable_config_path', return_value=portable_path),
-            patch('synodic_client.config.config_dir', return_value=system_dir),
-        ):
-            config = resolve_config()
-
-        assert config.update_source == '/system/releases'
-        assert config.update_channel == 'stable'
+# ---------------------------------------------------------------------------
+# resolve_update_config
+# ---------------------------------------------------------------------------
 
 
 class TestResolveUpdateConfig:
@@ -312,51 +301,42 @@ class TestResolveUpdateConfig:
     @staticmethod
     def test_dev_channel_from_config() -> None:
         """Verify dev channel is set from config."""
-        config = GlobalConfiguration(update_channel='dev')
+        config = _make_resolved(update_channel='dev')
         result = resolve_update_config(config)
         assert result.channel == UpdateChannel.DEVELOPMENT
 
     @staticmethod
     def test_stable_channel_from_config() -> None:
         """Verify stable channel is set from config."""
-        config = GlobalConfiguration(update_channel='stable')
+        config = _make_resolved(update_channel='stable')
         result = resolve_update_config(config)
         assert result.channel == UpdateChannel.STABLE
 
     @staticmethod
-    def test_default_channel_unfrozen() -> None:
-        """Verify default channel is DEVELOPMENT when not frozen."""
-        config = GlobalConfiguration()
-        with patch('synodic_client.resolution.sys') as mock_sys:
-            del mock_sys.frozen  # Ensure frozen is not set
-            result = resolve_update_config(config)
-        assert result.channel == UpdateChannel.DEVELOPMENT
-
-    @staticmethod
     def test_custom_source_non_github() -> None:
         """Verify non-GitHub custom source passes through unchanged."""
-        config = GlobalConfiguration(update_source='https://custom.example.com')
+        config = _make_resolved(update_source='https://custom.example.com')
         result = resolve_update_config(config)
         assert result.repo_url == 'https://custom.example.com'
 
     @staticmethod
     def test_default_source_dev() -> None:
         """Verify default dev source uses GitHub download path with dev tag."""
-        config = GlobalConfiguration(update_channel='dev')
+        config = _make_resolved(update_channel='dev')
         result = resolve_update_config(config)
         assert result.repo_url == f'{GITHUB_REPO_URL}/releases/download/dev'
 
     @staticmethod
     def test_default_source_stable() -> None:
         """Verify default stable source uses GitHub latest download path."""
-        config = GlobalConfiguration(update_channel='stable')
+        config = _make_resolved(update_channel='stable')
         result = resolve_update_config(config)
         assert result.repo_url == f'{GITHUB_REPO_URL}/releases/latest/download'
 
     @staticmethod
     def test_default_auto_update_interval() -> None:
         """Verify default auto-update interval in minutes."""
-        config = GlobalConfiguration()
+        config = _make_resolved()
         result = resolve_update_config(config)
         assert result.auto_update_interval_minutes == DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES
 
@@ -364,14 +344,14 @@ class TestResolveUpdateConfig:
     def test_custom_auto_update_interval() -> None:
         """Verify custom auto-update interval is passed through."""
         custom = DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES * 2
-        config = GlobalConfiguration(auto_update_interval_minutes=custom)
+        config = _make_resolved(auto_update_interval_minutes=custom)
         result = resolve_update_config(config)
         assert result.auto_update_interval_minutes == custom
 
     @staticmethod
     def test_default_tool_update_interval() -> None:
         """Verify default tool update interval in minutes."""
-        config = GlobalConfiguration()
+        config = _make_resolved()
         result = resolve_update_config(config)
         assert result.tool_update_interval_minutes == DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
 
@@ -379,36 +359,14 @@ class TestResolveUpdateConfig:
     def test_custom_tool_update_interval() -> None:
         """Verify custom tool update interval is passed through."""
         custom = DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES * 2
-        config = GlobalConfiguration(tool_update_interval_minutes=custom)
+        config = _make_resolved(tool_update_interval_minutes=custom)
         result = resolve_update_config(config)
         assert result.tool_update_interval_minutes == custom
 
     @staticmethod
     def test_disabled_intervals() -> None:
         """Verify zero disables both intervals."""
-        config = GlobalConfiguration(auto_update_interval_minutes=0, tool_update_interval_minutes=0)
+        config = _make_resolved(auto_update_interval_minutes=0, tool_update_interval_minutes=0)
         result = resolve_update_config(config)
         assert result.auto_update_interval_minutes == 0
         assert result.tool_update_interval_minutes == 0
-
-
-class TestUpdateAndResolve:
-    """Tests for update_and_resolve."""
-
-    @staticmethod
-    def test_saves_and_resolves(tmp_path: Path) -> None:
-        """Verify config is saved and an UpdateConfig is returned."""
-        config = GlobalConfiguration(update_source='/my/source', update_channel='dev')
-
-        with patch('synodic_client.config.config_dir', return_value=tmp_path):
-            result = update_and_resolve(config)
-
-        assert result.channel == UpdateChannel.DEVELOPMENT
-        assert result.repo_url == '/my/source'  # non-GitHub path unchanged
-
-        # Verify file was saved (sparse — only user-set fields)
-        saved = json.loads((tmp_path / 'config.json').read_text(encoding='utf-8'))
-        assert saved['update_source'] == '/my/source'
-        assert saved['update_channel'] == 'dev'
-        # Unset fields should not appear in the sparse output
-        assert 'auto_update_interval_minutes' not in saved

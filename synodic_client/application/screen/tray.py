@@ -20,12 +20,11 @@ from synodic_client.application.screen.screen import MainWindow
 from synodic_client.application.screen.settings import SettingsWindow
 from synodic_client.application.workers import ToolUpdateWorker, UpdateCheckWorker, UpdateDownloadWorker
 from synodic_client.client import Client
-from synodic_client.config import GlobalConfiguration
 from synodic_client.resolution import (
+    ResolvedConfig,
     resolve_config,
     resolve_enabled_plugins,
     resolve_update_config,
-    update_and_resolve,
 )
 from synodic_client.updater import UpdateInfo
 
@@ -40,7 +39,7 @@ class TrayScreen:
         app: QApplication,
         client: Client,
         window: MainWindow,
-        config: GlobalConfiguration | None = None,
+        config: ResolvedConfig | None = None,
     ) -> None:
         """Initialize the tray icon.
 
@@ -123,7 +122,7 @@ class TrayScreen:
 
     # -- Config helpers --
 
-    def _resolve_config(self) -> GlobalConfiguration:
+    def _resolve_config(self) -> ResolvedConfig:
         """Return the injected config or resolve from disk."""
         if self._config is not None:
             return self._config
@@ -192,14 +191,14 @@ class TrayScreen:
         """Show the settings window."""
         self._settings_window.show()
 
-    def _on_settings_changed(self) -> None:
+    def _on_settings_changed(self, config: ResolvedConfig) -> None:
         """React to a change made in the settings window."""
-        config = self._resolve_config()
+        self._config = config
         self._reinitialize_updater(config)
 
-    def _reinitialize_updater(self, config: GlobalConfiguration) -> None:
+    def _reinitialize_updater(self, config: ResolvedConfig) -> None:
         """Re-derive update settings and restart the updater and timers."""
-        update_cfg = update_and_resolve(config)
+        update_cfg = resolve_update_config(config)
         self._client.initialize_updater(update_cfg)
         self._restart_auto_update_timer()
         self._restart_tool_update_timer()

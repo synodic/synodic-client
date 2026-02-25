@@ -53,7 +53,7 @@ from synodic_client.application.theme import (
     PLUGIN_UPDATE_STYLE,
     SETTINGS_GEAR_STYLE,
 )
-from synodic_client.config import GlobalConfiguration, save_config
+from synodic_client.resolution import ResolvedConfig, update_user_config
 
 logger = logging.getLogger(__name__)
 
@@ -306,14 +306,14 @@ class PluginsView(QWidget):
     def __init__(
         self,
         porringer: API,
-        config: GlobalConfiguration,
+        config: ResolvedConfig,
         parent: QWidget | None = None,
     ) -> None:
         """Initialize the plugins view.
 
         Args:
             porringer: The porringer API instance.
-            config: Resolved global configuration (for auto-update toggles).
+            config: Resolved configuration (for auto-update toggles).
             parent: Optional parent widget.
         """
         super().__init__(parent)
@@ -484,10 +484,7 @@ class PluginsView(QWidget):
 
     def _on_auto_update_toggled(self, plugin_name: str, enabled: bool) -> None:
         """Persist the auto-update toggle change to config."""
-        mapping = self._config.plugin_auto_update
-        if mapping is None:
-            mapping = {}
-            self._config.plugin_auto_update = mapping
+        mapping = dict(self._config.plugin_auto_update or {})
 
         if enabled:
             mapping.pop(plugin_name, None)
@@ -495,10 +492,8 @@ class PluginsView(QWidget):
             mapping[plugin_name] = False
 
         # Clean up the dict if all plugins are enabled
-        if not mapping:
-            self._config.plugin_auto_update = None
-
-        save_config(self._config)
+        new_value = mapping if mapping else None
+        self._config = update_user_config(plugin_auto_update=new_value)
         logger.info('Auto-update for %s set to %s', plugin_name, enabled)
 
 
@@ -510,12 +505,12 @@ class ProjectsView(QWidget):
     install execution.
     """
 
-    def __init__(self, porringer: API, config: GlobalConfiguration, parent: QWidget | None = None) -> None:
+    def __init__(self, porringer: API, config: ResolvedConfig, parent: QWidget | None = None) -> None:
         """Initialize the projects view.
 
         Args:
             porringer: The porringer API instance.
-            config: Resolved global configuration.
+            config: Resolved configuration.
             parent: Optional parent widget.
         """
         super().__init__(parent)
@@ -805,17 +800,17 @@ class MainWindow(QMainWindow):
     def __init__(
         self,
         porringer: API | None = None,
-        config: GlobalConfiguration | None = None,
+        config: ResolvedConfig | None = None,
     ) -> None:
         """Initialize the main window.
 
         Args:
             porringer: Optional porringer API instance for manifest display.
-            config: Resolved global configuration for plugin auto-update state.
+            config: Resolved configuration for plugin auto-update state.
         """
         super().__init__()
         self._porringer = porringer
-        self._config = config or GlobalConfiguration()
+        self._config = config
         self.setWindowTitle('Synodic Client')
         self.setMinimumSize(*MAIN_WINDOW_MIN_SIZE)
         self.setWindowIcon(app_icon())
@@ -832,7 +827,7 @@ class MainWindow(QMainWindow):
 
     def show(self) -> None:
         """Show the window, initializing UI lazily on first show."""
-        if self._tabs is None and self._porringer is not None:
+        if self._tabs is None and self._porringer is not None and self._config is not None:
             self._tabs = QTabWidget(self)
 
             self._projects_view = ProjectsView(self._porringer, self._config, self)
@@ -867,13 +862,13 @@ class Screen:
     def __init__(
         self,
         porringer: API | None = None,
-        config: GlobalConfiguration | None = None,
+        config: ResolvedConfig | None = None,
     ) -> None:
         """Initialize the screen.
 
         Args:
             porringer: Optional porringer API instance.
-            config: Resolved global configuration.
+            config: Resolved configuration.
         """
         self._porringer = porringer
         self._config = config

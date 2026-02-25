@@ -72,7 +72,7 @@ from synodic_client.application.theme import (
     MUTED_STYLE,
     NO_MARGINS,
 )
-from synodic_client.config import GlobalConfiguration, save_config
+from synodic_client.resolution import ResolvedConfig, update_user_config
 
 logger = logging.getLogger(__name__)
 
@@ -332,7 +332,7 @@ class SetupPreviewWidget(QWidget):
         parent: QWidget | None = None,
         *,
         show_close: bool = True,
-        config: GlobalConfiguration | None = None,
+        config: ResolvedConfig | None = None,
     ) -> None:
         """Initialize the preview widget.
 
@@ -579,14 +579,14 @@ class SetupPreviewWidget(QWidget):
         if self._config is None or self._manifest_key is None:
             return
 
-        pkgs = self._config.prerelease_packages or {}
+        pkgs = dict(self._config.prerelease_packages or {})
         if self._prerelease_overrides:
             pkgs[self._manifest_key] = sorted(self._prerelease_overrides)
         else:
             pkgs.pop(self._manifest_key, None)
 
-        self._config.prerelease_packages = pkgs if pkgs else None
-        save_config(self._config)
+        new_value = pkgs if pkgs else None
+        self._config = update_user_config(prerelease_packages=new_value)
         logger.info('Pre-release overrides for %s: %s', self._manifest_key, self._prerelease_overrides)
 
         if not self._installing:
@@ -918,7 +918,7 @@ class InstallPreviewWindow(QMainWindow):
         manifest_url: str,
         parent: QWidget | None = None,
         *,
-        config: GlobalConfiguration | None = None,
+        config: ResolvedConfig | None = None,
     ) -> None:
         """Initialize the install preview window.
 
@@ -926,13 +926,13 @@ class InstallPreviewWindow(QMainWindow):
             porringer: The porringer API instance.
             manifest_url: The URL of the manifest to install.
             parent: Optional parent widget.
-            config: Resolved global configuration for per-manifest pre-release
+            config: Resolved configuration for per-manifest pre-release
                 state and update detection flags.
         """
         super().__init__(parent)
         self._porringer = porringer
         self._manifest_url = manifest_url
-        self._config = config or GlobalConfiguration()
+        self._config = config
         self._temp_dir_path: str | None = None
         self._runner: QThread | None = None
 
@@ -1038,13 +1038,16 @@ class InstallPreviewWindow(QMainWindow):
         self._preview_widget.set_manifest_key(self._manifest_url)
 
         manifest_key = normalize_manifest_key(self._manifest_url)
-        overrides = set((self._config.prerelease_packages or {}).get(manifest_key, []))
+        config = self._config
+        if config is None:
+            return
+        overrides = set((config.prerelease_packages or {}).get(manifest_key, []))
 
         preview_worker = PreviewWorker(
             self._porringer,
             self._manifest_url,
             project_directory=self._project_directory,
-            detect_updates=self._config.detect_updates,
+            detect_updates=config.detect_updates,
             prerelease_packages=overrides or None,
         )
 

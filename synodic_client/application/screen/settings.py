@@ -30,12 +30,10 @@ from PySide6.QtWidgets import (
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.card import CardFrame
 from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE
-from synodic_client.config import GlobalConfiguration, save_config
 from synodic_client.logging import log_path
+from synodic_client.resolution import ResolvedConfig, update_user_config
 from synodic_client.startup import is_startup_registered, register_startup, remove_startup
 from synodic_client.updater import (
-    DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
-    DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
     GITHUB_REPO_URL,
 )
 
@@ -45,25 +43,26 @@ logger = logging.getLogger(__name__)
 class SettingsWindow(QMainWindow):
     """Application settings window with grouped card sections.
 
-    All controls persist changes immediately via :func:`save_config` and
-    emit :attr:`settings_changed` so that the tray and updater can react.
+    All controls persist changes immediately via :func:`update_user_config`
+    and emit :attr:`settings_changed` so that the tray and updater can
+    react.  The signal carries the new :class:`ResolvedConfig`.
     """
 
-    settings_changed = Signal()
-    """Emitted whenever a setting is changed and persisted."""
+    settings_changed = Signal(object)
+    """Emitted with the new ``ResolvedConfig`` whenever a setting is changed and persisted."""
 
     check_updates_requested = Signal()
     """Emitted when the user clicks the *Check for Updates* button."""
 
     def __init__(
         self,
-        config: GlobalConfiguration,
+        config: ResolvedConfig,
         parent: QWidget | None = None,
     ) -> None:
         """Initialise the settings window.
 
         Args:
-            config: The shared global configuration object.
+            config: The current resolved configuration snapshot.
             parent: Optional parent widget.
         """
         super().__init__(parent)
@@ -212,15 +211,9 @@ class SettingsWindow(QMainWindow):
             # Update source
             self._source_edit.setText(config.update_source or '')
 
-            # Intervals
-            auto_interval = config.auto_update_interval_minutes
-            self._auto_update_spin.setValue(
-                auto_interval if auto_interval is not None else DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
-            )
-            tool_interval = config.tool_update_interval_minutes
-            self._tool_update_spin.setValue(
-                tool_interval if tool_interval is not None else DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
-            )
+            # Intervals (already resolved to concrete ints)
+            self._auto_update_spin.setValue(config.auto_update_interval_minutes)
+            self._tool_update_spin.setValue(config.tool_update_interval_minutes)
 
             # Checkboxes
             self._detect_updates_check.setChecked(config.detect_updates)
@@ -245,10 +238,14 @@ class SettingsWindow(QMainWindow):
     # Callbacks
     # ------------------------------------------------------------------
 
-    def _persist(self) -> None:
-        """Save config and notify listeners."""
-        save_config(self._config)
-        self.settings_changed.emit()
+    def _persist(self, **changes: object) -> None:
+        """Save config changes and notify listeners.
+
+        Args:
+            **changes: Field-name / value pairs to persist.
+        """
+        self._config = update_user_config(**changes)
+        self.settings_changed.emit(self._config)
 
     @contextmanager
     def _block_signals(self) -> Iterator[None]:
@@ -277,13 +274,11 @@ class SettingsWindow(QMainWindow):
         self.check_updates_requested.emit()
 
     def _on_channel_changed(self, index: int) -> None:
-        self._config.update_channel = 'dev' if index == 1 else 'stable'
-        self._persist()
+        self._persist(update_channel='dev' if index == 1 else 'stable')
 
     def _on_source_changed(self) -> None:
         text = self._source_edit.text().strip()
-        self._config.update_source = text or None
-        self._persist()
+        self._persist(update_source=text or None)
 
     def _on_browse_source(self) -> None:
         path = QFileDialog.getExistingDirectory(self, 'Select Releases Directory')
@@ -292,25 +287,21 @@ class SettingsWindow(QMainWindow):
             self._on_source_changed()
 
     def _on_auto_update_interval_changed(self, value: int) -> None:
-        self._config.auto_update_interval_minutes = value
-        self._persist()
+        self._persist(auto_update_interval_minutes=value)
 
     def _on_tool_update_interval_changed(self, value: int) -> None:
-        self._config.tool_update_interval_minutes = value
-        self._persist()
+        self._persist(tool_update_interval_minutes=value)
 
     def _on_detect_updates_changed(self, checked: bool) -> None:
-        self._config.detect_updates = checked
-        self._persist()
+        self._persist(detect_updates=checked)
 
     def _on_auto_start_changed(self, checked: bool) -> None:
-        self._config.auto_start = checked
-        save_config(self._config)
+        self._config = update_user_config(auto_start=checked)
         if checked:
             register_startup(sys.executable)
         else:
             remove_startup()
-        self.settings_changed.emit()
+        self.settings_changed.emit(self._config)
 
     @staticmethod
     def _open_log() -> None:

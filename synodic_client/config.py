@@ -2,16 +2,20 @@
 
 Two configuration layers are supported:
 
-- **LocalConfiguration** — a portable ``config.json`` next to the executable
+- **BuildConfig** — a read-only ``config.json`` next to the executable
   (frozen builds only).  Written by the packaging script for dev builds.
-  Fields set here override the global configuration.
+  Contains only ``update_source`` and ``update_channel``.
 
-- **GlobalConfiguration** — a user-scoped ``config.json`` in the OS application
+- **UserConfig** — a user-scoped ``config.json`` in the OS application
   data directory.  On Windows this is ``%LOCALAPPDATA%/Synodic/config.json``.
-  Persisted by the Settings UI.
+  Persisted by the Settings UI.  Always contains every field.
 
-Merging and resolution of these layers is handled by
-:mod:`synodic_client.resolution`.
+Resolution of these layers into an immutable ``ResolvedConfig`` is handled
+by :mod:`synodic_client.resolution`.
+
+Back-compat aliases (``GlobalConfiguration``, ``LocalConfiguration``,
+``save_config``) are provided at the bottom of the module so that
+existing call-sites continue to work during migration.
 """
 
 import json
@@ -52,8 +56,38 @@ def is_dev_mode() -> bool:
     return _dev_mode
 
 
-class _ConfigBase(BaseModel):
-    """Shared fields for both configuration layers."""
+# ---------------------------------------------------------------------------
+# BuildConfig — read-only, lives next to the executable
+# ---------------------------------------------------------------------------
+
+
+class BuildConfig(BaseModel):
+    """Read-only configuration embedded next to the executable.
+
+    Written by the packaging script (e.g. ``pdm run package -- --local-source``).
+    Only contains the two fields the build system needs to seed.
+    """
+
+    # URL or local file path for Velopack releases.
+    update_source: str | None = None
+
+    # Update channel: "stable" or "dev".
+    update_channel: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# UserConfig — read-write, lives in the OS data directory
+# ---------------------------------------------------------------------------
+
+
+class UserConfig(BaseModel):
+    """User-scoped configuration persisted in the OS application data directory.
+
+    On Windows: ``%LOCALAPPDATA%/Synodic/config.json``.
+
+    Every field is always saved.  There are no sparse/unset semantics —
+    the on-disk file is a complete snapshot of the user's preferences.
+    """
 
     # URL or local file path for Velopack releases.
     # None means use the default GitHub release source.
@@ -95,19 +129,20 @@ class _ConfigBase(BaseModel):
     auto_start: bool | None = None
 
 
-class LocalConfiguration(_ConfigBase):
-    """Portable configuration embedded next to the executable.
+# ---------------------------------------------------------------------------
+# Back-compat aliases (to be removed once all consumers migrate)
+# ---------------------------------------------------------------------------
 
-    Written by the packaging script (e.g. ``pdm run package -- --local-source``).
-    Fields set here override the corresponding ``GlobalConfiguration`` values.
-    """
+LocalConfiguration = BuildConfig
+"""Deprecated alias for :class:`BuildConfig`."""
+
+GlobalConfiguration = UserConfig
+"""Deprecated alias for :class:`UserConfig`."""
 
 
-class GlobalConfiguration(_ConfigBase):
-    """User-scoped configuration persisted in the OS application data directory.
-
-    On Windows: ``%LOCALAPPDATA%/Synodic/config.json``.
-    """
+# ---------------------------------------------------------------------------
+# File I/O
+# ---------------------------------------------------------------------------
 
 
 def _portable_config_path() -> Path | None:
@@ -128,11 +163,12 @@ def _portable_config_path() -> Path | None:
     return None
 
 
-def _load_local_config() -> LocalConfiguration | None:
-    """Load the portable local configuration, if present.
+def load_build_config() -> BuildConfig | None:
+    """Load the portable build configuration next to the executable.
 
     Returns:
-        The loaded local config, or None.
+        The loaded build config, or ``None`` when not in a frozen build
+        or no portable config exists.
     """
     portable = _portable_config_path()
     if portable is None:
@@ -140,12 +176,16 @@ def _load_local_config() -> LocalConfiguration | None:
 
     try:
         data = json.loads(portable.read_text(encoding='utf-8'))
-        config = LocalConfiguration.model_validate(data)
-        logger.debug('Loaded local config from %s', portable)
+        config = BuildConfig.model_validate(data)
+        logger.debug('Loaded build config from %s', portable)
         return config
     except Exception:
-        logger.exception('Failed to load local config from %s', portable)
+        logger.exception('Failed to load build config from %s', portable)
         return None
+
+
+# Keep internal name for backward compat with resolution.py during migration
+_load_local_config = load_build_config
 
 
 def config_dir() -> Path:
@@ -170,35 +210,37 @@ def config_dir() -> Path:
     return Path.home() / f'.{app_name.lower()}'
 
 
-def _load_global_config() -> GlobalConfiguration:
-    """Load the global configuration from the OS data directory.
+def load_user_config() -> UserConfig:
+    """Load the user configuration from the OS data directory.
 
     Returns:
-        The loaded or default global configuration.
+        The loaded or default user configuration.
     """
     path = config_dir() / _CONFIG_FILENAME
     if not path.exists():
-        logger.debug('No global config at %s, using defaults', path)
-        return GlobalConfiguration()
+        logger.debug('No user config at %s, using defaults', path)
+        return UserConfig()
 
     try:
         data = json.loads(path.read_text(encoding='utf-8'))
-        config = GlobalConfiguration.model_validate(data)
-        logger.debug('Loaded global config from %s', path)
+        config = UserConfig.model_validate(data)
+        logger.debug('Loaded user config from %s', path)
         return config
     except Exception:
-        logger.exception('Failed to load global config from %s, using defaults', path)
-        return GlobalConfiguration()
+        logger.exception('Failed to load user config from %s, using defaults', path)
+        return UserConfig()
 
 
-def save_config(config: GlobalConfiguration) -> None:
+# Keep internal name for backward compat with resolution.py during migration
+_load_global_config = load_user_config
+
+
+def save_user_config(config: UserConfig) -> None:
     """Save configuration to the global (system) config directory.
 
-    Only fields that have been explicitly set (either loaded from the
-    existing config file or changed at runtime) are written.  This
-    sparse serialisation ensures that build-time local-config values
-    do not leak into the user's global config and that future defaults
-    can take effect for fields the user has not customised.
+    All fields are always written.  The on-disk file is a complete
+    snapshot of the user's preferences so that no implicit state is
+    lost when builds change or new defaults are introduced.
 
     Args:
         config: The configuration to persist.
@@ -209,9 +251,14 @@ def save_config(config: GlobalConfiguration) -> None:
 
     try:
         path.write_text(
-            config.model_dump_json(indent=2, exclude_unset=True),
+            config.model_dump_json(indent=2),
             encoding='utf-8',
         )
         logger.info('Saved config to %s', path)
     except Exception:
         logger.exception('Failed to save config to %s', path)
+
+
+# Back-compat alias
+save_config = save_user_config
+"""Deprecated alias for :func:`save_user_config`."""
