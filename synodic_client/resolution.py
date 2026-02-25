@@ -126,8 +126,10 @@ def _resolve_from_user(user: UserConfig) -> ResolvedConfig:
 
     Resolves every ``None`` field to its concrete default.
     """
-    channel = user.update_channel if user.update_channel is not None else _default_channel()
+    channel = user.update_channel or _default_channel()
 
+    # Note: intervals use explicit None-checks because 0 is a valid
+    # value meaning "disabled" and `or` would incorrectly skip it.
     auto_interval = user.auto_update_interval_minutes
     if auto_interval is None:
         auto_interval = DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES
@@ -229,15 +231,3 @@ def resolve_enabled_plugins(
         return None
 
     return [n for n in all_plugin_names if n not in disabled]
-
-
-def resolve_auto_start(config: ResolvedConfig) -> bool:
-    """Determine whether auto-startup should be enabled.
-
-    Args:
-        config: A resolved configuration snapshot.
-
-    Returns:
-        ``True`` when the application should register for auto-startup.
-    """
-    return config.auto_start

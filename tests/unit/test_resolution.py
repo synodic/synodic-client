@@ -9,7 +9,6 @@ import pytest
 from synodic_client.config import BuildConfig, UserConfig
 from synodic_client.resolution import (
     ResolvedConfig,
-    resolve_auto_start,
     resolve_config,
     resolve_enabled_plugins,
     resolve_update_config,
@@ -227,27 +226,6 @@ class TestUpdateUserConfig:
 
         saved = mock_save.call_args.args[0]
         assert saved.update_channel == 'dev'
-
-
-# ---------------------------------------------------------------------------
-# resolve_auto_start
-# ---------------------------------------------------------------------------
-
-
-class TestResolveAutoStart:
-    """Tests for resolve_auto_start."""
-
-    @staticmethod
-    def test_true_when_auto_start_true() -> None:
-        """Verify True is returned."""
-        config = _make_resolved(auto_start=True)
-        assert resolve_auto_start(config) is True
-
-    @staticmethod
-    def test_false_when_auto_start_false() -> None:
-        """Verify False is returned."""
-        config = _make_resolved(auto_start=False)
-        assert resolve_auto_start(config) is False
 
 
 # ---------------------------------------------------------------------------

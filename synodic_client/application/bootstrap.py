@@ -18,7 +18,7 @@ import sys
 from synodic_client.config import set_dev_mode
 from synodic_client.logging import configure_logging
 from synodic_client.protocol import register_protocol
-from synodic_client.resolution import resolve_auto_start, resolve_config, seed_user_config_from_build
+from synodic_client.resolution import resolve_config, seed_user_config_from_build
 from synodic_client.startup import register_startup, remove_startup
 from synodic_client.updater import initialize_velopack
 
@@ -38,7 +38,7 @@ if not _dev_mode:
     register_protocol(sys.executable)
 
     _config = resolve_config()
-    if resolve_auto_start(_config):
+    if _config.auto_start:
         register_startup(sys.executable)
     else:
         remove_startup()

@@ -12,10 +12,6 @@ Two configuration layers are supported:
 
 Resolution of these layers into an immutable ``ResolvedConfig`` is handled
 by :mod:`synodic_client.resolution`.
-
-Back-compat aliases (``GlobalConfiguration``, ``LocalConfiguration``,
-``save_config``) are provided at the bottom of the module so that
-existing call-sites continue to work during migration.
 """
 
 import json
@@ -130,62 +126,35 @@ class UserConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Back-compat aliases (to be removed once all consumers migrate)
-# ---------------------------------------------------------------------------
-
-LocalConfiguration = BuildConfig
-"""Deprecated alias for :class:`BuildConfig`."""
-
-GlobalConfiguration = UserConfig
-"""Deprecated alias for :class:`UserConfig`."""
-
-
-# ---------------------------------------------------------------------------
 # File I/O
 # ---------------------------------------------------------------------------
-
-
-def _portable_config_path() -> Path | None:
-    """Return the path to a portable config file next to the executable, if it exists.
-
-    Only checked when running as a frozen (PyInstaller) build.
-
-    Returns:
-        Path to the portable config file, or None if not applicable.
-    """
-    if not getattr(sys, 'frozen', False):
-        return None
-
-    exe_dir = Path(sys.executable).resolve().parent
-    candidate = exe_dir / _CONFIG_FILENAME
-    if candidate.exists():
-        return candidate
-    return None
 
 
 def load_build_config() -> BuildConfig | None:
     """Load the portable build configuration next to the executable.
 
+    Only applicable when running as a frozen (PyInstaller) build and a
+    ``config.json`` file exists next to the executable.
+
     Returns:
         The loaded build config, or ``None`` when not in a frozen build
         or no portable config exists.
     """
-    portable = _portable_config_path()
-    if portable is None:
+    if not getattr(sys, 'frozen', False):
+        return None
+
+    path = Path(sys.executable).resolve().parent / _CONFIG_FILENAME
+    if not path.exists():
         return None
 
     try:
-        data = json.loads(portable.read_text(encoding='utf-8'))
+        data = json.loads(path.read_text(encoding='utf-8'))
         config = BuildConfig.model_validate(data)
-        logger.debug('Loaded build config from %s', portable)
+        logger.debug('Loaded build config from %s', path)
         return config
     except Exception:
-        logger.exception('Failed to load build config from %s', portable)
+        logger.exception('Failed to load build config from %s', path)
         return None
-
-
-# Keep internal name for backward compat with resolution.py during migration
-_load_local_config = load_build_config
 
 
 def config_dir() -> Path:
@@ -231,10 +200,6 @@ def load_user_config() -> UserConfig:
         return UserConfig()
 
 
-# Keep internal name for backward compat with resolution.py during migration
-_load_global_config = load_user_config
-
-
 def save_user_config(config: UserConfig) -> None:
     """Save configuration to the global (system) config directory.
 
@@ -257,8 +222,3 @@ def save_user_config(config: UserConfig) -> None:
         logger.info('Saved config to %s', path)
     except Exception:
         logger.exception('Failed to save config to %s', path)
-
-
-# Back-compat alias
-save_config = save_user_config
-"""Deprecated alias for :func:`save_user_config`."""

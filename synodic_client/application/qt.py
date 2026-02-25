@@ -26,7 +26,6 @@ from synodic_client.logging import configure_logging
 from synodic_client.protocol import register_protocol
 from synodic_client.resolution import (
     ResolvedConfig,
-    resolve_auto_start,
     resolve_config,
     resolve_update_config,
     seed_user_config_from_build,
@@ -149,7 +148,7 @@ def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
         seed_user_config_from_build()
 
         startup_config = resolve_config()
-        if resolve_auto_start(startup_config):
+        if startup_config.auto_start:
             register_startup(sys.executable)
         else:
             remove_startup()
