@@ -93,13 +93,6 @@ class TestClientUpdater:
         mock_download.assert_called_once_with(progress_cb)
 
     @staticmethod
-    def test_apply_update_and_restart_without_init() -> None:
-        """Verify apply_update_and_restart does nothing when updater not initialized."""
-        client = Client()
-        # Should not raise
-        client.apply_update_and_restart()
-
-    @staticmethod
     def test_apply_update_on_exit_without_init() -> None:
         """Verify apply_update_on_exit does nothing when updater not initialized."""
         client = Client()

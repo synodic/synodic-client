@@ -52,7 +52,7 @@ if info and info.available:
     
     if client.download_update(on_progress):
         # Apply and restart
-        client.apply_update_and_restart()
+        client.apply_update_on_exit(restart=True)
 ```
 
 ## Configuration

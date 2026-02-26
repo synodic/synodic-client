@@ -105,17 +105,6 @@ class Client:
 
         return self._updater.download_update(progress_callback)
 
-    def apply_update_and_restart(self) -> None:
-        """Apply a downloaded update and restart the application.
-
-        This method will not return - it exits and relaunches the app.
-        """
-        if self._updater is None:
-            logger.warning('Updater not initialized')
-            return
-
-        self._updater.apply_update_and_restart()
-
     def apply_update_on_exit(self, restart: bool = True) -> None:
         """Schedule the update to apply when the application exits.
 

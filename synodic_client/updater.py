@@ -302,14 +302,17 @@ class Updater:
             self._update_info.error = str(e)
             return False
 
-    def apply_update_and_restart(self, restart_args: list[str] | None = None) -> None:
-        """Apply the downloaded update and restart the application.
+    def apply_update_on_exit(self, restart: bool = True, restart_args: list[str] | None = None) -> None:
+        """Apply the downloaded update, optionally restarting the application.
 
-        This method will not return - it exits the current process
-        and launches the updated version.
+        When *restart* is ``True`` the Velopack runtime applies the update
+        **and** relaunches the new version (the call does not return).
+        When ``False`` the update is staged and applied after the process
+        exits without relaunching.
 
         Args:
-            restart_args: Optional arguments to pass to the restarted application
+            restart: Whether to restart the application after applying.
+            restart_args: Optional arguments to pass to the restarted application.
         """
         if not self.is_installed:
             raise NotImplementedError('Updates are only supported for Velopack installs')
@@ -320,63 +323,31 @@ class Updater:
         if self._update_info._velopack_info is None:
             raise RuntimeError('No Velopack update info available')
 
-        self._state = UpdateState.APPLYING
-
         try:
             manager = self._get_velopack_manager()
             if manager is None:
                 raise RuntimeError('Velopack manager not available')
 
-            logger.info('Applying update and restarting...')
-            if restart_args:
-                manager.apply_updates_and_restart_with_args(
-                    self._update_info._velopack_info,
-                    restart_args,
-                )
+            logger.info('Applying update (restart=%s)', restart)
+
+            if restart:
+                self._state = UpdateState.APPLYING
+                if restart_args:
+                    manager.apply_updates_and_restart_with_args(
+                        self._update_info._velopack_info,
+                        restart_args,
+                    )
+                else:
+                    manager.apply_updates_and_restart(self._update_info._velopack_info)
+                # apply_updates_and_restart terminates the process;
+                # fall through only as a safety net.
+                sys.exit(0)
             else:
-                manager.apply_updates_and_restart(self._update_info._velopack_info)
-            # This should not return, but just in case
-            sys.exit(0)
+                manager.apply_updates_and_exit(self._update_info._velopack_info)
+                self._state = UpdateState.APPLIED
 
         except Exception as e:
             logger.exception('Failed to apply update')
-            self._state = UpdateState.FAILED
-            self._update_info.error = str(e)
-            raise
-
-    def apply_update_on_exit(self, restart: bool = True, restart_args: list[str] | None = None) -> None:
-        """Schedule the update to be applied when the application exits.
-
-        Unlike apply_update_and_restart, this method returns immediately
-        and the update is applied after the application exits gracefully.
-
-        Args:
-            restart: Whether to restart the application after applying
-            restart_args: Optional arguments to pass to the restarted application
-        """
-        if not self.is_installed:
-            raise NotImplementedError('Updates are only supported for Velopack installs')
-
-        if self._state != UpdateState.DOWNLOADED or not self._update_info:
-            raise RuntimeError('No downloaded update to apply')
-
-        if self._update_info._velopack_info is None:
-            raise RuntimeError('No Velopack update info available')
-
-        try:
-            manager = self._get_velopack_manager()
-            if manager is None:
-                raise RuntimeError('Velopack manager not available')
-
-            logger.info('Scheduling update to apply on exit (restart=%s)', restart)
-            # Velopack apply_updates_and_exit applies on exit
-            # Note: The restart parameter is not supported by Velopack's exit method
-            # The app will need to be manually restarted or use apply_updates_and_restart
-            manager.apply_updates_and_exit(self._update_info._velopack_info)
-            self._state = UpdateState.APPLIED
-
-        except Exception as e:
-            logger.exception('Failed to schedule update')
             self._state = UpdateState.FAILED
             self._update_info.error = str(e)
             raise

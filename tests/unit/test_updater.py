@@ -321,24 +321,6 @@ class TestUpdaterApplyUpdate:
     """Tests for apply_update methods."""
 
     @staticmethod
-    def test_apply_and_restart_not_installed(updater: Updater) -> None:
-        """Verify apply_update_and_restart raises when not installed."""
-        with (
-            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=False),
-            pytest.raises(NotImplementedError, match='Velopack installs'),
-        ):
-            updater.apply_update_and_restart()
-
-    @staticmethod
-    def test_apply_and_restart_no_downloaded_update(updater: Updater) -> None:
-        """Verify apply_update_and_restart raises when no downloaded update."""
-        with (
-            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
-            pytest.raises(RuntimeError, match='No downloaded update'),
-        ):
-            updater.apply_update_and_restart()
-
-    @staticmethod
     def test_apply_on_exit_not_installed(updater: Updater) -> None:
         """Verify apply_update_on_exit raises when not installed."""
         with (
@@ -357,8 +339,8 @@ class TestUpdaterApplyUpdate:
             updater.apply_update_on_exit()
 
     @staticmethod
-    def test_apply_on_exit_success(updater: Updater) -> None:
-        """Verify apply_update_on_exit schedules update."""
+    def test_apply_on_exit_with_restart(updater: Updater) -> None:
+        """Verify apply_update_on_exit(restart=True) uses apply_updates_and_restart."""
         mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
         updater._update_info = UpdateInfo(
             available=True,
@@ -373,15 +355,43 @@ class TestUpdaterApplyUpdate:
         with (
             patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
             patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
+            pytest.raises(SystemExit, match='0'),
         ):
             updater.apply_update_on_exit(restart=True)
 
-        assert updater.state == UpdateState.APPLIED
-        mock_manager.apply_updates_and_exit.assert_called_once_with(mock_velopack_info)
+        assert updater.state == UpdateState.APPLYING
+        mock_manager.apply_updates_and_restart.assert_called_once_with(mock_velopack_info)
+
+    @staticmethod
+    def test_apply_on_exit_with_restart_args(updater: Updater) -> None:
+        """Verify restart_args are forwarded to apply_updates_and_restart_with_args."""
+        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
+        updater._update_info = UpdateInfo(
+            available=True,
+            current_version=Version('1.0.0'),
+            latest_version=Version('2.0.0'),
+            _velopack_info=mock_velopack_info,
+        )
+        updater._state = UpdateState.DOWNLOADED
+
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
+
+        with (
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
+            patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
+            pytest.raises(SystemExit, match='0'),
+        ):
+            updater.apply_update_on_exit(restart=True, restart_args=['--minimized'])
+
+        assert updater.state == UpdateState.APPLYING
+        mock_manager.apply_updates_and_restart_with_args.assert_called_once_with(
+            mock_velopack_info,
+            ['--minimized'],
+        )
 
     @staticmethod
     def test_apply_on_exit_no_restart(updater: Updater) -> None:
-        """Verify apply_update_on_exit can disable restart (note: not supported by Velopack)."""
+        """Verify apply_update_on_exit(restart=False) uses apply_updates_and_exit."""
         mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
         updater._update_info = UpdateInfo(
             available=True,
@@ -399,7 +409,7 @@ class TestUpdaterApplyUpdate:
         ):
             updater.apply_update_on_exit(restart=False)
 
-        # Note: Velopack's apply_updates_and_exit doesn't support restart parameter
+        assert updater.state == UpdateState.APPLIED
         mock_manager.apply_updates_and_exit.assert_called_once_with(mock_velopack_info)
 
 
