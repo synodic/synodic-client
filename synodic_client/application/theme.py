@@ -286,3 +286,73 @@ SETTINGS_GEAR_STYLE = (
     'QPushButton:hover { background: palette(midlight); border-radius: 3px; }'
 )
 """Gear button style for the MainWindow tab corner widget."""
+
+# ---------------------------------------------------------------------------
+# Update banner (in-app self-update notification)
+# ---------------------------------------------------------------------------
+UPDATE_BANNER_ANIMATION_MS = 250
+"""Duration of the slide-in / slide-out animation (ms)."""
+
+UPDATE_BANNER_ERROR_DISMISS_MS = 10000
+"""Auto-dismiss delay for the error banner (ms)."""
+
+UPDATE_BANNER_STYLE = (
+    'QFrame#updateBanner {  background: #1e3a5f;  border-bottom: 1px solid #2a5a8f;  padding: 6px 12px;}'
+)
+"""Default banner style — subtle blue tint for downloading state."""
+
+UPDATE_BANNER_READY_STYLE = (
+    'QFrame#updateBanner {  background: #1e3f2e;  border-bottom: 1px solid #2a6f3f;  padding: 6px 12px;}'
+)
+"""Green-tinted banner for "ready to restart" state."""
+
+UPDATE_BANNER_ERROR_STYLE = (
+    'QFrame#updateBanner {  background: #3f1e1e;  border-bottom: 1px solid #6f2a2a;  padding: 6px 12px;}'
+)
+"""Red-tinted banner for error state."""
+
+UPDATE_BANNER_MESSAGE_STYLE = 'color: #d4d4d4; font-size: 12px;'
+"""Style for the banner message text."""
+
+UPDATE_BANNER_VERSION_STYLE = 'color: #d4d4d4; font-size: 12px; font-weight: bold;'
+"""Style for the version number in the banner."""
+
+UPDATE_BANNER_BTN_STYLE = (
+    'QPushButton {'
+    '  background: #0e639c;'
+    '  color: white;'
+    '  border: none;'
+    '  border-radius: 3px;'
+    '  padding: 4px 12px;'
+    '  font-size: 11px;'
+    '  font-weight: bold;'
+    '}'
+    'QPushButton:hover { background: #1177bb; }'
+    'QPushButton:pressed { background: #0d5689; }'
+)
+"""Primary action button style (Restart Now, Retry)."""
+
+UPDATE_BANNER_DISMISS_STYLE = (
+    'QPushButton {'
+    '  color: #808080;'
+    '  border: none;'
+    '  font-size: 14px;'
+    '  padding: 2px 6px;'
+    '}'
+    'QPushButton:hover { color: #d4d4d4; }'
+)
+"""Dismiss (×) button style."""
+
+UPDATE_BANNER_PROGRESS_STYLE = (
+    'QProgressBar {'
+    '  background: #2a2d2e;'
+    '  border: none;'
+    '  border-radius: 2px;'
+    '  max-height: 3px;'
+    '}'
+    'QProgressBar::chunk {'
+    '  background: #0e639c;'
+    '  border-radius: 2px;'
+    '}'
+)
+"""Thin inline progress bar for the downloading state."""

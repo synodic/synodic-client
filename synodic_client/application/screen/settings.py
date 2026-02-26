@@ -224,6 +224,11 @@ class SettingsWindow(QMainWindow):
         """Set the inline status text next to the *Check for Updates* button."""
         self._update_status_label.setText(text)
 
+    def set_checking(self) -> None:
+        """Enter the *checking* state — disable button and show status."""
+        self._check_updates_btn.setEnabled(False)
+        self._update_status_label.setText('Checking\u2026')
+
     def reset_check_updates_button(self) -> None:
         """Re-enable the *Check for Updates* button after a check completes."""
         self._check_updates_btn.setEnabled(True)

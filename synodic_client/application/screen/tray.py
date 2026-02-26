@@ -10,8 +10,6 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
     QMenu,
-    QMessageBox,
-    QProgressDialog,
     QSystemTrayIcon,
 )
 
@@ -56,15 +54,11 @@ class TrayScreen:
         self._config = config
         self._runner: QThread | None = None
         self._tool_runner: QThread | None = None
-        self._progress_dialog: QProgressDialog | None = None
-        self._pending_update_info: UpdateInfo | None = None
-        self._download_cancelled = False
 
         self.tray_icon = app_icon()
 
         self.tray = QSystemTrayIcon()
         self.tray.setIcon(self.tray_icon)
-        self.tray.messageClicked.connect(self._on_notification_clicked)
         self.tray.activated.connect(self._on_tray_activated)
         self.tray.setVisible(True)
 
@@ -91,6 +85,11 @@ class TrayScreen:
         if plugins_view is not None:
             plugins_view.update_all_requested.connect(self._on_tool_update)
             plugins_view.plugin_update_requested.connect(self._on_single_plugin_update)
+
+        # Connect update banner signals
+        self._banner = window.update_banner
+        self._banner.restart_requested.connect(self._apply_update)
+        self._banner.retry_requested.connect(lambda: self._do_check_updates(silent=True))
 
     def _build_menu(self, app: QApplication, window: MainWindow) -> None:
         """Build the tray context menu."""
@@ -216,12 +215,6 @@ class TrayScreen:
         self.update_action.setEnabled(True)
         self.update_action.setText('Check for Updates...')
 
-    def _close_progress(self) -> None:
-        """Close and discard the download progress dialog, if open."""
-        if self._progress_dialog:
-            self._progress_dialog.close()
-            self._progress_dialog = None
-
     def _on_check_updates(self) -> None:
         """Handle manual check for updates action."""
         self._do_check_updates(silent=False)
@@ -230,7 +223,7 @@ class TrayScreen:
         """Handle automatic (periodic) check for updates.
 
         Failures and no-update results are logged silently without
-        showing Windows notifications.
+        showing the in-app error banner.
         """
         self._do_check_updates(silent=True)
 
@@ -238,24 +231,19 @@ class TrayScreen:
         """Run an update check.
 
         Args:
-            silent: When ``True``, suppress notifications for failures
-                and no-update results.  Notifications are still shown
-                when an update *is* available.
+            silent: When ``True``, suppress the in-app error banner
+                for failures and no-update results.  The banner is
+                always shown when an update *is* available.
         """
         if self._client.updater is None:
             if not silent:
-                self.tray.showMessage(
-                    'Update Error',
-                    'Updater is not initialized.',
-                    QSystemTrayIcon.MessageIcon.Warning,
-                )
+                self._banner.show_error('Updater is not initialized.')
             return
 
         # Disable both the tray action and the settings button while checking
         self.update_action.setEnabled(False)
         self.update_action.setText('Checking for Updates...')
-        self._settings_window._check_updates_btn.setEnabled(False)
-        self._settings_window.set_update_status('Checking\u2026')
+        self._settings_window.set_checking()
 
         worker = UpdateCheckWorker(self._client)
         worker.finished.connect(lambda result: self._on_update_check_finished(result, silent=silent))
@@ -272,11 +260,7 @@ class TrayScreen:
         if result is None:
             self._settings_window.set_update_status('Check failed')
             if not silent:
-                self.tray.showMessage(
-                    'Update Check Failed',
-                    'Failed to check for updates. Please try again later.',
-                    QSystemTrayIcon.MessageIcon.Warning,
-                )
+                self._banner.show_error('Failed to check for updates.')
             else:
                 logger.warning('Automatic update check failed (no result)')
             return
@@ -284,14 +268,7 @@ class TrayScreen:
         if result.error:
             self._settings_window.set_update_status(result.error)
             if not silent:
-                # Distinguish informational messages (no releases for channel)
-                # from genuine failures.
-                is_no_releases = 'No releases found' in result.error
-                title = 'No Updates Available' if is_no_releases else 'Update Check Failed'
-                icon = (
-                    QSystemTrayIcon.MessageIcon.Information if is_no_releases else QSystemTrayIcon.MessageIcon.Warning
-                )
-                self.tray.showMessage(title, result.error, icon)
+                self._banner.show_error(result.error)
             else:
                 logger.warning('Automatic update check failed: %s', result.error)
             return
@@ -301,25 +278,16 @@ class TrayScreen:
                 f'Up to date ({result.current_version})',
             )
             if not silent:
-                self.tray.showMessage(
-                    'No Updates Available',
-                    f'You are running the latest version ({result.current_version}).',
-                    QSystemTrayIcon.MessageIcon.Information,
-                )
+                logger.info('No updates available (current: %s)', result.current_version)
             else:
                 logger.debug('Automatic update check: no update available')
             return
 
-        # Update available - always show notification, clicking it starts download
-        self._pending_update_info = result
-        self._settings_window.set_update_status(
-            f'Update available: {result.latest_version}',
-        )
-        self.tray.showMessage(
-            'Update Available',
-            f'Version {result.latest_version} is available (current: {result.current_version}).\nClick to download.',
-            QSystemTrayIcon.MessageIcon.Information,
-        )
+        # Update available — show banner and start download automatically
+        version = str(result.latest_version)
+        self._settings_window.set_update_status(f'Update available: {version}')
+        self._banner.show_downloading(version)
+        self._start_download(version)
 
     def _on_update_check_error(self, error: str, *, silent: bool = False) -> None:
         """Handle update check error."""
@@ -328,11 +296,7 @@ class TrayScreen:
         self._settings_window.set_update_status(f'Error: {error}')
 
         if not silent:
-            self.tray.showMessage(
-                'Update Check Error',
-                f'An error occurred: {error}',
-                QSystemTrayIcon.MessageIcon.Critical,
-            )
+            self._banner.show_error(f'Update check error: {error}')
         else:
             logger.warning('Automatic update check error: %s', error)
 
@@ -393,107 +357,44 @@ class TrayScreen:
             QSystemTrayIcon.MessageIcon.Warning,
         )
 
-    def _on_notification_clicked(self) -> None:
-        """Handle notification click - starts download if update is pending."""
-        if self._pending_update_info is not None and self._pending_update_info.available:
-            self._pending_update_info = None
-            self._start_download()
+    # -- Self-update download & apply --
 
-    def _start_download(self) -> None:
-        """Start downloading the update."""
-        # Create progress dialog
-        self._progress_dialog = QProgressDialog(
-            'Downloading update...',
-            'Cancel',
-            0,
-            100,
-            self._window,
-        )
-        self._progress_dialog.setWindowTitle('Downloading Update')
-        self._progress_dialog.setAutoClose(False)
-        self._progress_dialog.setAutoReset(False)
-        self._progress_dialog.canceled.connect(self._on_download_cancelled)
-        self._download_cancelled = False
-        self._progress_dialog.show()
+    def _start_download(self, version: str) -> None:
+        """Start downloading the update in the background.
 
+        Args:
+            version: The version string being downloaded (for banner display).
+        """
         worker = UpdateDownloadWorker(self._client)
-        worker.finished.connect(self._on_download_finished)
-        worker.progress.connect(self._on_download_progress)
+        worker.finished.connect(lambda success: self._on_download_finished(success, version))
+        worker.progress.connect(self._banner.show_downloading_progress)
         worker.error.connect(self._on_download_error)
 
         self._runner = worker
         self._runner.start()
 
-    def _on_download_cancelled(self) -> None:
-        """Handle cancel button on the download progress dialog."""
-        self._download_cancelled = True
-        self._close_progress()
-        logger.info('Update download cancelled by user')
-
-    def _on_download_progress(self, percentage: int) -> None:
-        """Handle download progress update."""
-        if self._progress_dialog and not self._download_cancelled:
-            self._progress_dialog.setValue(percentage)
-            self._progress_dialog.setLabelText(f'Downloading update... {percentage}%')
-
-    def _on_download_finished(self, success: bool) -> None:
-        """Handle download completion."""
-        self._close_progress()
-
-        if self._download_cancelled:
-            return
-
+    def _on_download_finished(self, success: bool, version: str) -> None:
+        """Handle download completion — transition banner to ready state."""
         if not success:
-            self.tray.showMessage(
-                'Download Failed',
-                'Failed to download the update. Please try again later.',
-                QSystemTrayIcon.MessageIcon.Warning,
-            )
+            self._banner.show_error('Download failed. Please try again later.')
             return
 
-        # Prompt to apply update - keep as dialog since it needs user choice
-        reply = QMessageBox.question(
-            self._window if self._window.isVisible() else None,
-            'Download Complete',
-            'The update has been downloaded.\n\n'
-            'Would you like to install it now?\n'
-            'The application will restart after installation.',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-
-        if reply == QMessageBox.StandardButton.Yes:
-            self._apply_update()
+        self._banner.show_ready(version)
+        self._settings_window.set_update_status(f'Ready to install: {version}')
 
     def _on_download_error(self, error: str) -> None:
-        """Handle download error."""
-        self._close_progress()
-
-        self.tray.showMessage(
-            'Download Error',
-            f'An error occurred while downloading: {error}',
-            QSystemTrayIcon.MessageIcon.Critical,
-        )
+        """Handle download error — show error banner."""
+        self._banner.show_error(f'Download error: {error}')
 
     def _apply_update(self) -> None:
-        """Apply the downloaded update."""
+        """Apply the downloaded update and restart."""
         if self._client.updater is None:
             return
 
         try:
-            # Schedule update to apply on exit, then quit the app
             self._client.apply_update_on_exit(restart=True)
-
-            self.tray.showMessage(
-                'Update Ready',
-                'The update will be applied when the application closes.\nThe application will restart automatically.',
-                QSystemTrayIcon.MessageIcon.Information,
-            )
+            logger.info('Update scheduled — restarting application')
             self._app.quit()
-
         except Exception as e:
-            self.tray.showMessage(
-                'Update Failed',
-                f'Failed to apply the update: {e}',
-                QSystemTrayIcon.MessageIcon.Warning,
-            )
+            logger.error('Failed to apply update: %s', e)
+            self._banner.show_error(f'Failed to apply update: {e}')

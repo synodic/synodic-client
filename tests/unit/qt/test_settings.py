@@ -369,3 +369,11 @@ class TestCheckForUpdatesButton:
         window.reset_check_updates_button()
 
         assert window._check_updates_btn.isEnabled() is True
+
+    @staticmethod
+    def test_set_checking() -> None:
+        """set_checking disables the button and shows 'Checking\u2026' status."""
+        window = _make_window()
+        window.set_checking()
+        assert window._check_updates_btn.isEnabled() is False
+        assert window._update_status_label.text() == 'Checking\u2026'

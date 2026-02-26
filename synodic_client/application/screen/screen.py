@@ -38,6 +38,7 @@ from synodic_client.application.screen.install import (
     normalize_manifest_key,
 )
 from synodic_client.application.screen.spinner import SpinnerWidget
+from synodic_client.application.screen.update_banner import UpdateBanner
 from synodic_client.application.theme import (
     CARD_SPACING,
     COMPACT_MARGINS,
@@ -815,6 +816,9 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(*MAIN_WINDOW_MIN_SIZE)
         self.setWindowIcon(app_icon())
 
+        # Update banner — always available, starts hidden.
+        self._update_banner = UpdateBanner(self)
+
     @property
     def porringer(self) -> API | None:
         """Return the porringer API instance, if available."""
@@ -824,6 +828,11 @@ class MainWindow(QMainWindow):
     def plugins_view(self) -> PluginsView | None:
         """Return the plugins view, if initialised."""
         return self._plugins_view
+
+    @property
+    def update_banner(self) -> UpdateBanner:
+        """Return the update banner widget."""
+        return self._update_banner
 
     def show(self) -> None:
         """Show the window, initializing UI lazily on first show."""
@@ -843,7 +852,14 @@ class MainWindow(QMainWindow):
             gear_btn.clicked.connect(self.settings_requested.emit)
             self._tabs.setCornerWidget(gear_btn)
 
-            self.setCentralWidget(self._tabs)
+            # Container: banner above tabs
+            container = QWidget(self)
+            container_layout = QVBoxLayout(container)
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            container_layout.setSpacing(0)
+            container_layout.addWidget(self._update_banner)
+            container_layout.addWidget(self._tabs)
+            self.setCentralWidget(container)
 
         # Paint the window immediately, then refresh data asynchronously
         super().show()
