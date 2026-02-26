@@ -27,6 +27,7 @@ from synodic_client.application.theme import (
     ACTION_CARD_STATUS_DONE,
     ACTION_CARD_STATUS_FAILED,
     ACTION_CARD_STATUS_NEEDED,
+    ACTION_CARD_STATUS_PENDING,
     ACTION_CARD_STATUS_RUNNING,
     ACTION_CARD_STATUS_SATISFIED,
     ACTION_CARD_STATUS_SKIPPED,
@@ -559,14 +560,15 @@ class TestActionCardList:
             assert not c._is_skeleton
 
     @staticmethod
-    def test_populate_skips_command_actions() -> None:
-        """Populate skips actions with kind=None."""
+    def test_populate_includes_command_actions() -> None:
+        """Populate includes actions with kind=None."""
         card_list = ActionCardList()
         a1 = _make_action(package='pkg1')
         a2 = _make_action(package='pkg2')
         a2.kind = None  # bare command
-        card_list.populate([a1, a2])
-        assert card_list.card_count() == 1
+        actions = [a1, a2]
+        card_list.populate(actions)
+        assert card_list.card_count() == len(actions)
 
     @staticmethod
     def test_get_card_by_stable_key() -> None:
@@ -933,13 +935,44 @@ class TestActionCardListOrdering:
             assert card._package_label.text() == name
 
     @staticmethod
-    def test_bare_commands_excluded() -> None:
-        """Actions with kind=None are excluded from the card list."""
+    def test_bare_commands_included() -> None:
+        """Actions with kind=None are included in the card list."""
         card_list = ActionCardList()
         pkg = _make_action(kind=PluginKind.PACKAGE, package='requests')
         cmd = _make_action(kind=None, package='run-something')
-        card_list.populate([pkg, cmd])
-        assert card_list.card_count() == 1
+        actions = [pkg, cmd]
+        card_list.populate(actions)
+        assert card_list.card_count() == len(actions)
+
+    @staticmethod
+    def test_bare_commands_sort_last() -> None:
+        """Bare-command actions sort after all PluginKind phases."""
+        card_list = ActionCardList()
+        cmd = _make_action(kind=None, package='post-cmd')
+        a_pkg = _make_action(kind=PluginKind.PACKAGE, package='requests')
+        a_scm = _make_action(kind=PluginKind.SCM, package='my-repo')
+        actions = [cmd, a_pkg, a_scm]
+        card_list.populate(actions)
+
+        assert card_list.card_count() == len(actions)
+        # Package(1) → SCM(4) → None(last)
+        card_0 = card_list.card_at(0)
+        card_1 = card_list.card_at(1)
+        card_2 = card_list.card_at(2)
+        assert card_0 is not None
+        assert card_0._package_label.text() == 'requests'
+        assert card_1 is not None
+        assert card_1._package_label.text() == 'my-repo'
+        assert card_2 is not None
+        assert card_2._package_label.text() == 'post-cmd'
+
+    @staticmethod
+    def test_bare_command_shows_pending_status() -> None:
+        """Bare-command card shows 'Pending' status with the pending style."""
+        card = ActionCard()
+        card.populate(_make_action(kind=None, package='echo-hello'))
+        assert card.status_text() == 'Pending'
+        assert ACTION_CARD_STATUS_PENDING in card._status_label.styleSheet()
 
     @staticmethod
     def test_scroll_to_card_bottom_exists() -> None:

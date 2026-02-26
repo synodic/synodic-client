@@ -6,7 +6,7 @@ execution log panel live here to avoid circular imports.
 
 from __future__ import annotations
 
-from porringer.schema import SkipReason
+from porringer.schema import SetupAction, SkipReason
 from porringer.schema.plugin import PluginKind
 
 ACTION_KIND_LABELS: dict[PluginKind | None, str] = {
@@ -54,3 +54,17 @@ def skip_reason_label(reason: SkipReason | None) -> str:
     if reason is None:
         return 'Skipped'
     return SKIP_REASON_LABELS.get(reason, reason.name.replace('_', ' ').capitalize())
+
+
+def format_cli_command(action: SetupAction) -> str:
+    """Return a human-readable CLI command string for *action*.
+
+    Prefers ``cli_command``, falls back to ``command``, then synthesises
+    an ``installer install <package>`` string for package actions, and
+    finally returns the action description as a last resort.
+    """
+    if parts := (action.cli_command or action.command):
+        return ' '.join(parts)
+    if action.kind == PluginKind.PACKAGE and action.package:
+        return f'{action.installer or "pip"} install {action.package}'
+    return action.description

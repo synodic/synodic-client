@@ -21,13 +21,13 @@ from porringer.schema.plugin import PluginKind
 from synodic_client.application.screen import (
     ACTION_KIND_LABELS,
     SKIP_REASON_LABELS,
+    format_cli_command,
     skip_reason_label,
 )
 from synodic_client.application.screen.install import (
     InstallConfig,
     InstallWorker,
     PreviewWorker,
-    format_cli_command,
     normalize_manifest_key,
     resolve_local_path,
 )

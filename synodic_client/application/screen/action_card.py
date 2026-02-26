@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from synodic_client.application.screen import ACTION_KIND_LABELS, skip_reason_label
+from synodic_client.application.screen import ACTION_KIND_LABELS, format_cli_command, skip_reason_label
 from synodic_client.application.theme import (
     ACTION_CARD_COMMAND_STYLE,
     ACTION_CARD_DESC_STYLE,
@@ -48,6 +48,7 @@ from synodic_client.application.theme import (
     ACTION_CARD_STATUS_DONE,
     ACTION_CARD_STATUS_FAILED,
     ACTION_CARD_STATUS_NEEDED,
+    ACTION_CARD_STATUS_PENDING,
     ACTION_CARD_STATUS_RUNNING,
     ACTION_CARD_STATUS_SATISFIED,
     ACTION_CARD_STATUS_SKIPPED,
@@ -113,12 +114,14 @@ def action_sort_key(action: SetupAction) -> int:
 
 
 def _format_command(action: SetupAction) -> str:
-    """Return a short CLI command string for display."""
-    if parts := (action.cli_command or action.command):
-        return ' '.join(parts)
-    if action.kind == PluginKind.PACKAGE and action.package:
-        return f'{action.installer or "pip"} install {action.package}'
-    return ''
+    """Return a short CLI command string for display.
+
+    Wraps :func:`~synodic_client.application.screen.format_cli_command`
+    but returns an empty string instead of the description fallback so
+    cards only show an explicit command line.
+    """
+    text = format_cli_command(action)
+    return '' if text == action.description else text
 
 
 # ---------------------------------------------------------------------------
@@ -471,23 +474,8 @@ class ActionCard(QFrame):
 
         self._version_label.setText('')
 
-        # Status — check plugin presence first
-        installer_missing = (
-            action.installer is not None
-            and action.installer in plugin_installed
-            and not plugin_installed[action.installer]
-        )
-
-        if installer_missing:
-            self._status_label.setText('Not installed')
-            self._status_label.setStyleSheet(ACTION_CARD_STATUS_UNAVAILABLE)
-            self._status_label.show()
-        else:
-            # Show spinner instead of status text while checking
-            self._status_label.hide()
-            self._checking = True
-            self._spinner_canvas.show()
-            self._spinner_timer.start()
+        # Status
+        self._populate_status(action, plugin_installed)
 
         # Pre-release checkbox
         if action.package is not None:
@@ -524,6 +512,40 @@ class ActionCard(QFrame):
             self._command_row.show()
         else:
             self._command_row.hide()
+
+    def _populate_status(
+        self,
+        action: SetupAction,
+        plugin_installed: dict[str, bool],
+    ) -> None:
+        """Set the initial status badge during :meth:`populate`.
+
+        Bare-command actions (``kind is None``) show a static *Pending*
+        badge.  Plugin-backed actions either flag a missing installer or
+        start the dry-run spinner.
+        """
+        if action.kind is None:
+            self._status_label.setText('Pending')
+            self._status_label.setStyleSheet(ACTION_CARD_STATUS_PENDING)
+            self._status_label.show()
+            return
+
+        installer_missing = (
+            action.installer is not None
+            and action.installer in plugin_installed
+            and not plugin_installed[action.installer]
+        )
+
+        if installer_missing:
+            self._status_label.setText('Not installed')
+            self._status_label.setStyleSheet(ACTION_CARD_STATUS_UNAVAILABLE)
+            self._status_label.show()
+        else:
+            # Show spinner instead of status text while checking
+            self._status_label.hide()
+            self._checking = True
+            self._spinner_canvas.show()
+            self._spinner_timer.start()
 
     def initial_status(self) -> str:
         """Return the initial status text set during :meth:`populate`."""
@@ -786,10 +808,7 @@ class ActionCardList(QScrollArea):
             prerelease_overrides: Package names with user pre-release overrides.
         """
         self.clear()
-        sorted_actions = sorted(
-            (a for a in actions if a.kind is not None),
-            key=action_sort_key,
-        )
+        sorted_actions = sorted(actions, key=action_sort_key)
         for act in sorted_actions:
             card = ActionCard(self._container)
             card.populate(

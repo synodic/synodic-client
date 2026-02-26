@@ -33,11 +33,8 @@ from porringer.schema import (
     SubActionProgress,
     SyncStrategy,
 )
-from porringer.schema.plugin import PluginKind
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import (
-    QApplication,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -46,7 +43,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -57,19 +53,12 @@ from synodic_client.application.screen.card import CardFrame
 from synodic_client.application.theme import (
     ACTION_CARD_SKELETON_BAR_STYLE,
     CARD_SPACING,
-    COMMAND_HEADER_STYLE,
     COMPACT_MARGINS,
     CONTENT_MARGINS,
-    COPY_BTN_SIZE,
-    COPY_BTN_STYLE,
-    COPY_FEEDBACK_MS,
-    COPY_ICON,
     HEADER_STYLE,
     INSTALL_PREVIEW_MIN_SIZE,
     METADATA_SKELETON_HEIGHT,
     METADATA_SKELETON_STYLE,
-    MONOSPACE_FAMILY,
-    MONOSPACE_SIZE,
     MUTED_STYLE,
     NO_MARGINS,
 )
@@ -93,15 +82,6 @@ def normalize_manifest_key(path_or_url: str) -> str:
         return str(Path(path_or_url).resolve())
     except Exception:
         return path_or_url
-
-
-def format_cli_command(action: SetupAction) -> str:
-    """Return a copyable CLI command string for *action*."""
-    if parts := (action.cli_command or action.command):
-        return ' '.join(parts)
-    if action.kind == PluginKind.PACKAGE and action.package:
-        return f'{action.installer or "pip"} install {action.package}'
-    return action.description
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,109 +175,6 @@ class InstallWorker(QThread):
             manifest_path=manifest_result.manifest_path if manifest_result else None,
             metadata=manifest_result.metadata if manifest_result else None,
         )
-
-
-class PostInstallSection(QWidget):
-    """Always-visible section showing bare-command (post-install) actions.
-
-    Bare-command actions (``kind is None``) cannot be dry-run checked, so
-    they are excluded from the main actions table.  This widget gives
-    them a dedicated, always-visible home with copyable CLI text.
-    """
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        """Initialise the section (hidden until :meth:`populate` is called)."""
-        super().__init__(parent)
-        self.hide()
-
-        self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(*NO_MARGINS)
-        self._layout.setSpacing(4)
-
-        header = QLabel('Post-Install Commands')
-        header.setStyleSheet(COMMAND_HEADER_STYLE)
-        self._layout.addWidget(header)
-
-        self._content = QWidget()
-        self._content_layout = QVBoxLayout(self._content)
-        self._content_layout.setContentsMargins(*NO_MARGINS)
-        self._content_layout.setSpacing(4)
-        self._layout.addWidget(self._content)
-
-    def populate(self, actions: list[SetupAction]) -> None:
-        """Show command actions from *actions*.
-
-        Only actions whose ``kind`` is ``None`` are shown.  If there are
-        none the widget stays hidden.
-
-        Args:
-            actions: The full list of setup actions.
-        """
-        # Clear previous content
-        while self._content_layout.count():
-            item = self._content_layout.takeAt(0)
-            if item is not None:
-                widget = item.widget()
-                if widget is not None:
-                    widget.deleteLater()
-
-        commands = [(i, a) for i, a in enumerate(actions, 1) if a.kind is None]
-        if not commands:
-            self.hide()
-            return
-
-        mono = QFont(MONOSPACE_FAMILY, MONOSPACE_SIZE)
-        for idx, action in commands:
-            desc = action.package_description or action.description
-            label = QLabel(f'{idx}. {desc}')
-            label.setStyleSheet(COMMAND_HEADER_STYLE)
-            self._content_layout.addWidget(label)
-
-            field = QLineEdit(format_cli_command(action))
-            field.setReadOnly(True)
-            field.setFont(mono)
-
-            row_layout = QHBoxLayout()
-            row_layout.setContentsMargins(*NO_MARGINS)
-            row_layout.setSpacing(4)
-            row_layout.addWidget(field)
-            row_layout.addWidget(_make_copy_button(field))
-
-            row_widget = QWidget()
-            row_widget.setLayout(row_layout)
-            self._content_layout.addWidget(row_widget)
-
-        self.show()
-
-
-def _make_copy_button(field: QLineEdit) -> QToolButton:
-    """Create a copy-to-clipboard button bound to *field*."""
-    btn = QToolButton()
-    btn.setText(COPY_ICON)
-    btn.setToolTip('Copy to clipboard')
-    btn.setFixedSize(*COPY_BTN_SIZE)
-    btn.setStyleSheet(COPY_BTN_STYLE)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.clicked.connect(lambda: _copy_command(field, btn))
-    return btn
-
-
-def _copy_command(field: QLineEdit, button: QToolButton) -> None:
-    """Copy the field text to the clipboard and briefly show a check mark."""
-    clipboard = QApplication.clipboard()
-    if clipboard:
-        clipboard.setText(field.text())
-    button.setText('\u2713')
-    button.setToolTip('Copied!')
-
-    def _restore() -> None:
-        try:
-            button.setText(COPY_ICON)
-            button.setToolTip('Copy to clipboard')
-        except RuntimeError:
-            pass
-
-    QTimer.singleShot(COPY_FEEDBACK_MS, _restore)
 
 
 # ---------------------------------------------------------------------------
@@ -401,10 +278,6 @@ class SetupPreviewWidget(QWidget):
         self._card_list = ActionCardList()
         self._card_list.prerelease_toggled.connect(self._on_prerelease_row_toggled)
         outer.addWidget(self._card_list, stretch=1)
-
-        # Post-install section lives below the card list but still scrolls.
-        # It starts hidden and is inserted into the layout after populate().
-        self._post_install_section = PostInstallSection()
 
         # --- Button bar (fixed at bottom) ---
         button_bar = self._init_button_bar()
@@ -526,7 +399,6 @@ class SetupPreviewWidget(QWidget):
         self._prerelease_debounce.stop()
 
         self._card_list.clear()
-        self._post_install_section.hide()
         self._name_label.hide()
         self._description_label.hide()
         self._meta_label.hide()
@@ -645,8 +517,6 @@ class SetupPreviewWidget(QWidget):
 
         # Mark installer-missing actions as 'Not installed' in the status list
         for i, action in enumerate(preview.actions):
-            if action.kind is None:
-                continue
             installer_missing = (
                 action.installer is not None
                 and action.installer in self._plugin_installed
@@ -654,13 +524,6 @@ class SetupPreviewWidget(QWidget):
             )
             if installer_missing:
                 self._action_statuses[i] = 'Not installed'
-
-        # Populate post-install commands and place them after all cards.
-        self._post_install_section.populate(preview.actions)
-        self._card_list._layout.insertWidget(
-            self._card_list._layout.count() - 1,
-            self._post_install_section,
-        )
 
         self._install_btn.setEnabled(True)
 

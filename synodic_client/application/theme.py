@@ -236,6 +236,9 @@ ACTION_CARD_STATUS_FAILED = 'color: #f48771; font-size: 11px; font-weight: bold;
 ACTION_CARD_STATUS_SKIPPED = 'color: grey; font-size: 11px;'
 """Status label: Skipped."""
 
+ACTION_CARD_STATUS_PENDING = 'color: grey; font-size: 11px; font-style: italic;'
+"""Status label: Pending (bare commands with no dry-run check)."""
+
 ACTION_CARD_LOG_STYLE = (
     'QTextEdit {'
     '  background: #1e1e1e;'
