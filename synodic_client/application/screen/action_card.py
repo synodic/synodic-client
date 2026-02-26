@@ -297,6 +297,9 @@ class ActionCard(QFrame):
 
         self._package_label = QLabel()
         self._package_label.setStyleSheet(ACTION_CARD_PACKAGE_STYLE)
+        self._package_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse,
+        )
         top.addWidget(self._package_label)
 
         top.addStretch()
@@ -327,6 +330,9 @@ class ActionCard(QFrame):
         self._desc_label = QLabel()
         self._desc_label.setStyleSheet(ACTION_CARD_DESC_STYLE)
         self._desc_label.setWordWrap(True)
+        self._desc_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse,
+        )
         return self._desc_label
 
     def _build_command_row(self) -> QWidget:
@@ -377,8 +383,12 @@ class ActionCard(QFrame):
         """Toggle the inline log body on click."""
         if self._is_skeleton or not hasattr(self, '_log_output'):
             return
-        # Don't toggle the log when clicking the copy button
+        # Don't toggle the log when clicking interactive child widgets
         if hasattr(self, '_copy_btn') and self._copy_btn.underMouse():
+            return
+        if hasattr(self, '_package_label') and self._package_label.underMouse():
+            return
+        if hasattr(self, '_desc_label') and self._desc_label.underMouse():
             return
         self._toggle_log()
 
@@ -559,6 +569,12 @@ class ActionCard(QFrame):
             label = 'Needed'
             self._status_label.setText(label)
             self._status_label.setStyleSheet(ACTION_CARD_STATUS_NEEDED)
+
+        # Surface diagnostic detail (e.g. SCM URL mismatch) as a tooltip
+        if result.message:
+            self._status_label.setToolTip(result.message)
+        else:
+            self._status_label.setToolTip('')
 
         # Version column
         self._check_available_version = result.available_version
