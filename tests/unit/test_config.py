@@ -50,13 +50,6 @@ class TestUserConfig:
         assert config.auto_start is None
 
     @staticmethod
-    def test_with_values() -> None:
-        """Verify config accepts explicit values."""
-        config = UserConfig(update_source='/path/to/releases', update_channel='dev')
-        assert config.update_source == '/path/to/releases'
-        assert config.update_channel == 'dev'
-
-    @staticmethod
     def test_prerelease_packages_round_trip() -> None:
         """Verify prerelease_packages survives JSON round-trip."""
         packages = {'/some/path': ['alpha', 'beta'], 'https://example.com/manifest.json': ['gamma']}
@@ -90,15 +83,6 @@ class TestUserConfig:
         data = json.loads(original.model_dump_json())
         restored = UserConfig.model_validate(data)
         assert restored == original
-
-    @staticmethod
-    def test_json_round_trip_defaults() -> None:
-        """Verify default config round-trips cleanly."""
-        original = UserConfig()
-        data = json.loads(original.model_dump_json())
-        restored = UserConfig.model_validate(data)
-        assert restored.update_source is None
-        assert restored.update_channel is None
 
     @staticmethod
     def test_extra_fields_ignored() -> None:

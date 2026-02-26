@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from porringer.api import API
-from porringer.schema import DirectoryValidationResult, ManifestDirectory, PluginInfo, SetupResults
+from porringer.schema import DirectoryValidationResult, ManifestDirectory, PluginInfo
 from porringer.schema.plugin import PluginKind
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QResizeEvent, QStandardItem
 from PySide6.QtWidgets import (
     QComboBox,
@@ -32,11 +32,7 @@ from PySide6.QtWidgets import (
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen import plugin_kind_group_label
 from synodic_client.application.screen.card import CHEVRON_DOWN, CHEVRON_RIGHT, ClickableHeader
-from synodic_client.application.screen.install import (
-    PreviewWorker,
-    SetupPreviewWidget,
-    normalize_manifest_key,
-)
+from synodic_client.application.screen.install import SetupPreviewWidget
 from synodic_client.application.screen.spinner import SpinnerWidget
 from synodic_client.application.screen.update_banner import UpdateBanner
 from synodic_client.application.theme import (
@@ -503,7 +499,8 @@ class ProjectsView(QWidget):
 
     Combines a cached-directory selector (editable ``QComboBox`` with
     Browse) and a :class:`SetupPreviewWidget` for dry-run preview and
-    install execution.
+    install execution.  Preview loading is fully delegated to the
+    embedded widget via :meth:`SetupPreviewWidget.load`.
     """
 
     def __init__(self, porringer: API, config: ResolvedConfig, parent: QWidget | None = None) -> None:
@@ -517,7 +514,6 @@ class ProjectsView(QWidget):
         super().__init__(parent)
         self._porringer = porringer
         self._config = config
-        self._runner: QThread | None = None
         self._refresh_in_progress = False
         self._init_ui()
 
@@ -555,7 +551,6 @@ class ProjectsView(QWidget):
         # Row 1 — Shared preview widget (takes majority of space)
         self._preview = SetupPreviewWidget(self._porringer, self, show_close=False, config=self._config)
         self._preview.install_finished.connect(self._on_install_finished)
-        self._preview.prerelease_changed.connect(self._on_prerelease_changed)
         grid.addWidget(self._preview, 1, 0, 1, 3)
         grid.setRowStretch(1, 1)
 
@@ -627,7 +622,13 @@ class ProjectsView(QWidget):
 
             # Trigger preview for the current selection
             if self._combo.currentText():
-                self._load_preview()
+                path_text = self._combo.currentText().strip()
+                selected = Path(path_text)
+                self._preview.load(
+                    path_text,
+                    project_directory=selected if selected.is_dir() else selected.parent,
+                    detect_updates=self._config.detect_updates,
+                )
         except Exception:
             logger.exception('Failed to refresh projects')
         finally:
@@ -649,10 +650,16 @@ class ProjectsView(QWidget):
     # --- Event handlers ---
 
     def _on_selection_changed(self, _index: int) -> None:
-        """Handle combo box selection changes."""
+        """Handle combo box selection changes — delegate to the preview widget."""
         self._update_remove_btn()
-        if self._combo.currentText():
-            self._load_preview()
+        path_text = self._combo.currentText().strip()
+        if path_text:
+            selected = Path(path_text)
+            self._preview.load(
+                str(selected),
+                project_directory=selected if selected.is_dir() else selected.parent,
+                detect_updates=self._config.detect_updates,
+            )
 
     def _on_browse(self) -> None:
         """Open a file picker filtered to recognised manifest filenames."""
@@ -666,7 +673,12 @@ class ProjectsView(QWidget):
         )
         if chosen:
             self._combo.setEditText(chosen)
-            self._load_preview()
+            selected = Path(chosen)
+            self._preview.load(
+                chosen,
+                project_directory=selected if selected.is_dir() else selected.parent,
+                detect_updates=self._config.detect_updates,
+            )
 
     def _on_remove(self) -> None:
         """Remove the currently selected directory from the cache."""
@@ -685,101 +697,31 @@ class ProjectsView(QWidget):
 
         The directory is added to the porringer cache and the combo box
         is updated *without* reloading the preview, so the execution
-        log remains visible.
+        log remains visible.  Combo signals are blocked during the
+        update to prevent ``_on_selection_changed`` from firing a
+        redundant :meth:`SetupPreviewWidget.load` (which would be
+        skipped anyway due to the DONE-phase guard, but blocking
+        is cleaner).
         """
         current_text = self._combo.currentText().strip()
         if not current_text:
             return
 
-        # Only register if the path isn't already in the combo's cached items
         idx = self._combo.findText(current_text)
         item_data = self._combo.itemData(idx, Qt.ItemDataRole.UserRole) if idx >= 0 else None
         if item_data is None:
             try:
                 self._porringer.cache.add_directory(Path(current_text))
                 logger.info('Registered new project directory: %s', current_text)
-                # Add the entry to the combo inline so the Remove button
-                # works without a full refresh that would wipe the log.
+                self._combo.blockSignals(True)
                 new_idx = self._combo.count()
                 self._combo.addItem(current_text)
                 self._combo.setItemData(new_idx, current_text, Qt.ItemDataRole.UserRole)
                 self._combo.setCurrentIndex(new_idx)
+                self._combo.blockSignals(False)
                 self._update_remove_btn()
             except ValueError:
                 logger.debug('Directory already cached or invalid: %s', current_text)
-
-    def _on_prerelease_changed(self) -> None:
-        """Re-load the preview with the updated pre-release setting."""
-        self._load_preview()
-
-    def _stop_preview(self) -> None:
-        """Wait for any running preview worker to finish before starting a new one."""
-        if self._runner is not None and self._runner.isRunning():
-            self._runner.quit()
-            self._runner.wait()
-            self._runner = None
-
-    # --- Preview loading ---
-
-    def _load_preview(self) -> None:
-        """Run a dry-run preview for the currently selected path."""
-        path_text = self._combo.currentText().strip()
-        if not path_text:
-            return
-
-        selected_path = Path(path_text)
-
-        self._stop_preview()
-        self._preview.reset()
-
-        if not selected_path.exists():
-            self._preview.show_not_found(f'Path not found: {selected_path}')
-            return
-
-        if not self._porringer.sync.has_manifest(selected_path):
-            self._preview.show_not_found(f'No manifest found at: {selected_path}')
-            return
-
-        self._preview.start_loading()
-
-        # Set the manifest key so per-item pre-release checkboxes
-        # reflect persisted overrides for this specific manifest.
-        self._preview.set_manifest_key(str(selected_path))
-
-        # Build prerelease_packages from persisted overrides
-        manifest_key = normalize_manifest_key(str(selected_path))
-        overrides = set((self._config.prerelease_packages or {}).get(manifest_key, []))
-
-        # For file paths, use the parent directory so the dry-run
-        # can detect already-cloned repositories on disk.  The final
-        # project directory may still be overridden once porringer
-        # returns ``root_directory`` in the preview result.
-        preview_worker = PreviewWorker(
-            self._porringer,
-            str(selected_path),
-            project_directory=selected_path if selected_path.is_dir() else selected_path.parent,
-            detect_updates=self._config.detect_updates,
-            prerelease_packages=overrides or None,
-        )
-        preview_worker.preview_ready.connect(self._on_preview_ready)
-        preview_worker.action_checked.connect(self._preview.on_action_checked)
-        preview_worker.plugins_queried.connect(self._preview.on_plugins_queried)
-        preview_worker.finished.connect(self._preview.on_preview_finished)
-        preview_worker.error.connect(self._on_preview_error)
-
-        self._runner = preview_worker
-        self._runner.start()
-
-    def _on_preview_ready(self, preview: SetupResults, manifest_path: str, temp_dir_path: str) -> None:
-        """Set the project directory from the manifest result and forward."""
-        if preview.root_directory:
-            self._preview.set_project_directory(preview.root_directory)
-        self._preview.on_preview_ready(preview, manifest_path, temp_dir_path)
-
-    def _on_preview_error(self, message: str) -> None:
-        """Handle preview errors inline instead of showing a modal dialog."""
-        logger.warning('Preview error: %s', message)
-        self._preview.show_not_found(message)
 
     def _update_remove_btn(self) -> None:
         """Enable the Remove button only for cached (non-freeform) entries."""
