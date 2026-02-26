@@ -690,6 +690,8 @@ class SetupPreviewWidget(QWidget):
             self._upgradable_rows.add(row)
         elif result.skipped:
             label = skip_reason_label(result.skip_reason)
+        elif not result.success:
+            label = 'Failed'
         else:
             label = 'Needed'
 
@@ -726,7 +728,8 @@ class SetupPreviewWidget(QWidget):
         needed = sum(1 for s in self._action_statuses if s == 'Needed')
         upgradable = len(self._upgradable_rows)
         unavailable = sum(1 for s in self._action_statuses if s == 'Not installed')
-        satisfied = total - needed - upgradable - unavailable
+        failed = sum(1 for s in self._action_statuses if s == 'Failed')
+        satisfied = total - needed - upgradable - unavailable - failed
 
         parts: list[str] = []
         if needed:
@@ -737,21 +740,24 @@ class SetupPreviewWidget(QWidget):
             parts.append(f'{satisfied} already satisfied')
         if unavailable:
             parts.append(f'{unavailable} unavailable (plugin not installed)')
+        if failed:
+            parts.append(f'{failed} failed')
 
         actionable = needed + upgradable
-        if actionable == 0 and unavailable == 0:
+        if actionable == 0 and unavailable == 0 and failed == 0:
             self._status_label.setText(f'{total} action(s) \u2014 all already satisfied.')
             self._install_btn.setEnabled(False)
         else:
             self._status_label.setText(f'{total} action(s): {", ".join(parts)}.')
 
         logger.info(
-            'Preview complete: %d total, %d needed, %d upgradable, %d satisfied, %d unavailable',
+            'Preview complete: %d total, %d needed, %d upgradable, %d satisfied, %d unavailable, %d failed',
             total,
             needed,
             upgradable,
             satisfied,
             unavailable,
+            failed,
         )
 
     def on_preview_error(self, message: str) -> None:

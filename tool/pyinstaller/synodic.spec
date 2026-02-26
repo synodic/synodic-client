@@ -13,27 +13,33 @@ hiddenimports = []
 # Add porringer metadata so entry points work
 datas += copy_metadata('porringer')
 
-# Porringer bundled plugins (discovered via entry points at runtime)
+# Porringer bundled plugins (discovered via entry points at runtime).
+# Keep in sync with porringer's pyproject.toml [project.entry-points.*] groups.
 hiddenimports += [
+    # porringer.environment
     'porringer.plugin.apt.plugin',
     'porringer.plugin.brew.plugin',
     'porringer.plugin.bun.plugin',
-    'porringer.plugin.bun_project.plugin',
     'porringer.plugin.deno.plugin',
-    'porringer.plugin.deno_project.plugin',
     'porringer.plugin.npm.plugin',
-    'porringer.plugin.npm_project.plugin',
-    'porringer.plugin.pdm.plugin',
     'porringer.plugin.pim.plugin',
     'porringer.plugin.pip.plugin',
     'porringer.plugin.pipx.plugin',
-    'porringer.plugin.pnpm_project.plugin',
-    'porringer.plugin.poetry.plugin',
+    'porringer.plugin.pnpm.plugin',
     'porringer.plugin.pyenv.plugin',
     'porringer.plugin.uv.plugin',
-    'porringer.plugin.uv_project.plugin',
     'porringer.plugin.winget.plugin',
+    # porringer.project_environment
+    'porringer.plugin.bun_project.plugin',
+    'porringer.plugin.deno_project.plugin',
+    'porringer.plugin.npm_project.plugin',
+    'porringer.plugin.pdm.plugin',
+    'porringer.plugin.pnpm_project.plugin',
+    'porringer.plugin.poetry.plugin',
+    'porringer.plugin.uv_project.plugin',
     'porringer.plugin.yarn_project.plugin',
+    # porringer.scm
+    'porringer.plugin.git.plugin',
 ]
 
 a = Analysis(

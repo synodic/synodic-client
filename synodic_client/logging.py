@@ -4,6 +4,7 @@ Provides a rotating file handler with eager flushing.
 """
 
 import logging
+import sys
 import tempfile
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -71,4 +72,11 @@ def configure_logging() -> None:
 
     porringer_logger = logging.getLogger('porringer')
     porringer_logger.addHandler(handler)
-    porringer_logger.setLevel(logging.INFO)
+
+    # In frozen (PyInstaller) builds, capture porringer DEBUG output so
+    # that plugin discovery details appear in the log file for post-mortem
+    # diagnostics.  In dev mode, keep INFO to reduce noise.
+    if getattr(sys, 'frozen', False):
+        porringer_logger.setLevel(logging.DEBUG)
+    else:
+        porringer_logger.setLevel(logging.INFO)

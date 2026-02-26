@@ -330,6 +330,71 @@ class TestActionCardCheckResult:
 
 
 # ---------------------------------------------------------------------------
+# ActionCard — dry-run check failure (success=False)
+# ---------------------------------------------------------------------------
+
+
+class TestActionCardCheckFailure:
+    """Tests for set_check_result when the dry-run returns a failure."""
+
+    @staticmethod
+    def test_failed_check_shows_failed_status() -> None:
+        """A check result with success=False shows 'Failed'."""
+        card = ActionCard()
+        card.populate(_make_action(kind=PluginKind.SCM, package='periapsis', installer='git'))
+        result = _make_result(
+            success=False,
+            skipped=False,
+            message="No SCM plugin was found for ecosystem 'git'.",
+        )
+        card.set_check_result(result)
+        assert card.status_text() == 'Failed'
+        assert ACTION_CARD_STATUS_FAILED in card._status_label.styleSheet()
+
+    @staticmethod
+    def test_failed_check_shows_error_tooltip() -> None:
+        """A failed check result surfaces the error message as a tooltip."""
+        card = ActionCard()
+        action = _make_action(kind=PluginKind.SCM, package='repo')
+        action.installer = None  # Simulate an unresolved deferred action
+        card.populate(action)
+        msg = "SCM environment 'None' is not available"
+        result = _make_result(success=False, skipped=False, message=msg)
+        card.set_check_result(result)
+        assert card._status_label.toolTip() == msg
+
+    @staticmethod
+    def test_failed_check_stops_spinner() -> None:
+        """A failed check result stops the inline spinner."""
+        card = ActionCard()
+        card.populate(_make_action())
+        assert card._checking
+        result = _make_result(success=False, skipped=False, message='error')
+        card.set_check_result(result)
+        assert not card._checking
+        assert not card._spinner_timer.isActive()
+
+    @staticmethod
+    def test_failed_check_not_update_available() -> None:
+        """A failed check is not considered 'Update available'."""
+        card = ActionCard()
+        card.populate(_make_action())
+        result = _make_result(success=False, skipped=False, message='backend missing')
+        card.set_check_result(result)
+        assert not card.is_update_available()
+
+    @staticmethod
+    def test_success_true_still_needed() -> None:
+        """A non-skipped, successful result still shows 'Needed'."""
+        card = ActionCard()
+        card.populate(_make_action())
+        result = _make_result(success=True, skipped=False)
+        card.set_check_result(result)
+        assert card.status_text() == 'Needed'
+        assert ACTION_CARD_STATUS_NEEDED in card._status_label.styleSheet()
+
+
+# ---------------------------------------------------------------------------
 # ActionCard — execution (inline log)
 # ---------------------------------------------------------------------------
 

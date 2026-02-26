@@ -1,6 +1,7 @@
 """Tests for the centralised logging module."""
 
 import logging
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -134,3 +135,73 @@ class TestOpenLog:
         ):
             SettingsWindow._open_log()
             mock_ds.openUrl.assert_called_once()
+
+
+class TestPorringerLogLevel:
+    """Tests for porringer logger level in frozen vs normal builds."""
+
+    @staticmethod
+    def test_frozen_build_sets_porringer_debug(tmp_path: Path) -> None:
+        """In frozen builds, porringer logger should be set to DEBUG."""
+        porringer_logger = logging.getLogger('porringer')
+        app_logger = logging.getLogger('synodic_client')
+
+        # Remove any existing EagerRotatingFileHandler so configure_logging re-runs
+        for h in list(app_logger.handlers):
+            if isinstance(h, EagerRotatingFileHandler):
+                app_logger.removeHandler(h)
+                h.close()
+
+        with (
+            patch('synodic_client.logging.log_path', return_value=tmp_path / 'synodic.log'),
+            patch.object(sys, 'frozen', True, create=True),
+        ):
+            configure_logging()
+
+        assert porringer_logger.level == logging.DEBUG
+
+        # Clean up
+        for h in list(app_logger.handlers):
+            if isinstance(h, EagerRotatingFileHandler):
+                app_logger.removeHandler(h)
+                h.close()
+        for h in list(porringer_logger.handlers):
+            if isinstance(h, EagerRotatingFileHandler):
+                porringer_logger.removeHandler(h)
+                h.close()
+
+    @staticmethod
+    def test_normal_build_sets_porringer_info(tmp_path: Path) -> None:
+        """In normal (non-frozen) builds, porringer logger should be INFO."""
+        porringer_logger = logging.getLogger('porringer')
+        app_logger = logging.getLogger('synodic_client')
+
+        # Remove any existing EagerRotatingFileHandler so configure_logging re-runs
+        for h in list(app_logger.handlers):
+            if isinstance(h, EagerRotatingFileHandler):
+                app_logger.removeHandler(h)
+                h.close()
+
+        # Ensure frozen is not set
+        had_frozen = hasattr(sys, 'frozen')
+        if had_frozen:
+            old_frozen = sys.frozen  # type: ignore[attr-defined]
+            delattr(sys, 'frozen')
+
+        try:
+            with patch('synodic_client.logging.log_path', return_value=tmp_path / 'synodic.log'):
+                configure_logging()
+            assert porringer_logger.level == logging.INFO
+        finally:
+            if had_frozen:
+                sys.frozen = old_frozen  # type: ignore[attr-defined]
+
+            # Clean up
+            for h in list(app_logger.handlers):
+                if isinstance(h, EagerRotatingFileHandler):
+                    app_logger.removeHandler(h)
+                    h.close()
+            for h in list(porringer_logger.handlers):
+                if isinstance(h, EagerRotatingFileHandler):
+                    porringer_logger.removeHandler(h)
+                    h.close()

@@ -549,6 +549,15 @@ class ActionCard(QFrame):
     def set_check_result(self, result: SetupActionResult) -> None:
         """Update the card with a dry-run check result.
 
+        Handles four cases:
+
+        * **Skipped (update available)** — amber "Update available" badge.
+        * **Skipped (other)** — muted satisfied badge.
+        * **Failed** — red "Failed" badge with diagnostic tooltip.
+          This covers backend failures surfaced during the dry-run
+          (e.g. missing SCM plugin, unresolvable deferred action).
+        * **Needed** — default blue badge.
+
         Args:
             result: The action check result from the preview worker.
         """
@@ -565,6 +574,15 @@ class ActionCard(QFrame):
             label = skip_reason_label(result.skip_reason)
             self._status_label.setText(label)
             self._status_label.setStyleSheet(ACTION_CARD_STATUS_SATISFIED)
+        elif not result.success:
+            label = 'Failed'
+            self._status_label.setText(label)
+            self._status_label.setStyleSheet(ACTION_CARD_STATUS_FAILED)
+            logger.warning(
+                'Dry-run check failed for %s: %s',
+                self._action.description if self._action else '(unknown)',
+                result.message or 'unknown error',
+            )
         else:
             label = 'Needed'
             self._status_label.setText(label)
