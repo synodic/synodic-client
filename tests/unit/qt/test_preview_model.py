@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import sys
 from typing import Any
 from unittest.mock import MagicMock
 
 from porringer.schema import SetupAction
 from porringer.schema.plugin import PluginKind
-from PySide6.QtWidgets import QApplication
 
 from synodic_client.application.screen.action_card import action_key
 from synodic_client.application.screen.install import (
@@ -17,9 +15,6 @@ from synodic_client.application.screen.install import (
     PreviewPhase,
     normalize_manifest_key,
 )
-
-_app = QApplication.instance() or QApplication(sys.argv)
-
 
 # ---------------------------------------------------------------------------
 # Helpers

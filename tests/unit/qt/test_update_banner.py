@@ -2,13 +2,7 @@
 
 from __future__ import annotations
 
-import sys
-
-from PySide6.QtWidgets import QApplication
-
 from synodic_client.application.screen.update_banner import UpdateBanner, UpdateBannerState
-
-_app = QApplication.instance() or QApplication(sys.argv)
 
 _PROGRESS_MAX = 100
 _TEST_PROGRESS = 42

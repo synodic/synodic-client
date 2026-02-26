@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -33,13 +32,7 @@ from synodic_client.application.theme import (
     ACTION_CARD_STATUS_SKIPPED,
     ACTION_CARD_STATUS_UPDATE,
     ACTION_CARD_STYLE,
-    LOG_COLOR_STDERR,
-    LOG_COLOR_STDOUT,
-    LOG_COLOR_SUCCESS,
 )
-
-_app = QApplication.instance() or QApplication(sys.argv)
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -405,14 +398,12 @@ class TestActionCardExecution:
 
     @staticmethod
     def test_set_executing_shows_running() -> None:
-        """set_executing changes status to 'Running…' and expands log."""
+        """set_executing changes status to 'Running…'."""
         card = ActionCard()
         card.populate(_make_action())
         card.set_executing()
         assert card.status_text() == 'Running\u2026'
         assert ACTION_CARD_STATUS_RUNNING in card._status_label.styleSheet()
-        assert not card._log_output.isHidden()
-        assert card._log_expanded
 
     @staticmethod
     def test_set_executing_changes_border_style() -> None:
@@ -423,37 +414,8 @@ class TestActionCardExecution:
         assert ACTION_CARD_EXECUTING_STYLE in card.styleSheet()
 
     @staticmethod
-    def test_append_stdout() -> None:
-        """append_output with stdout stream adds coloured text."""
-        card = ActionCard()
-        card.populate(_make_action())
-        card.append_output('Processing package', 'stdout')
-        html = card._log_output.toHtml()
-        assert LOG_COLOR_STDOUT in html
-        assert 'Processing package' in html
-
-    @staticmethod
-    def test_append_stderr() -> None:
-        """append_output with stderr stream uses amber colour."""
-        card = ActionCard()
-        card.populate(_make_action())
-        card.append_output('warning: something', 'stderr')
-        html = card._log_output.toHtml()
-        assert LOG_COLOR_STDERR in html
-        assert 'warning: something' in html
-
-    @staticmethod
-    def test_append_html_escaping() -> None:
-        """Special HTML characters are escaped in output."""
-        card = ActionCard()
-        card.populate(_make_action())
-        card.append_output('<script>alert("xss")</script>', 'stdout')
-        html = card._log_output.toHtml()
-        assert '&lt;script&gt;' in html
-
-    @staticmethod
     def test_set_result_success() -> None:
-        """Successful result shows 'Done' with success message in log."""
+        """Successful result shows 'Done' status."""
         card = ActionCard()
         card.populate(_make_action())
         card.set_executing()
@@ -462,9 +424,6 @@ class TestActionCardExecution:
         assert card.status_text() == 'Done'
         assert ACTION_CARD_STATUS_DONE in card._status_label.styleSheet()
         assert ACTION_CARD_STYLE in card.styleSheet()
-        html = card._log_output.toHtml()
-        assert LOG_COLOR_SUCCESS in html
-        assert 'Installed ruff-0.8.0' in html
 
     @staticmethod
     def test_set_result_failure() -> None:
@@ -505,23 +464,6 @@ class TestActionCardExecution:
         )
         card.set_result(result)
         assert card._version_label.text() == '2.0.0'
-
-    @staticmethod
-    def test_toggle_log_visibility() -> None:
-        """Clicking the card toggles log visibility."""
-        card = ActionCard()
-        card.populate(_make_action())
-        card.set_executing()
-        assert card._log_expanded
-        assert not card._log_output.isHidden()
-
-        card._toggle_log()
-        assert not card._log_expanded
-        assert card._log_output.isHidden()
-
-        card._toggle_log()
-        assert card._log_expanded
-        assert not card._log_output.isHidden()
 
 
 # ---------------------------------------------------------------------------
@@ -973,12 +915,6 @@ class TestActionCardListOrdering:
         card.populate(_make_action(kind=None, package='echo-hello'))
         assert card.status_text() == 'Pending'
         assert ACTION_CARD_STATUS_PENDING in card._status_label.styleSheet()
-
-    @staticmethod
-    def test_scroll_to_card_bottom_exists() -> None:
-        """scroll_to_card_bottom method exists and is callable."""
-        card_list = ActionCardList()
-        assert callable(card_list.scroll_to_card_bottom)
 
 
 # ---------------------------------------------------------------------------

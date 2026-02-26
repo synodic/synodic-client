@@ -4,8 +4,8 @@ Provides a reusable :class:`SetupPreviewWidget` for displaying dry-run
 previews and executing porringer setup actions, along with the standalone
 :class:`InstallPreviewWindow` used for URI-based manifest installs.
 
-Execution runs on a background ``QThread`` with real-time inline
-log output in each :class:`~synodic_client.application.screen.action_card.ActionCard`.
+Execution runs on a background ``QThread`` with real-time output routed
+to a unified :class:`~synodic_client.application.screen.log_panel.ExecutionLogPanel`.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from porringer.schema import (
     SubActionProgress,
     SyncStrategy,
 )
-from PySide6.QtCore import QThread, QTimer, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -51,6 +52,7 @@ from PySide6.QtWidgets import (
 from synodic_client.application.screen import skip_reason_label
 from synodic_client.application.screen.action_card import ActionCardList, action_key
 from synodic_client.application.screen.card import CardFrame
+from synodic_client.application.screen.log_panel import ExecutionLogPanel
 from synodic_client.application.theme import (
     ACTION_CARD_SKELETON_BAR_STYLE,
     CARD_SPACING,
@@ -353,12 +355,12 @@ class SetupPreviewWidget(QWidget):
     # --- UI construction ---
 
     def _init_ui(self) -> None:
-        """Build the two-pane layout.
+        """Build the layout.
 
-        Top pane (fixed): metadata card (or skeleton), status/phase label,
-        button bar.  Bottom pane (scrollable): :class:`ActionCardList`
-        holding one :class:`ActionCard` per action, with inline execution
-        logs and per-card spinners.  No global overlay spinner.
+        Top section (fixed): metadata card (or skeleton), status/phase label.
+        Middle section: single scroll area containing the
+        :class:`ActionCardList` and the :class:`ExecutionLogPanel`.
+        Bottom section (fixed): button bar.
         """
         outer = QVBoxLayout(self)
         outer.setContentsMargins(*NO_MARGINS)
@@ -375,10 +377,31 @@ class SetupPreviewWidget(QWidget):
         self._status_label = QLabel()
         outer.addWidget(self._status_label)
 
-        # --- Scrollable card list (fills remaining space) ---
+        # --- Single scroll area for cards + execution log ---
+        self._scroll_area = QScrollArea()
+        self._scroll_area.setWidgetResizable(True)
+        self._scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+        )
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(CARD_SPACING)
+
         self._card_list = ActionCardList()
         self._card_list.prerelease_toggled.connect(self._on_prerelease_row_toggled)
-        outer.addWidget(self._card_list, stretch=1)
+        scroll_layout.addWidget(self._card_list)
+
+        self._log_panel = ExecutionLogPanel()
+        self._log_panel.hide()
+        scroll_layout.addWidget(self._log_panel)
+
+        scroll_layout.addStretch()
+
+        self._scroll_area.setWidget(scroll_content)
+        outer.addWidget(self._scroll_area, stretch=1)
 
         # --- Button bar (fixed at bottom) ---
         button_bar = self._init_button_bar()
@@ -567,6 +590,8 @@ class SetupPreviewWidget(QWidget):
         self._status_label.setText('')
         self._status_label.setStyleSheet('')
         self._install_btn.setEnabled(False)
+        self._log_panel.clear()
+        self._log_panel.hide()
 
     def show_not_found(self, message: str) -> None:
         """Display a muted 'not found' message in the status label.
@@ -598,6 +623,8 @@ class SetupPreviewWidget(QWidget):
             self._status_label.setText('Downloading manifest\u2026')
             self._status_label.setStyleSheet(MUTED_STYLE)
             self._install_btn.setEnabled(False)
+            self._log_panel.clear()
+            self._log_panel.hide()
         elif phase == PreviewPhase.ERROR:
             self._metadata_skeleton.hide()
             self._install_btn.setEnabled(False)
@@ -893,6 +920,10 @@ class SetupPreviewWidget(QWidget):
 
         self._status_label.setText('Installing\u2026')
 
+        # Show the unified execution log panel
+        self._log_panel.clear()
+        self._log_panel.show()
+
         # Choose LATEST strategy when there are upgradable actions so
         # porringer actually upgrades the already-installed packages.
         strategy = SyncStrategy.LATEST if m.upgradable_keys else SyncStrategy.MINIMAL
@@ -918,14 +949,16 @@ class SetupPreviewWidget(QWidget):
         self._runner.start()
 
     def _on_action_started(self, action: SetupAction) -> None:
-        """Handle an action starting execution — expand its card inline."""
+        """Handle an action starting execution — update card badge and add a log section."""
         card = self._card_list.get_card(action)
         if card is not None:
             card.set_executing()
-            self._card_list.scroll_to_card(card)
+
+        section = self._log_panel.add_section(action)
+        self._scroll_area.ensureWidgetVisible(section)
 
     def _on_sub_progress(self, action: SetupAction, progress: SubActionProgress) -> None:
-        """Handle a sub-action progress event — route output to the card and model."""
+        """Handle a sub-action progress event — route output to the log panel and model."""
         # Store in model so logs survive widget rebuilds
         state = self._model.action_state_for(action)
         if state is not None:
@@ -934,16 +967,12 @@ class SetupPreviewWidget(QWidget):
             elif progress.message is not None:
                 state.log_lines.append((progress.message, None))
 
-        card = self._card_list.get_card(action)
-        if card is None:
-            return
+        self._log_panel.on_sub_progress(action, progress)
 
-        if progress.output is not None:
-            card.append_output(progress.output, progress.stream)
-        elif progress.message is not None:
-            card.append_output(progress.message)
-
-        self._card_list.scroll_to_card_bottom(card)
+        # Auto-scroll the single scroll area to the bottom
+        scrollbar = self._scroll_area.verticalScrollBar()
+        if scrollbar is not None:
+            scrollbar.setValue(scrollbar.maximum())
 
     def _on_action_progress(self, action: SetupAction, result: SetupActionResult) -> None:
         """Handle a single action completion from the worker."""
@@ -953,6 +982,8 @@ class SetupPreviewWidget(QWidget):
         card = self._card_list.get_card(action)
         if card is not None:
             card.set_result(result)
+
+        self._log_panel.on_action_completed(action, result)
 
         total = len(m.action_states)
         self._status_label.setText(f'Installing\u2026 ({m.completed_count}/{total})')

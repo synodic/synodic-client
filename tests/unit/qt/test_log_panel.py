@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -17,9 +16,6 @@ from porringer.schema import (
     SubActionProgress,
 )
 from porringer.schema.plugin import PluginKind
-
-# PySide6 widgets require a QApplication; create one once for the module.
-from PySide6.QtWidgets import QApplication
 
 from synodic_client.application.screen.install import InstallWorker
 from synodic_client.application.screen.log_panel import (
@@ -42,8 +38,6 @@ from synodic_client.application.theme import (
 
 _EXPECTED_SECTION_COUNT = 2
 
-_app = QApplication.instance() or QApplication(sys.argv)
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -61,10 +55,13 @@ def _make_action(
     action.kind = kind
     action.description = description
     action.installer = installer
-    action.package = package
+    pkg_mock = MagicMock()
+    pkg_mock.name = package
+    action.package = pkg_mock
     action.package_description = package_description or description
     action.command = None
     action.cli_command = None
+    action.plugin_target = None
     return action
 
 
@@ -307,8 +304,8 @@ class TestExecutionLogPanel:
     def test_add_section_increments_index() -> None:
         """Section indices increment with each add_section call."""
         panel = ExecutionLogPanel()
-        a1 = _make_action(description='First')
-        a2 = _make_action(description='Second')
+        a1 = _make_action(description='First', package='first')
+        a2 = _make_action(description='Second', package='second')
 
         panel.add_section(a1)
         panel.add_section(a2)
@@ -409,8 +406,8 @@ class TestExecutionLogPanel:
     def test_clear_removes_all_sections() -> None:
         """clear() removes all sections and resets the counter."""
         panel = ExecutionLogPanel()
-        a1 = _make_action(description='First')
-        a2 = _make_action(description='Second')
+        a1 = _make_action(description='First', package='first')
+        a2 = _make_action(description='Second', package='second')
         panel.add_section(a1)
         panel.add_section(a2)
 
@@ -425,8 +422,8 @@ class TestExecutionLogPanel:
     def test_multiple_actions_tracked_independently() -> None:
         """Different actions get independent sections with separate output."""
         panel = ExecutionLogPanel()
-        a1 = _make_action(description='First')
-        a2 = _make_action(description='Second')
+        a1 = _make_action(description='First', package='first')
+        a2 = _make_action(description='Second', package='second')
         panel.add_section(a1)
         panel.add_section(a2)
 

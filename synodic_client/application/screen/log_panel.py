@@ -1,9 +1,12 @@
 """Collapsible execution log panel for install operations.
 
-Provides :class:`ExecutionLogPanel`, a scrollable container of
+Provides :class:`ExecutionLogPanel`, a container of
 :class:`ActionLogSection` widgets — one per setup action.  Each section
 has a collapsible header (default: open) with a status badge and a
 monospace output area that receives colour-coded stdout/stderr lines.
+
+Scrolling is handled by the parent :class:`QScrollArea` in
+:class:`~synodic_client.application.screen.install.SetupPreviewWidget`.
 """
 
 from __future__ import annotations
@@ -12,10 +15,10 @@ import html
 import logging
 
 from porringer.schema import SetupAction, SetupActionResult, SubActionProgress
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
     QLabel,
-    QScrollArea,
     QSizePolicy,
     QTextEdit,
     QVBoxLayout,
@@ -23,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from synodic_client.application.screen import ACTION_KIND_LABELS, skip_reason_label
+from synodic_client.application.screen.action_card import action_key
 from synodic_client.application.screen.card import CHEVRON_DOWN, CHEVRON_RIGHT, ClickableHeader
 from synodic_client.application.theme import (
     LOG_CHEVRON_STYLE,
@@ -98,8 +102,10 @@ class ActionLogSection(QWidget):
         self._output.setFont(QFont(MONOSPACE_FAMILY, MONOSPACE_SIZE))
         self._output.setStyleSheet(LOG_OUTPUT_STYLE)
         self._output.setMinimumHeight(60)
-        self._output.setMaximumHeight(300)
-        self._output.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._output.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._output.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._output.setFixedHeight(60)
+        self._output.document().contentsChanged.connect(self._update_output_height)
         layout.addWidget(self._output)
 
     # --- Public API ---
@@ -155,29 +161,32 @@ class ActionLogSection(QWidget):
         self._output.setVisible(self._expanded)
         self._chevron.setText(CHEVRON_DOWN if self._expanded else CHEVRON_RIGHT)
 
+    def _update_output_height(self) -> None:
+        """Resize the output QTextEdit to fit its content."""
+        doc_height = int(self._output.document().size().height())
+        frame = self._output.frameWidth() * 2
+        self._output.setFixedHeight(max(60, doc_height + frame))
 
-class ExecutionLogPanel(QScrollArea):
-    """Scrollable container of :class:`ActionLogSection` widgets.
+
+class ExecutionLogPanel(QWidget):
+    """Container of :class:`ActionLogSection` widgets.
 
     Used as the execution view during install operations.  Sections are
-    added dynamically as ``ACTION_STARTED`` events arrive.
+    added dynamically as ``ACTION_STARTED`` events arrive.  Scrolling
+    is handled by the parent scroll area.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Initialise the log panel."""
         super().__init__(parent)
-        self.setWidgetResizable(True)
 
-        self._container = QWidget()
-        self._layout = QVBoxLayout(self._container)
+        self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(4, 4, 4, 4)
         self._layout.setSpacing(6)
         self._layout.addStretch()
 
-        self.setWidget(self._container)
-
-        # Map action id → section widget for quick lookup
-        self._sections: dict[int, ActionLogSection] = {}
+        # Map action content-key → section widget for quick lookup
+        self._sections: dict[tuple[object, ...], ActionLogSection] = {}
         self._section_count = 0
 
     # --- Public API ---
@@ -192,13 +201,10 @@ class ExecutionLogPanel(QScrollArea):
             The created section widget.
         """
         self._section_count += 1
-        section = ActionLogSection(action, self._section_count, self._container)
+        section = ActionLogSection(action, self._section_count, self)
         # Insert before the stretch
         self._layout.insertWidget(self._layout.count() - 1, section)
-        self._sections[id(action)] = section
-
-        # Scroll to show the new section
-        self.ensureWidgetVisible(section)
+        self._sections[action_key(action)] = section
 
         return section
 
@@ -211,7 +217,7 @@ class ExecutionLogPanel(QScrollArea):
         Returns:
             The section widget, or ``None`` if not found.
         """
-        return self._sections.get(id(action))
+        return self._sections.get(action_key(action))
 
     def on_sub_progress(self, action: SetupAction, progress: SubActionProgress) -> None:
         """Handle a sub-action progress event.

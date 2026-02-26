@@ -1,9 +1,9 @@
 """Action card widgets for the install preview screen.
 
-Replaces the previous ``QTableWidget`` + ``ExecutionLogPanel`` layout
-with compact, self-contained cards — one per setup action.  Each card
-shows essential information (package name, type, version, status) and
-expands inline to display execution output during install.
+Each card shows essential information (package name, type, version,
+status badge).  During install, execution output is routed to the
+unified :class:`~synodic_client.application.screen.log_panel.ExecutionLogPanel`
+rather than displayed inline.
 
 :class:`ActionCard` is the per-action widget.
 :class:`ActionCardList` is the scrollable container that holds them.
@@ -11,23 +11,19 @@ expands inline to display execution output during install.
 
 from __future__ import annotations
 
-import html as html_mod
 import logging
 
 from porringer.backend.command.core.action_builder import PHASE_ORDER
 from porringer.schema import SetupAction, SetupActionResult, SkipReason
 from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QTextCursor
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
-    QScrollArea,
-    QSizePolicy,
-    QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -38,7 +34,6 @@ from synodic_client.application.theme import (
     ACTION_CARD_COMMAND_STYLE,
     ACTION_CARD_DESC_STYLE,
     ACTION_CARD_EXECUTING_STYLE,
-    ACTION_CARD_LOG_STYLE,
     ACTION_CARD_PACKAGE_STYLE,
     ACTION_CARD_SKELETON_BAR_STYLE,
     ACTION_CARD_SKELETON_STYLE,
@@ -61,13 +56,6 @@ from synodic_client.application.theme import (
     COPY_BTN_STYLE,
     COPY_FEEDBACK_MS,
     COPY_ICON,
-    LOG_COLOR_ERROR,
-    LOG_COLOR_PHASE,
-    LOG_COLOR_STDERR,
-    LOG_COLOR_STDOUT,
-    LOG_COLOR_SUCCESS,
-    MONOSPACE_FAMILY,
-    MONOSPACE_SIZE,
 )
 
 logger = logging.getLogger(__name__)
@@ -214,7 +202,6 @@ class ActionCard(QFrame):
         self.setObjectName('actionCard')
         self._action: SetupAction | None = None
         self._is_skeleton = skeleton
-        self._log_expanded = False
         self._checking = False
         self._check_available_version: str | None = None
 
@@ -278,7 +265,6 @@ class ActionCard(QFrame):
     def _init_real_ui(self) -> None:
         """Build the action card layout."""
         self.setStyleSheet(ACTION_CARD_STYLE)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 6, 6, 6)
@@ -287,7 +273,6 @@ class ActionCard(QFrame):
         outer.addLayout(self._build_top_row())
         outer.addWidget(self._build_description_row())
         outer.addWidget(self._build_command_row())
-        outer.addWidget(self._build_log_output())
 
     def _build_top_row(self) -> QHBoxLayout:
         """Build the top row: type badge | package name ... version | status/spinner | prerelease."""
@@ -366,39 +351,9 @@ class ActionCard(QFrame):
         self._command_row.hide()
         return self._command_row
 
-    def _build_log_output(self) -> QTextEdit:
-        """Build the inline log body (hidden by default)."""
-        self._log_output = QTextEdit()
-        self._log_output.setReadOnly(True)
-        self._log_output.setFont(QFont(MONOSPACE_FAMILY, MONOSPACE_SIZE))
-        self._log_output.setStyleSheet(ACTION_CARD_LOG_STYLE)
-        self._log_output.setMinimumHeight(40)
-        self._log_output.setMaximumHeight(250)
-        self._log_output.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self._log_output.hide()
-        return self._log_output
-
     # ------------------------------------------------------------------
-    # Mouse events (toggle log)
+    # Mouse events (copy button)
     # ------------------------------------------------------------------
-
-    def mousePressEvent(self, event: object) -> None:
-        """Toggle the inline log body on click."""
-        if self._is_skeleton or not hasattr(self, '_log_output'):
-            return
-        # Don't toggle the log when clicking interactive child widgets
-        if hasattr(self, '_copy_btn') and self._copy_btn.underMouse():
-            return
-        if hasattr(self, '_package_label') and self._package_label.underMouse():
-            return
-        if hasattr(self, '_desc_label') and self._desc_label.underMouse():
-            return
-        self._toggle_log()
-
-    def _toggle_log(self) -> None:
-        """Expand or collapse the inline log body."""
-        self._log_expanded = not self._log_expanded
-        self._log_output.setVisible(self._log_expanded)
 
     def _copy_command(self) -> None:
         """Copy the command label text to the clipboard with brief feedback."""
@@ -644,7 +599,8 @@ class ActionCard(QFrame):
     def set_executing(self) -> None:
         """Transition the card into the *executing* state.
 
-        Shows the inline log body and updates the status badge.
+        Updates the status badge.  Execution output is routed to the
+        unified :class:`~synodic_client.application.screen.log_panel.ExecutionLogPanel`.
         """
         if self._is_skeleton:
             return
@@ -652,37 +608,13 @@ class ActionCard(QFrame):
         self.setStyleSheet(ACTION_CARD_EXECUTING_STYLE)
         self._status_label.setText('Running\u2026')
         self._status_label.setStyleSheet(ACTION_CARD_STATUS_RUNNING)
-        self._log_expanded = True
-        self._log_output.setVisible(True)
-
-    def append_output(self, text: str, stream: str | None = None) -> None:
-        """Append a line of output to the inline log.
-
-        Args:
-            text: The output line.
-            stream: ``'stdout'``, ``'stderr'``, or ``None`` for phase messages.
-        """
-        if self._is_skeleton or not hasattr(self, '_log_output'):
-            return
-
-        colour = LOG_COLOR_STDOUT
-        if stream == 'stderr':
-            colour = LOG_COLOR_STDERR
-        elif stream is None:
-            colour = LOG_COLOR_PHASE
-
-        escaped = html_mod.escape(text)
-        self._log_output.append(f'<span style="color: {colour};">{escaped}</span>')
-
-        cursor = self._log_output.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        self._log_output.setTextCursor(cursor)
 
     def set_result(self, result: SetupActionResult) -> None:
         """Update the card with the final execution result.
 
-        The card returns to the default border style.  The log body stays
-        visible but can be collapsed by clicking the card.
+        The card returns to the default border style.  Detailed output
+        is displayed in the unified
+        :class:`~synodic_client.application.screen.log_panel.ExecutionLogPanel`.
 
         Args:
             result: The action execution result.
@@ -696,14 +628,9 @@ class ActionCard(QFrame):
             label = skip_reason_label(result.skip_reason)
             self._status_label.setText(label)
             self._status_label.setStyleSheet(ACTION_CARD_STATUS_SKIPPED)
-            self.append_output(f'\u23ed Skipped: {label}', None)
         elif result.success:
             self._status_label.setText('Done')
             self._status_label.setStyleSheet(ACTION_CARD_STATUS_DONE)
-            msg = result.message or 'Completed successfully'
-            self._log_output.append(
-                f'<span style="color: {LOG_COLOR_SUCCESS};">\u2713 {html_mod.escape(msg)}</span>',
-            )
             # Update version if an upgrade completed
             new_version = result.available_version or self._check_available_version
             if new_version:
@@ -712,10 +639,6 @@ class ActionCard(QFrame):
         else:
             self._status_label.setText('Failed')
             self._status_label.setStyleSheet(ACTION_CARD_STATUS_FAILED)
-            msg = result.message or 'Unknown error'
-            self._log_output.append(
-                f'<span style="color: {LOG_COLOR_ERROR};">\u2717 {html_mod.escape(msg)}</span>',
-            )
 
     # ------------------------------------------------------------------
     # Public API — status text accessors (for counting)
@@ -735,15 +658,12 @@ class ActionCard(QFrame):
 
 
 # ---------------------------------------------------------------------------
-# ActionCardList — scrollable container
+# ActionCardList — card container
 # ---------------------------------------------------------------------------
 
 
-class ActionCardList(QScrollArea):
-    """Scrollable container of :class:`ActionCard` widgets.
-
-    Replaces both the ``QTableWidget`` and the ``ExecutionLogPanel`` from
-    the previous install screen layout.  One scrollbar, no nesting.
+class ActionCardList(QWidget):
+    """Container of :class:`ActionCard` widgets.
 
     Cards are keyed by :func:`action_key` (content-based) so that
     look-ups work across different ``execute_stream`` runs where the
@@ -756,17 +676,11 @@ class ActionCardList(QScrollArea):
     def __init__(self, parent: QWidget | None = None) -> None:
         """Initialise the card list."""
         super().__init__(parent)
-        self.setWidgetResizable(True)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setFrameShape(QFrame.Shape.NoFrame)
 
-        self._container = QWidget()
-        self._layout = QVBoxLayout(self._container)
+        self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(ACTION_CARD_SPACING)
         self._layout.addStretch()
-
-        self.setWidget(self._container)
 
         self._cards: list[ActionCard] = []
         self._action_map: dict[tuple[object, ...], ActionCard] = {}
@@ -785,7 +699,7 @@ class ActionCardList(QScrollArea):
         """
         self.clear()
         for _ in range(count):
-            card = ActionCard(self._container, skeleton=True)
+            card = ActionCard(self, skeleton=True)
             self._layout.insertWidget(self._layout.count() - 1, card)
             self._cards.append(card)
 
@@ -810,7 +724,7 @@ class ActionCardList(QScrollArea):
         self.clear()
         sorted_actions = sorted(actions, key=action_sort_key)
         for act in sorted_actions:
-            card = ActionCard(self._container)
+            card = ActionCard(self)
             card.populate(
                 act,
                 plugin_installed=plugin_installed,
@@ -866,21 +780,3 @@ class ActionCardList(QScrollArea):
             card.deleteLater()
         self._cards.clear()
         self._action_map.clear()
-
-    # ------------------------------------------------------------------
-    # Scroll helpers
-    # ------------------------------------------------------------------
-
-    def scroll_to_card(self, card: ActionCard) -> None:
-        """Ensure *card* is visible in the scroll area."""
-        self.ensureWidgetVisible(card)
-
-    def scroll_to_card_bottom(self, card: ActionCard) -> None:
-        """Scroll so the bottom of *card* is visible.
-
-        Used during execution to follow the growing inline log output.
-        Unlike :meth:`scroll_to_card` (which may show the top of a tall
-        card), this always brings the bottom edge into view.
-        """
-        bottom_y = card.geometry().bottom()
-        self.ensureVisible(0, bottom_y, 0, 50)
