@@ -14,6 +14,7 @@ import asyncio
 import logging
 import shutil
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -103,6 +104,15 @@ def format_cli_command(action: SetupAction) -> str:
     return action.description
 
 
+@dataclass(frozen=True, slots=True)
+class InstallConfig:
+    """Optional execution parameters for :class:`InstallWorker`."""
+
+    project_directory: Path | None = None
+    strategy: SyncStrategy = SyncStrategy.MINIMAL
+    prerelease_packages: set[str] | None = field(default=None)
+
+
 class InstallWorker(QThread):
     """Background worker that executes setup actions via porringer.
 
@@ -116,15 +126,12 @@ class InstallWorker(QThread):
     sub_progress = Signal(object, object)  # (SetupAction, SubActionProgress)
     error = Signal(str)
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         porringer: API,
         manifest_path: Path,
         cancellation_token: CancellationToken,
-        *,
-        project_directory: Path | None = None,
-        strategy: SyncStrategy = SyncStrategy.MINIMAL,
-        prerelease_packages: set[str] | None = None,
+        config: InstallConfig | None = None,
     ) -> None:
         """Initialize the worker.
 
@@ -132,19 +139,14 @@ class InstallWorker(QThread):
             porringer: The porringer API instance.
             manifest_path: Path to the manifest file to execute.
             cancellation_token: Token for cooperative cancellation.
-            project_directory: Working directory for project sync actions.
-            strategy: Sync strategy — ``LATEST`` when upgrades are pending.
-            prerelease_packages: Package names whose ``include_prereleases``
-                flag should be forced to ``True``, overriding the manifest
-                default.
+            config: Optional execution parameters (directory, strategy,
+                prerelease overrides).
         """
         super().__init__()
         self._porringer = porringer
         self._manifest_path = manifest_path
         self._cancellation_token = cancellation_token
-        self._project_directory = project_directory
-        self._strategy = strategy
-        self._prerelease_packages = prerelease_packages
+        self._config = config or InstallConfig()
 
     def run(self) -> None:
         """Execute the setup actions on this thread's event loop."""
@@ -161,9 +163,9 @@ class InstallWorker(QThread):
         """Stream execution events and collect results."""
         params = SetupParameters(
             paths=[self._manifest_path],
-            project_directory=self._project_directory,
-            strategy=self._strategy,
-            prerelease_packages=self._prerelease_packages,
+            project_directory=self._config.project_directory,
+            strategy=self._config.strategy,
+            prerelease_packages=self._config.prerelease_packages,
         )
         actions: list[SetupAction] = []
         collected: list[SetupActionResult] = []
@@ -818,9 +820,11 @@ class SetupPreviewWidget(QWidget):
             self._porringer,
             self._manifest_path,
             self._cancellation_token,
-            project_directory=self._project_directory,
-            strategy=strategy,
-            prerelease_packages=self._prerelease_overrides or None,
+            InstallConfig(
+                project_directory=self._project_directory,
+                strategy=strategy,
+                prerelease_packages=self._prerelease_overrides or None,
+            ),
         )
         worker.action_started.connect(self._on_action_started)
         worker.sub_progress.connect(self._on_sub_progress)

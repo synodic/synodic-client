@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from typing import Any
 from unittest.mock import MagicMock
 
 from porringer.schema import (
@@ -50,7 +51,7 @@ def _make_action(
     description: str = 'Install requests',
     installer: str = 'pip',
     package: str = 'requests',
-    **overrides: object,
+    **overrides: Any,
 ) -> SetupAction:
     """Create a mock SetupAction with sensible defaults.
 
@@ -80,7 +81,7 @@ def _make_result(
     skipped: bool = False,
     skip_reason: SkipReason | None = None,
     message: str | None = None,
-    **overrides: object,
+    **overrides: Any,
 ) -> SetupActionResult:
     """Create a SetupActionResult.
 
@@ -88,13 +89,13 @@ def _make_result(
     ``available_version``) are forwarded to the constructor.
     """
     return SetupActionResult(
-        action=overrides.get('action') or _make_action(),  # type: ignore[arg-type]
+        action=overrides.get('action') or _make_action(),
         success=success,
         skipped=skipped,
         skip_reason=skip_reason,
         message=message,
-        installed_version=overrides.get('installed_version'),  # type: ignore[arg-type]
-        available_version=overrides.get('available_version'),  # type: ignore[arg-type]
+        installed_version=overrides.get('installed_version'),
+        available_version=overrides.get('available_version'),
     )
 
 

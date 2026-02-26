@@ -25,7 +25,7 @@ class _Canvas(QWidget):
         self._angle = 0
         self.setFixedSize(_SIZE, _SIZE)
 
-    def paintEvent(self, _event: object) -> None:  # noqa: N802
+    def paintEvent(self, _event: object) -> None:
         """Draw a muted track circle and the animated highlight arc."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)

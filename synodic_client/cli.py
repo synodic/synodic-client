@@ -37,6 +37,6 @@ def main(
     ] = False,
 ) -> None:
     """Launch the Synodic Client GUI application."""
-    from synodic_client.application.qt import application  # noqa: PLC0415
+    from synodic_client.application.qt import application
 
     application(uri=uri, dev_mode=dev)

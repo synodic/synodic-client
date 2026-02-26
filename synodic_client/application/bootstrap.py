@@ -44,7 +44,7 @@ if not _dev_mode:
         remove_startup()
 
 # Heavy imports happen here — PySide6, porringer, etc.
-from synodic_client.application.qt import application  # noqa: E402
+from synodic_client.application.qt import application
 
 _uri = next((a for a in sys.argv[1:] if a.lower().startswith(f'{_PROTOCOL_SCHEME}://')), None)
 application(uri=_uri, dev_mode=_dev_mode)

@@ -24,6 +24,7 @@ from synodic_client.application.screen import (
     skip_reason_label,
 )
 from synodic_client.application.screen.install import (
+    InstallConfig,
     InstallWorker,
     PreviewWorker,
     format_cli_command,
@@ -32,6 +33,7 @@ from synodic_client.application.screen.install import (
 )
 
 _DOWNLOAD_PATCH = 'synodic_client.application.screen.install.API.download'
+_EXPECTED_CHECKED_COUNT = 2
 
 
 class TestInstallPreviewWindow:
@@ -268,7 +270,7 @@ class TestInstallWorker:
             result=result,
         )
 
-        async def mock_stream(*args, **kwargs):  # noqa: ANN002, ANN003
+        async def mock_stream(*args, **kwargs):
             yield manifest_event
             yield completed_event
 
@@ -290,7 +292,7 @@ class TestInstallWorker:
         porringer = MagicMock()
         manifest_path = Path('/tmp/test/porringer.json')
 
-        async def mock_stream(*args, **kwargs):  # noqa: ANN002, ANN003
+        async def mock_stream(*args, **kwargs):
             if False:
                 yield  # pragma: no cover — establishes async generator protocol
             msg = 'boom'
@@ -330,7 +332,7 @@ class TestInstallWorker:
             porringer,
             manifest_path,
             token,
-            prerelease_packages={'cppython'},
+            InstallConfig(prerelease_packages={'cppython'}),
         )
         worker.run()
 
@@ -602,7 +604,7 @@ class TestPreviewWorkerSignals:
         worker.action_checked.connect(lambda row, r: checked.append((row, r)))
         worker.run()
 
-        assert len(checked) == 2  # noqa: PLR2004
+        assert len(checked) == _EXPECTED_CHECKED_COUNT
         # action_b is at index 1 in preview, action_a at index 0
         assert checked[0] == (1, result_b)
         assert checked[1] == (0, result_a)

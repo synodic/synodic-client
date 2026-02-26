@@ -231,7 +231,7 @@ def resolve_version(client: object) -> Version:
         try:
             if updater.is_installed:
                 return updater.current_version
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.debug('Failed to query Velopack version, falling back', exc_info=True)
 
     return getattr(client, 'version', Version('0.0.0'))

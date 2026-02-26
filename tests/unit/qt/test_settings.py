@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from PySide6.QtWidgets import QApplication
@@ -20,9 +21,9 @@ _app = QApplication.instance() or QApplication(sys.argv)
 # ---------------------------------------------------------------------------
 
 
-def _make_config(**overrides: object) -> ResolvedConfig:
+def _make_config(**overrides: Any) -> ResolvedConfig:
     """Create a ``ResolvedConfig`` with sensible defaults and optional overrides."""
-    defaults: dict[str, object] = {
+    defaults: dict[str, Any] = {
         'update_source': None,
         'update_channel': 'stable',
         'auto_update_interval_minutes': DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
@@ -33,7 +34,7 @@ def _make_config(**overrides: object) -> ResolvedConfig:
         'auto_start': True,
     }
     defaults.update(overrides)
-    return ResolvedConfig(**defaults)  # type: ignore[arg-type]
+    return ResolvedConfig(**defaults)
 
 
 def _make_window(config: ResolvedConfig | None = None) -> SettingsWindow:

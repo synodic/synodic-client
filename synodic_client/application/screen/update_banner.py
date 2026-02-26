@@ -15,6 +15,7 @@ The banner slides in/out using a ``QPropertyAnimation`` on
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from enum import Enum, auto
 
 from PySide6.QtCore import (
@@ -60,6 +61,20 @@ class UpdateBannerState(Enum):
     ERROR = auto()
 
 
+@dataclass(frozen=True, slots=True)
+class _BannerConfig:
+    """Bundled visual configuration for a banner state transition."""
+
+    state: UpdateBannerState
+    style: str
+    icon: str
+    text: str
+    text_style: str
+    version: str = ''
+    action_label: str = ''
+    show_progress: bool = False
+
+
 # Height of the banner content (progress variant is slightly taller).
 _BANNER_HEIGHT = 38
 _BANNER_HEIGHT_WITH_PROGRESS = 44
@@ -79,6 +94,7 @@ class UpdateBanner(QFrame):
     dismissed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialise the banner (starts hidden and fully collapsed)."""
         super().__init__(parent)
         self.setObjectName('updateBanner')
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -151,13 +167,15 @@ class UpdateBanner(QFrame):
             version: The version string being downloaded (e.g. ``"0.0.1.dev35"``).
         """
         self._configure(
-            state=UpdateBannerState.DOWNLOADING,
-            version=version,
-            style=UPDATE_BANNER_STYLE,
-            icon='\u2b07',
-            text=f'Downloading update <b>{version}</b>\u2026',
-            text_style=UPDATE_BANNER_MESSAGE_STYLE,
-            show_progress=True,
+            _BannerConfig(
+                state=UpdateBannerState.DOWNLOADING,
+                version=version,
+                style=UPDATE_BANNER_STYLE,
+                icon='\u2b07',
+                text=f'Downloading update <b>{version}</b>\u2026',
+                text_style=UPDATE_BANNER_MESSAGE_STYLE,
+                show_progress=True,
+            )
         )
 
     def show_downloading_progress(self, percentage: int) -> None:
@@ -180,13 +198,15 @@ class UpdateBanner(QFrame):
             version: The version that is ready to install.
         """
         self._configure(
-            state=UpdateBannerState.READY,
-            version=version,
-            style=UPDATE_BANNER_READY_STYLE,
-            icon='\u2705',
-            text=f'Update <b>{version}</b> is ready \u2014 restart to finish installing',
-            text_style=UPDATE_BANNER_VERSION_STYLE,
-            action_label='Restart Now',
+            _BannerConfig(
+                state=UpdateBannerState.READY,
+                version=version,
+                style=UPDATE_BANNER_READY_STYLE,
+                icon='\u2705',
+                text=f'Update <b>{version}</b> is ready \u2014 restart to finish installing',
+                text_style=UPDATE_BANNER_VERSION_STYLE,
+                action_label='Restart Now',
+            )
         )
 
     def show_error(self, message: str) -> None:
@@ -196,12 +216,14 @@ class UpdateBanner(QFrame):
             message: Human-readable error description.
         """
         self._configure(
-            state=UpdateBannerState.ERROR,
-            style=UPDATE_BANNER_ERROR_STYLE,
-            icon='\u26a0',
-            text=message,
-            text_style=UPDATE_BANNER_MESSAGE_STYLE,
-            action_label='Retry',
+            _BannerConfig(
+                state=UpdateBannerState.ERROR,
+                style=UPDATE_BANNER_ERROR_STYLE,
+                icon='\u26a0',
+                text=message,
+                text_style=UPDATE_BANNER_MESSAGE_STYLE,
+                action_label='Retry',
+            )
         )
         QTimer.singleShot(UPDATE_BANNER_ERROR_DISMISS_MS, self._auto_dismiss_error)
 
@@ -214,51 +236,33 @@ class UpdateBanner(QFrame):
 
     # --- Internal ---
 
-    def _configure(
-        self,
-        *,
-        state: UpdateBannerState,
-        style: str,
-        icon: str,
-        text: str,
-        text_style: str,
-        version: str = '',
-        action_label: str = '',
-        show_progress: bool = False,
-    ) -> None:
+    def _configure(self, config: _BannerConfig) -> None:
         """Apply common visual configuration and slide the banner in.
 
         Args:
-            state: The new banner state.
-            style: QSS for the banner frame.
-            icon: Single character displayed as the leading icon.
-            text: Message (may contain HTML).
-            text_style: QSS for the message label.
-            version: Version string to store (optional).
-            action_label: Text for the action button; hidden when empty.
-            show_progress: Whether to show the progress bar.
+            config: Bundled visual properties for the new state.
         """
-        self._state = state
-        self._target_version = version
+        self._state = config.state
+        self._target_version = config.version
 
-        self.setStyleSheet(style)
-        self._icon_label.setText(icon)
-        self._message.setText(text)
-        self._message.setStyleSheet(text_style)
+        self.setStyleSheet(config.style)
+        self._icon_label.setText(config.icon)
+        self._message.setText(config.text)
+        self._message.setStyleSheet(config.text_style)
 
-        if action_label:
-            self._action_btn.setText(action_label)
+        if config.action_label:
+            self._action_btn.setText(config.action_label)
             self._action_btn.show()
         else:
             self._action_btn.hide()
 
-        if show_progress:
+        if config.show_progress:
             self._progress.setRange(0, 0)  # indeterminate
             self._progress.show()
         else:
             self._progress.hide()
 
-        target_height = _BANNER_HEIGHT_WITH_PROGRESS if show_progress else _BANNER_HEIGHT
+        target_height = _BANNER_HEIGHT_WITH_PROGRESS if config.show_progress else _BANNER_HEIGHT
         self._slide_in(target_height)
 
     def _slide_in(self, target_height: int) -> None:

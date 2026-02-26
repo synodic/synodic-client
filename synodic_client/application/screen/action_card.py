@@ -138,7 +138,7 @@ class _CardSpinner(QWidget):
         self._angle = 0
         self.setFixedSize(ACTION_CARD_SPINNER_SIZE, ACTION_CARD_SPINNER_SIZE)
 
-    def paintEvent(self, _event: object) -> None:  # noqa: N802
+    def paintEvent(self, _event: object) -> None:
         """Draw the muted track and animated highlight arc."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -379,7 +379,7 @@ class ActionCard(QFrame):
     # Mouse events (toggle log)
     # ------------------------------------------------------------------
 
-    def mousePressEvent(self, event: object) -> None:  # noqa: N802
+    def mousePressEvent(self, event: object) -> None:
         """Toggle the inline log body on click."""
         if self._is_skeleton or not hasattr(self, '_log_output'):
             return

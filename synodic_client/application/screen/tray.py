@@ -316,7 +316,11 @@ class TrayScreen:
         """Resolve enabled plugins off-thread, then start the update worker."""
         loop = asyncio.get_running_loop()
         config = self._resolve_config()
-        all_plugins = await loop.run_in_executor(None, lambda: porringer.plugin.list())  # noqa: PLW0108
+
+        def fetch_plugins() -> list:
+            return porringer.plugin.list()
+
+        all_plugins = await loop.run_in_executor(None, fetch_plugins)
         all_names = [p.name for p in all_plugins if p.installed]
         enabled = resolve_enabled_plugins(config, all_names)
 

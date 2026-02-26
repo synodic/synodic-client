@@ -40,6 +40,8 @@ from synodic_client.application.theme import (
     LOG_STATUS_SUCCESS,
 )
 
+_EXPECTED_SECTION_COUNT = 2
+
 _app = QApplication.instance() or QApplication(sys.argv)
 
 # ---------------------------------------------------------------------------
@@ -311,7 +313,7 @@ class TestExecutionLogPanel:
         panel.add_section(a1)
         panel.add_section(a2)
 
-        assert panel._section_count == 2  # noqa: PLR2004
+        assert panel._section_count == _EXPECTED_SECTION_COUNT
 
     @staticmethod
     def test_get_section_returns_correct_section() -> None:
@@ -473,7 +475,7 @@ class TestInstallWorkerNewSignals:
             result=result,
         )
 
-        async def mock_stream(*args, **kwargs):  # noqa: ANN002, ANN003
+        async def mock_stream(*args, **kwargs):
             yield manifest_event
             yield started_event
             yield completed_event
@@ -518,7 +520,7 @@ class TestInstallWorkerNewSignals:
             result=result,
         )
 
-        async def mock_stream(*args, **kwargs):  # noqa: ANN002, ANN003
+        async def mock_stream(*args, **kwargs):
             yield manifest_event
             yield sub_event
             yield completed_event
@@ -557,7 +559,7 @@ class TestInstallWorkerNewSignals:
             result=result,
         )
 
-        async def mock_stream(*args, **kwargs):  # noqa: ANN002, ANN003
+        async def mock_stream(*args, **kwargs):
             yield manifest_event
             yield bad_event_1
             yield bad_event_2
@@ -592,7 +594,7 @@ class TestInstallWorkerNewSignals:
             result=result,
         )
 
-        async def mock_stream(*args, **kwargs):  # noqa: ANN002, ANN003
+        async def mock_stream(*args, **kwargs):
             yield manifest_event
             yield bad_event
             yield completed_event

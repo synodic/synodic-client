@@ -28,7 +28,11 @@ _APP_NAME = 'Synodic'
 _APP_NAME_DEV = 'Synodic-Dev'
 _CONFIG_FILENAME = 'config.json'
 
-_dev_mode: bool = False
+
+class _DevMode:
+    """Module-level mutable state (avoids ``global`` statements)."""
+
+    enabled: bool = False
 
 
 def set_dev_mode(enabled: bool) -> None:
@@ -43,13 +47,12 @@ def set_dev_mode(enabled: bool) -> None:
     Args:
         enabled: ``True`` to activate dev-mode namespacing.
     """
-    global _dev_mode  # noqa: PLW0603
-    _dev_mode = enabled
+    _DevMode.enabled = enabled
 
 
 def is_dev_mode() -> bool:
     """Return whether dev-mode namespacing is active."""
-    return _dev_mode
+    return _DevMode.enabled
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +170,7 @@ def config_dir() -> Path:
     Returns:
         Path to the configuration directory.
     """
-    app_name = _APP_NAME_DEV if _dev_mode else _APP_NAME
+    app_name = _APP_NAME_DEV if _DevMode.enabled else _APP_NAME
 
     if sys.platform == 'win32':
         base = os.environ.get('LOCALAPPDATA', '')

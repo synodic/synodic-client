@@ -566,7 +566,7 @@ class ProjectsView(QWidget):
         self._loading_spinner.raise_()
 
     # ------------------------------------------------------------------
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+    def resizeEvent(self, event: QResizeEvent) -> None:
         """Keep the overlay spinner filling the entire view."""
         super().resizeEvent(event)
         self._loading_spinner.setGeometry(self.rect())

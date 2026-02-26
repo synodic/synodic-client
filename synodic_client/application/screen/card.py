@@ -64,7 +64,7 @@ class ClickableHeader(QWidget):
 
     # --- Event handling ---------------------------------------------------
 
-    def mousePressEvent(self, _event: object) -> None:  # noqa: N802
+    def mousePressEvent(self, _event: object) -> None:
         """Emit :attr:`clicked` on any mouse press."""
         self.clicked.emit()
 

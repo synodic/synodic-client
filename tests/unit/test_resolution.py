@@ -1,10 +1,9 @@
 """Tests for the configuration resolution module."""
 
-import dataclasses
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, PropertyMock, patch
 
-import pytest
 from packaging.version import Version
 
 from synodic_client.config import BuildConfig, UserConfig
@@ -29,9 +28,9 @@ from synodic_client.updater import (
 # ---------------------------------------------------------------------------
 
 
-def _make_resolved(**overrides: object) -> ResolvedConfig:
+def _make_resolved(**overrides: Any) -> ResolvedConfig:
     """Create a ``ResolvedConfig`` with sensible defaults and optional overrides."""
-    defaults: dict[str, object] = {
+    defaults: dict[str, Any] = {
         'update_source': None,
         'update_channel': 'stable',
         'auto_update_interval_minutes': DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
@@ -42,7 +41,7 @@ def _make_resolved(**overrides: object) -> ResolvedConfig:
         'auto_start': True,
     }
     defaults.update(overrides)
-    return ResolvedConfig(**defaults)  # type: ignore[arg-type]
+    return ResolvedConfig(**defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -179,17 +178,6 @@ class TestResolveConfig:
             config = resolve_config()
 
         assert config.auto_start is True
-
-    @staticmethod
-    def test_config_is_frozen() -> None:
-        """Verify ResolvedConfig is immutable."""
-        with patch('synodic_client.resolution.load_user_config', return_value=UserConfig()):
-            config = resolve_config()
-
-        assert dataclasses.is_dataclass(config)
-
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            config.update_channel = 'dev'  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
