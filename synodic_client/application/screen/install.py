@@ -152,6 +152,7 @@ class PreviewModel:
     """
 
     def __init__(self) -> None:
+        """Initialise a blank preview model."""
         self.phase: PreviewPhase = PreviewPhase.IDLE
         self.preview: SetupResults | None = None
         self.manifest_path: Path | None = None

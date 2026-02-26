@@ -154,7 +154,8 @@ class TestPreviewModel:
         upgradable.status = 'Update available'
         model.action_states = [needed, satisfied, upgradable]
         model.upgradable_keys.add(action_key(upgradable.action))
-        assert model.actionable_count == 2  # 1 needed + 1 upgradable
+        expected_actionable = 2  # 1 needed + 1 upgradable
+        assert model.actionable_count == expected_actionable
 
     @staticmethod
     def test_action_state_for_found() -> None:
