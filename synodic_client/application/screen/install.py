@@ -275,7 +275,7 @@ async def run_install(
         ):
             cb.on_sub_progress(event.action, event.sub_action)
 
-        if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
+        if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result and event.action:
             collected.append(event.result)
             if cb.on_progress is not None:
                 cb.on_progress(event.action, event.result)
@@ -1260,7 +1260,7 @@ async def _resolve_manifest_path(url: str) -> tuple[Path, str | None]:
 
     params = DownloadParameters(url=url, destination=dest, timeout=3)
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, API.download, params)
+    result = await loop.run_in_executor(None, lambda: API.download(params))
 
     if not result.success:
         _safe_rmtree(temp_dir)

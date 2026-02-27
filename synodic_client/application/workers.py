@@ -15,18 +15,19 @@ from porringer.api import API
 from porringer.schema import SetupParameters, SyncStrategy
 
 from synodic_client.client import Client
+from synodic_client.updater import UpdateInfo
 
 logger = logging.getLogger(__name__)
 
 
-async def check_for_update(client: Client) -> object:
+async def check_for_update(client: Client) -> UpdateInfo | None:
     """Check for application updates off the main thread.
 
     Args:
         client: The Synodic Client service.
 
     Returns:
-        An ``UpdateInfo`` result.
+        An ``UpdateInfo`` result, or ``None`` when no updater is initialised.
     """
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, client.check_for_update)

@@ -424,7 +424,7 @@ class TestPreviewWorkerSignals:
         assert ready_calls[0][0] is preview
         assert len(checked) == 1
         assert checked[0] == (0, result)
-        assert finished is True
+        assert finished
 
     @staticmethod
     def test_emits_finished_for_empty_actions(tmp_path: Path) -> None:
@@ -449,7 +449,7 @@ class TestPreviewWorkerSignals:
             finished = True
 
         asyncio.run(_run())
-        assert finished is True
+        assert finished
 
     @staticmethod
     def test_action_checked_maps_correct_rows(tmp_path: Path) -> None:

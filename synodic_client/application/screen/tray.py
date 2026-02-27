@@ -5,6 +5,7 @@ import logging
 from collections.abc import Callable
 
 from porringer.api import API
+from porringer.schema import PluginInfo
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
@@ -321,7 +322,10 @@ class TrayScreen:
         loop = asyncio.get_running_loop()
         config = self._resolve_config()
 
-        all_plugins = await loop.run_in_executor(None, porringer.plugin.list)
+        def _list_plugins() -> list[PluginInfo]:
+            return porringer.plugin.list()
+
+        all_plugins = await loop.run_in_executor(None, _list_plugins)
         all_names = [p.name for p in all_plugins if p.installed]
         enabled = resolve_enabled_plugins(config, all_names)
 

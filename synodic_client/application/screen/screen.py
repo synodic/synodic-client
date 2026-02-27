@@ -366,7 +366,19 @@ class PluginsView(QWidget):
 
         try:
             loop = asyncio.get_running_loop()
-            plugins, packages_map = await loop.run_in_executor(None, self._fetch_plugin_data)
+            plugins, directories = await loop.run_in_executor(
+                None,
+                self._fetch_plugin_data,
+            )
+
+            # Gather packages for updatable plugins (async)
+            packages_map: dict[str, list[tuple[str, str]]] = {}
+            for plugin in plugins:
+                if plugin.kind in _UPDATABLE_KINDS:
+                    packages_map[plugin.name] = await self._gather_packages(
+                        plugin.name,
+                        directories,
+                    )
 
             # Clear existing groups
             for group in self._groups:
@@ -408,15 +420,11 @@ class PluginsView(QWidget):
 
     def _fetch_plugin_data(
         self,
-    ) -> tuple[list[PluginInfo], dict[str, list[tuple[str, str]]]]:
-        """Fetch plugin data from porringer (runs in thread-pool executor)."""
+    ) -> tuple[list[PluginInfo], list[ManifestDirectory]]:
+        """Fetch plugin list and directories from porringer (sync, run in executor)."""
         plugins = self._porringer.plugin.list()
         directories = self._porringer.cache.list_directories()
-        packages_map: dict[str, list[tuple[str, str]]] = {}
-        for plugin in plugins:
-            if plugin.kind in _UPDATABLE_KINDS:
-                packages_map[plugin.name] = self._gather_packages(plugin.name, directories)
-        return plugins, packages_map
+        return plugins, directories
 
     @staticmethod
     def _build_plugin_section(
@@ -450,7 +458,7 @@ class PluginsView(QWidget):
             parent=parent,
         )
 
-    def _gather_packages(
+    async def _gather_packages(
         self,
         plugin_name: str,
         directories: list[ManifestDirectory],
@@ -459,7 +467,7 @@ class PluginsView(QWidget):
         packages: list[tuple[str, str]] = []
         for directory in directories:
             try:
-                pkgs = self._porringer.plugin.list_packages(
+                pkgs = await self._porringer.plugin.list_packages(
                     plugin_name,
                     Path(directory.path),
                 )
