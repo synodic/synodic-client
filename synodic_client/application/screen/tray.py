@@ -5,7 +5,7 @@ import logging
 from collections.abc import Callable
 
 from porringer.api import API
-from PySide6.QtCore import QThread, QTimer
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.screen import MainWindow
 from synodic_client.application.screen.settings import SettingsWindow
-from synodic_client.application.workers import ToolUpdateWorker, UpdateCheckWorker, UpdateDownloadWorker
+from synodic_client.application.workers import check_for_update, download_update, run_tool_updates
 from synodic_client.client import Client
 from synodic_client.resolution import (
     ResolvedConfig,
@@ -52,8 +52,8 @@ class TrayScreen:
         self._client = client
         self._window = window
         self._config = config
-        self._runner: QThread | None = None
-        self._tool_runner: QThread | None = None
+        self._update_task: asyncio.Task[None] | None = None
+        self._tool_task: asyncio.Task[None] | None = None
 
         self.tray_icon = app_icon()
 
@@ -245,12 +245,16 @@ class TrayScreen:
         self.update_action.setText('Checking for Updates...')
         self._settings_window.set_checking()
 
-        worker = UpdateCheckWorker(self._client)
-        worker.finished.connect(lambda result: self._on_update_check_finished(result, silent=silent))
-        worker.error.connect(lambda error: self._on_update_check_error(error, silent=silent))
+        self._update_task = asyncio.create_task(self._async_check_updates(silent=silent))
 
-        self._runner = worker
-        self._runner.start()
+    async def _async_check_updates(self, *, silent: bool) -> None:
+        """Run the update check coroutine and route results."""
+        try:
+            result = await check_for_update(self._client)
+            self._on_update_check_finished(result, silent=silent)
+        except Exception as exc:
+            logger.exception('Update check failed')
+            self._on_update_check_error(str(exc), silent=silent)
 
     def _on_update_check_finished(self, result: UpdateInfo | None, *, silent: bool = False) -> None:
         """Handle update check completion."""
@@ -310,26 +314,23 @@ class TrayScreen:
             return
 
         logger.info('Starting periodic tool update check')
-        asyncio.ensure_future(self._do_tool_update(porringer))
+        self._tool_task = asyncio.create_task(self._do_tool_update(porringer))
 
     async def _do_tool_update(self, porringer: API) -> None:
-        """Resolve enabled plugins off-thread, then start the update worker."""
+        """Resolve enabled plugins off-thread, then run the tool update."""
         loop = asyncio.get_running_loop()
         config = self._resolve_config()
 
-        def fetch_plugins() -> list:
-            return porringer.plugin.list()
-
-        all_plugins = await loop.run_in_executor(None, fetch_plugins)
+        all_plugins = await loop.run_in_executor(None, porringer.plugin.list)
         all_names = [p.name for p in all_plugins if p.installed]
         enabled = resolve_enabled_plugins(config, all_names)
 
-        worker = ToolUpdateWorker(porringer, plugins=enabled)
-        worker.finished.connect(self._on_tool_update_finished)
-        worker.error.connect(self._on_tool_update_error)
-
-        self._tool_runner = worker
-        self._tool_runner.start()
+        try:
+            count = await run_tool_updates(porringer, plugins=enabled)
+            self._on_tool_update_finished(count)
+        except Exception as exc:
+            logger.exception('Tool update failed')
+            self._on_tool_update_error(str(exc))
 
     def _on_single_plugin_update(self, plugin_name: str) -> None:
         """Upgrade a single plugin across all cached projects."""
@@ -339,13 +340,18 @@ class TrayScreen:
             return
 
         logger.info('Starting update for plugin: %s', plugin_name)
+        self._tool_task = asyncio.create_task(
+            self._async_single_plugin_update(porringer, plugin_name),
+        )
 
-        worker = ToolUpdateWorker(porringer, plugins=[plugin_name])
-        worker.finished.connect(self._on_tool_update_finished)
-        worker.error.connect(self._on_tool_update_error)
-
-        self._tool_runner = worker
-        self._tool_runner.start()
+    async def _async_single_plugin_update(self, porringer: API, plugin_name: str) -> None:
+        """Run a single-plugin tool update and route results."""
+        try:
+            count = await run_tool_updates(porringer, plugins=[plugin_name])
+            self._on_tool_update_finished(count)
+        except Exception as exc:
+            logger.exception('Tool update failed')
+            self._on_tool_update_error(str(exc))
 
     def _on_tool_update_finished(self, count: int) -> None:
         """Handle tool update completion."""
@@ -369,13 +375,19 @@ class TrayScreen:
         Args:
             version: The version string being downloaded (for banner display).
         """
-        worker = UpdateDownloadWorker(self._client)
-        worker.finished.connect(lambda success: self._on_download_finished(success, version))
-        worker.progress.connect(self._banner.show_downloading_progress)
-        worker.error.connect(self._on_download_error)
+        self._update_task = asyncio.create_task(self._async_download(version))
 
-        self._runner = worker
-        self._runner.start()
+    async def _async_download(self, version: str) -> None:
+        """Run the download coroutine and route results."""
+        try:
+            success = await download_update(
+                self._client,
+                on_progress=self._banner.show_downloading_progress,
+            )
+            self._on_download_finished(success, version)
+        except Exception as exc:
+            logger.exception('Update download failed')
+            self._on_download_error(str(exc))
 
     def _on_download_finished(self, success: bool, version: str) -> None:
         """Handle download completion — transition banner to ready state."""

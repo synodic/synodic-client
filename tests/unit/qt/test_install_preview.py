@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from porringer.schema import (
-    CancellationToken,
     DownloadResult,
     ProgressEvent,
     ProgressEventKind,
@@ -26,10 +26,12 @@ from synodic_client.application.screen import (
 )
 from synodic_client.application.screen.install import (
     InstallConfig,
-    InstallWorker,
-    PreviewWorker,
+    PreviewCallbacks,
+    PreviewConfig,
     normalize_manifest_key,
     resolve_local_path,
+    run_install,
+    run_preview,
 )
 
 _DOWNLOAD_PATCH = 'synodic_client.application.screen.install.API.download'
@@ -137,11 +139,11 @@ class TestFormatCliCommand:
 
 
 class TestInstallWorker:
-    """Tests for InstallWorker signal emission."""
+    """Tests for run_install coroutine."""
 
     @staticmethod
     def test_worker_emits_finished_on_success() -> None:
-        """Verify worker emits finished signal with results."""
+        """Verify coroutine returns results on success."""
         porringer = MagicMock()
         manifest_path = Path('/tmp/test/porringer.json')
 
@@ -162,19 +164,13 @@ class TestInstallWorker:
 
         porringer.sync.execute_stream = mock_stream
 
-        token = CancellationToken()
-        worker = InstallWorker(porringer, manifest_path, token)
+        results = asyncio.run(run_install(porringer, manifest_path))
 
-        received: list[SetupResults] = []
-        worker.finished.connect(received.append)
-        worker.run()
-
-        assert len(received) == 1
-        assert received[0].actions == manifest.actions
+        assert results.actions == manifest.actions
 
     @staticmethod
     def test_worker_emits_error_on_failure() -> None:
-        """Verify worker emits error signal on exception."""
+        """Verify coroutine raises on exception."""
         porringer = MagicMock()
         manifest_path = Path('/tmp/test/porringer.json')
 
@@ -186,15 +182,8 @@ class TestInstallWorker:
 
         porringer.sync.execute_stream = mock_stream
 
-        token = CancellationToken()
-        worker = InstallWorker(porringer, manifest_path, token)
-
-        errors: list[str] = []
-        worker.error.connect(errors.append)
-        worker.run()
-
-        assert len(errors) == 1
-        assert 'boom' in errors[0]
+        with pytest.raises(RuntimeError, match='boom'):
+            asyncio.run(run_install(porringer, manifest_path))
 
     @staticmethod
     def test_worker_passes_prerelease_packages() -> None:
@@ -213,14 +202,13 @@ class TestInstallWorker:
 
         porringer.sync.execute_stream = mock_stream
 
-        token = CancellationToken()
-        worker = InstallWorker(
-            porringer,
-            manifest_path,
-            token,
-            InstallConfig(prerelease_packages={'cppython'}),
+        asyncio.run(
+            run_install(
+                porringer,
+                manifest_path,
+                InstallConfig(prerelease_packages={'cppython'}),
+            ),
         )
-        worker.run()
 
         assert len(captured_params) == 1
         assert captured_params[0].prerelease_packages == {'cppython'}
@@ -242,9 +230,7 @@ class TestInstallWorker:
 
         porringer.sync.execute_stream = mock_stream
 
-        token = CancellationToken()
-        worker = InstallWorker(porringer, manifest_path, token)
-        worker.run()
+        asyncio.run(run_install(porringer, manifest_path))
 
         assert len(captured_params) == 1
         assert captured_params[0].prerelease_packages is None
@@ -283,11 +269,11 @@ class TestResolveLocalPath:
 
 
 class TestPreviewWorkerLocal:
-    """Tests for PreviewWorker with local manifest files."""
+    """Tests for run_preview with local manifest files."""
 
     @staticmethod
     def test_local_manifest_skips_download(tmp_path: Path) -> None:
-        """Verify PreviewWorker skips download for local files."""
+        """Verify run_preview skips download for local files."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text('{}')
 
@@ -300,11 +286,17 @@ class TestPreviewWorkerLocal:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(porringer, str(manifest))
-
         results: list[tuple[object, str, str]] = []
-        worker.preview_ready.connect(lambda r, p, t: results.append((r, p, t)))
-        worker.run()
+
+        asyncio.run(
+            run_preview(
+                porringer,
+                str(manifest),
+                callbacks=PreviewCallbacks(
+                    on_preview_ready=lambda r, p, t: results.append((r, p, t)),
+                ),
+            ),
+        )
 
         assert len(results) == 1
         assert results[0][0] is expected
@@ -313,25 +305,20 @@ class TestPreviewWorkerLocal:
 
     @staticmethod
     def test_local_manifest_not_found(tmp_path: Path) -> None:
-        """Verify PreviewWorker emits error for missing local file."""
+        """Verify run_preview raises error for missing local file."""
         path = str(tmp_path / 'nonexistent' / 'porringer.json')
         porringer = MagicMock()
-        worker = PreviewWorker(porringer, path)
 
-        errors: list[str] = []
-        worker.error.connect(errors.append)
-        worker.run()
-
-        assert len(errors) == 1
-        assert 'not found' in errors[0].lower()
+        with pytest.raises(FileNotFoundError, match='not found'):
+            asyncio.run(run_preview(porringer, path))
 
 
 class TestPreviewWorker:
-    """Tests for PreviewWorker download and preview flow."""
+    """Tests for run_preview download and preview flow."""
 
     @staticmethod
     def test_emits_error_on_download_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-        """Verify PreviewWorker emits error when download fails."""
+        """Verify run_preview raises when download fails."""
         porringer = MagicMock()
         monkeypatch.setattr(
             _DOWNLOAD_PATCH,
@@ -344,18 +331,12 @@ class TestPreviewWorker:
             ),
         )
 
-        worker = PreviewWorker(porringer, 'https://example.com/bad.json')
-
-        errors: list[str] = []
-        worker.error.connect(errors.append)
-        worker.run()
-
-        assert len(errors) == 1
-        assert 'Network error' in errors[0]
+        with pytest.raises(RuntimeError, match='Network error'):
+            asyncio.run(run_preview(porringer, 'https://example.com/bad.json'))
 
     @staticmethod
     def test_emits_preview_ready_on_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """Verify PreviewWorker emits preview_ready with SetupResults."""
+        """Verify run_preview invokes on_preview_ready with SetupResults."""
         porringer = MagicMock()
 
         dest = tmp_path / 'porringer.json'
@@ -380,22 +361,28 @@ class TestPreviewWorker:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(porringer, 'https://example.com/good.json')
-
         results: list[tuple[object, str, str]] = []
-        worker.preview_ready.connect(lambda r, p, t: results.append((r, p, t)))
-        worker.run()
+
+        asyncio.run(
+            run_preview(
+                porringer,
+                'https://example.com/good.json',
+                callbacks=PreviewCallbacks(
+                    on_preview_ready=lambda r, p, t: results.append((r, p, t)),
+                ),
+            ),
+        )
 
         assert len(results) == 1
         assert results[0][0] is expected
 
 
 class TestPreviewWorkerSignals:
-    """Tests for PreviewWorker signal emission and dry-run status check."""
+    """Tests for run_preview callback invocation and dry-run status check."""
 
     @staticmethod
     def test_emits_preview_ready_and_finished(tmp_path: Path) -> None:
-        """Verify worker emits preview_ready then finished for a local manifest."""
+        """Verify coroutine invokes on_preview_ready for a local manifest."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text('{}')
 
@@ -415,25 +402,33 @@ class TestPreviewWorkerSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(porringer, str(manifest))
-
         ready_calls: list[tuple[object, str, str]] = []
         checked: list[tuple[int, SetupActionResult]] = []
-        finished_count: list[int] = []
-        worker.preview_ready.connect(lambda p, m, t: ready_calls.append((p, m, t)))
-        worker.action_checked.connect(lambda row, r: checked.append((row, r)))
-        worker.finished.connect(lambda: finished_count.append(1))
-        worker.run()
+        finished = False
+
+        async def _run() -> None:
+            nonlocal finished
+            await run_preview(
+                porringer,
+                str(manifest),
+                callbacks=PreviewCallbacks(
+                    on_preview_ready=lambda p, m, t: ready_calls.append((p, m, t)),
+                    on_action_checked=lambda row, r: checked.append((row, r)),
+                ),
+            )
+            finished = True
+
+        asyncio.run(_run())
 
         assert len(ready_calls) == 1
         assert ready_calls[0][0] is preview
         assert len(checked) == 1
         assert checked[0] == (0, result)
-        assert len(finished_count) == 1
+        assert finished is True
 
     @staticmethod
     def test_emits_finished_for_empty_actions(tmp_path: Path) -> None:
-        """Verify worker emits finished signal even with no actions."""
+        """Verify coroutine completes normally with no actions."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text('{}')
 
@@ -446,17 +441,19 @@ class TestPreviewWorkerSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(porringer, str(manifest))
+        finished = False
 
-        finished_count: list[int] = []
-        worker.finished.connect(lambda: finished_count.append(1))
-        worker.run()
+        async def _run() -> None:
+            nonlocal finished
+            await run_preview(porringer, str(manifest))
+            finished = True
 
-        assert len(finished_count) == 1
+        asyncio.run(_run())
+        assert finished is True
 
     @staticmethod
     def test_action_checked_maps_correct_rows(tmp_path: Path) -> None:
-        """Verify action_checked emits correct row indices via identity matching."""
+        """Verify on_action_checked receives correct row indices via identity matching."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text('{}')
 
@@ -484,11 +481,17 @@ class TestPreviewWorkerSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(porringer, str(manifest))
-
         checked: list[tuple[int, SetupActionResult]] = []
-        worker.action_checked.connect(lambda row, r: checked.append((row, r)))
-        worker.run()
+
+        asyncio.run(
+            run_preview(
+                porringer,
+                str(manifest),
+                callbacks=PreviewCallbacks(
+                    on_action_checked=lambda row, r: checked.append((row, r)),
+                ),
+            ),
+        )
 
         assert len(checked) == _EXPECTED_CHECKED_COUNT
         # action_b is at index 1 in preview, action_a at index 0
@@ -497,7 +500,7 @@ class TestPreviewWorkerSignals:
 
     @staticmethod
     def test_emits_error_when_dry_run_fails(tmp_path: Path) -> None:
-        """Verify worker emits error when dry-run raises."""
+        """Verify coroutine raises when dry-run fails."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text('{}')
 
@@ -511,21 +514,12 @@ class TestPreviewWorkerSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(porringer, str(manifest))
-
-        errors: list[str] = []
-        finished_count: list[int] = []
-        worker.error.connect(errors.append)
-        worker.finished.connect(lambda: finished_count.append(1))
-        worker.run()
-
-        assert len(errors) == 1
-        assert 'dry-run boom' in errors[0]
-        assert len(finished_count) == 0
+        with pytest.raises(RuntimeError, match='dry-run boom'):
+            asyncio.run(run_preview(porringer, str(manifest)))
 
     @staticmethod
     def test_emits_plugins_queried(tmp_path: Path) -> None:
-        """Verify plugins_queried is emitted with plugin presence mapping."""
+        """Verify on_plugins_queried is invoked with plugin presence mapping."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text('{}')
 
@@ -544,18 +538,24 @@ class TestPreviewWorkerSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(porringer, str(manifest))
-
         plugin_data: list[dict[str, bool]] = []
-        worker.plugins_queried.connect(plugin_data.append)
-        worker.run()
+
+        asyncio.run(
+            run_preview(
+                porringer,
+                str(manifest),
+                callbacks=PreviewCallbacks(
+                    on_plugins_queried=plugin_data.append,
+                ),
+            ),
+        )
 
         assert len(plugin_data) == 1
         assert plugin_data[0] == {'pip': True, 'uv': False}
 
     @staticmethod
     def test_plugins_queried_emitted_before_preview_ready(tmp_path: Path) -> None:
-        """Verify plugins_queried fires before preview_ready."""
+        """Verify on_plugins_queried fires before on_preview_ready."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text('{}')
 
@@ -574,18 +574,24 @@ class TestPreviewWorkerSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(porringer, str(manifest))
-
         order: list[str] = []
-        worker.plugins_queried.connect(lambda _: order.append('plugins'))
-        worker.preview_ready.connect(lambda *_: order.append('preview'))
-        worker.run()
+
+        asyncio.run(
+            run_preview(
+                porringer,
+                str(manifest),
+                callbacks=PreviewCallbacks(
+                    on_plugins_queried=lambda _: order.append('plugins'),
+                    on_preview_ready=lambda *_: order.append('preview'),
+                ),
+            ),
+        )
 
         assert order == ['plugins', 'preview']
 
     @staticmethod
     def test_emits_manifest_parsed(tmp_path: Path) -> None:
-        """Verify manifest_parsed is emitted from MANIFEST_PARSED events."""
+        """Verify on_manifest_parsed is invoked from MANIFEST_PARSED events."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text('{}')
 
@@ -604,17 +610,23 @@ class TestPreviewWorkerSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(porringer, str(manifest))
-
         parsed_data: list[Any] = []
-        worker.manifest_parsed.connect(lambda *a: parsed_data.append(a))
-        worker.run()
+
+        asyncio.run(
+            run_preview(
+                porringer,
+                str(manifest),
+                callbacks=PreviewCallbacks(
+                    on_manifest_parsed=lambda *a: parsed_data.append(a),
+                ),
+            ),
+        )
 
         assert len(parsed_data) == 1
 
     @staticmethod
     def test_two_phase_signal_order(tmp_path: Path) -> None:
-        """Verify the full two-phase signal order: parsed → plugins → ready."""
+        """Verify the full two-phase callback order: parsed → plugins → ready."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text('{}')
 
@@ -638,19 +650,25 @@ class TestPreviewWorkerSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(porringer, str(manifest))
-
         order: list[str] = []
-        worker.manifest_parsed.connect(lambda *_: order.append('parsed'))
-        worker.plugins_queried.connect(lambda _: order.append('plugins'))
-        worker.preview_ready.connect(lambda *_: order.append('ready'))
-        worker.run()
+
+        asyncio.run(
+            run_preview(
+                porringer,
+                str(manifest),
+                callbacks=PreviewCallbacks(
+                    on_manifest_parsed=lambda *_: order.append('parsed'),
+                    on_plugins_queried=lambda _: order.append('plugins'),
+                    on_preview_ready=lambda *_: order.append('ready'),
+                ),
+            ),
+        )
 
         assert order == ['parsed', 'plugins', 'ready']
 
 
 class TestPreviewWorkerUpdateDetection:
-    """Tests for PreviewWorker passing update-detection flags to porringer."""
+    """Tests for run_preview passing update-detection flags to porringer."""
 
     @staticmethod
     def test_passes_detect_updates_and_prerelease_packages(tmp_path: Path) -> None:
@@ -670,13 +688,16 @@ class TestPreviewWorkerUpdateDetection:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(
-            porringer,
-            str(manifest),
-            detect_updates=True,
-            prerelease_packages={'some-pkg'},
+        asyncio.run(
+            run_preview(
+                porringer,
+                str(manifest),
+                config=PreviewConfig(
+                    detect_updates=True,
+                    prerelease_packages={'some-pkg'},
+                ),
+            ),
         )
-        worker.run()
 
         assert len(captured_params) == 1
         assert captured_params[0].detect_updates is True
@@ -700,8 +721,7 @@ class TestPreviewWorkerUpdateDetection:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(porringer, str(manifest))
-        worker.run()
+        asyncio.run(run_preview(porringer, str(manifest)))
 
         assert len(captured_params) == 1
         assert captured_params[0].detect_updates is True
@@ -751,12 +771,13 @@ class TestPreviewWorkerProjectDirectory:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(
-            porringer,
-            str(manifest),
-            project_directory=manifest.parent,
+        asyncio.run(
+            run_preview(
+                porringer,
+                str(manifest),
+                config=PreviewConfig(project_directory=manifest.parent),
+            ),
         )
-        worker.run()
 
         assert len(captured_params) == 1
         assert captured_params[0].project_directory == tmp_path
@@ -779,12 +800,13 @@ class TestPreviewWorkerProjectDirectory:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(
-            porringer,
-            str(tmp_path),
-            project_directory=tmp_path,
+        asyncio.run(
+            run_preview(
+                porringer,
+                str(tmp_path),
+                config=PreviewConfig(project_directory=tmp_path),
+            ),
         )
-        worker.run()
 
         assert len(captured_params) == 1
         assert captured_params[0].project_directory == tmp_path
@@ -805,7 +827,7 @@ class TestSCMPreviewActions:
         return action
 
     def test_scm_already_installed_emits_correct_result(self, tmp_path: Path) -> None:
-        """An SCM action with ALREADY_INSTALLED is surfaced via action_checked."""
+        """An SCM action with ALREADY_INSTALLED is surfaced via on_action_checked."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text('{}')
 
@@ -832,11 +854,18 @@ class TestSCMPreviewActions:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(porringer, str(manifest), project_directory=tmp_path)
-
         checked: list[tuple[int, SetupActionResult]] = []
-        worker.action_checked.connect(lambda row, r: checked.append((row, r)))
-        worker.run()
+
+        asyncio.run(
+            run_preview(
+                porringer,
+                str(manifest),
+                config=PreviewConfig(project_directory=tmp_path),
+                callbacks=PreviewCallbacks(
+                    on_action_checked=lambda row, r: checked.append((row, r)),
+                ),
+            ),
+        )
 
         assert len(checked) == 1
         assert checked[0] == (0, result)
@@ -871,11 +900,18 @@ class TestSCMPreviewActions:
 
         porringer.sync.execute_stream = mock_stream
 
-        worker = PreviewWorker(porringer, str(manifest), project_directory=tmp_path)
-
         checked: list[tuple[int, SetupActionResult]] = []
-        worker.action_checked.connect(lambda row, r: checked.append((row, r)))
-        worker.run()
+
+        asyncio.run(
+            run_preview(
+                porringer,
+                str(manifest),
+                config=PreviewConfig(project_directory=tmp_path),
+                callbacks=PreviewCallbacks(
+                    on_action_checked=lambda row, r: checked.append((row, r)),
+                ),
+            ),
+        )
 
         assert len(checked) == 1
         assert checked[0][1].skipped is False

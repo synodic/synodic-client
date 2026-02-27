@@ -1,12 +1,12 @@
-"""Tests for the execution log panel widgets and new InstallWorker signals."""
+"""Tests for the execution log panel widgets and run_install callback signals."""
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock
 
 from porringer.schema import (
-    CancellationToken,
     ProgressEvent,
     ProgressEventKind,
     SetupAction,
@@ -17,7 +17,7 @@ from porringer.schema import (
 )
 from porringer.schema.plugin import PluginKind
 
-from synodic_client.application.screen.install import InstallWorker
+from synodic_client.application.screen.install import InstallCallbacks, run_install
 from synodic_client.application.screen.log_panel import (
     CHEVRON_DOWN,
     CHEVRON_RIGHT,
@@ -447,16 +447,16 @@ class TestExecutionLogPanel:
 
 
 # ---------------------------------------------------------------------------
-# InstallWorker signal tests for new action_started / sub_progress signals
+# run_install callback tests for action_started / sub_progress signals
 # ---------------------------------------------------------------------------
 
 
-class TestInstallWorkerNewSignals:
-    """Tests for InstallWorker action_started and sub_progress signals."""
+class TestRunInstallCallbackSignals:
+    """Tests for run_install action_started and sub_progress callbacks."""
 
     @staticmethod
     def test_emits_action_started() -> None:
-        """Verify worker emits action_started when ACTION_STARTED event arrives."""
+        """Verify run_install invokes on_action_started when ACTION_STARTED event arrives."""
         porringer = MagicMock()
         manifest_path = Path('/tmp/test/porringer.json')
 
@@ -479,19 +479,22 @@ class TestInstallWorkerNewSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        token = CancellationToken()
-        worker = InstallWorker(porringer, manifest_path, token)
-
         started_actions: list[object] = []
-        worker.action_started.connect(started_actions.append)
-        worker.run()
+
+        asyncio.run(
+            run_install(
+                porringer,
+                manifest_path,
+                callbacks=InstallCallbacks(on_action_started=started_actions.append),
+            ),
+        )
 
         assert len(started_actions) == 1
         assert started_actions[0] is action
 
     @staticmethod
     def test_emits_sub_progress() -> None:
-        """Verify worker emits sub_progress when SUB_ACTION_PROGRESS event arrives."""
+        """Verify run_install invokes on_sub_progress when SUB_ACTION_PROGRESS event arrives."""
         porringer = MagicMock()
         manifest_path = Path('/tmp/test/porringer.json')
 
@@ -524,12 +527,17 @@ class TestInstallWorkerNewSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        token = CancellationToken()
-        worker = InstallWorker(porringer, manifest_path, token)
-
         received: list[tuple[object, object]] = []
-        worker.sub_progress.connect(lambda a, s: received.append((a, s)))
-        worker.run()
+
+        asyncio.run(
+            run_install(
+                porringer,
+                manifest_path,
+                callbacks=InstallCallbacks(
+                    on_sub_progress=lambda a, s: received.append((a, s)),
+                ),
+            ),
+        )
 
         assert len(received) == 1
         assert received[0][0] is action
@@ -564,12 +572,17 @@ class TestInstallWorkerNewSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        token = CancellationToken()
-        worker = InstallWorker(porringer, manifest_path, token)
-
         received: list[tuple[object, object]] = []
-        worker.sub_progress.connect(lambda a, s: received.append((a, s)))
-        worker.run()
+
+        asyncio.run(
+            run_install(
+                porringer,
+                manifest_path,
+                callbacks=InstallCallbacks(
+                    on_sub_progress=lambda a, s: received.append((a, s)),
+                ),
+            ),
+        )
 
         assert len(received) == 0
 
@@ -598,11 +611,14 @@ class TestInstallWorkerNewSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        token = CancellationToken()
-        worker = InstallWorker(porringer, manifest_path, token)
-
         started_actions: list[object] = []
-        worker.action_started.connect(started_actions.append)
-        worker.run()
+
+        asyncio.run(
+            run_install(
+                porringer,
+                manifest_path,
+                callbacks=InstallCallbacks(on_action_started=started_actions.append),
+            ),
+        )
 
         assert len(started_actions) == 0

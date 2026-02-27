@@ -10,11 +10,9 @@ from porringer.api import API
 from porringer.schema import DirectoryValidationResult, ManifestDirectory, PluginInfo
 from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QResizeEvent, QStandardItem
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
-    QComboBox,
     QFileDialog,
-    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -22,6 +20,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -32,11 +31,11 @@ from PySide6.QtWidgets import (
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen import plugin_kind_group_label
 from synodic_client.application.screen.card import CHEVRON_DOWN, CHEVRON_RIGHT, ClickableHeader
-from synodic_client.application.screen.install import SetupPreviewWidget
+from synodic_client.application.screen.install import PreviewPhase, SetupPreviewWidget
+from synodic_client.application.screen.sidebar import ManifestSidebar
 from synodic_client.application.screen.spinner import SpinnerWidget
 from synodic_client.application.screen.update_banner import UpdateBanner
 from synodic_client.application.theme import (
-    CARD_SPACING,
     COMPACT_MARGINS,
     LOG_CHEVRON_STYLE,
     LOG_SECTION_TITLE_STYLE,
@@ -358,7 +357,7 @@ class PluginsView(QWidget):
         """Schedule an asynchronous rebuild of the plugin sections."""
         if self._refresh_in_progress:
             return
-        asyncio.ensure_future(self._async_refresh())
+        asyncio.create_task(self._async_refresh())
 
     async def _async_refresh(self) -> None:
         """Rebuild the plugin sections from porringer data, grouped by kind."""
@@ -497,10 +496,10 @@ class PluginsView(QWidget):
 class ProjectsView(QWidget):
     """Widget for managing project directories and previewing their manifests.
 
-    Combines a cached-directory selector (editable ``QComboBox`` with
-    Browse) and a :class:`SetupPreviewWidget` for dry-run preview and
-    install execution.  Preview loading is fully delegated to the
-    embedded widget via :meth:`SetupPreviewWidget.load`.
+    Displays a vertical sidebar of cached project directories on the
+    left with a stacked widget on the right showing one
+    :class:`SetupPreviewWidget` per manifest.  All manifests are loaded
+    in parallel on first refresh; switching between them is instant.
     """
 
     def __init__(self, porringer: API, config: ResolvedConfig, parent: QWidget | None = None) -> None:
@@ -515,47 +514,40 @@ class ProjectsView(QWidget):
         self._porringer = porringer
         self._config = config
         self._refresh_in_progress = False
+        self._pending_select: Path | None = None
+        self._widgets: dict[Path, SetupPreviewWidget] = {}
         self._init_ui()
 
     def _init_ui(self) -> None:
-        """Initialize the UI components with a grid layout.
+        """Build the sidebar + stacked widget layout."""
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        The loading spinner is a floating overlay parented to ``self``
-        but **not** part of the grid, so showing/hiding it never
-        changes the geometry of the rows beneath.
-        """
-        grid = QGridLayout(self)
-        grid.setContentsMargins(*COMPACT_MARGINS)
-        grid.setVerticalSpacing(CARD_SPACING)
+        # Left — sidebar
+        self._sidebar = ManifestSidebar()
+        self._sidebar.add_requested.connect(self._on_add)
+        self._sidebar.remove_requested.connect(self._on_remove)
+        self._sidebar.selection_changed.connect(self._on_selection_changed)
+        outer.addWidget(self._sidebar)
 
-        # Row 0 — Project directory selector
-        self._combo = QComboBox()
-        self._combo.setEditable(True)
-        self._combo.setToolTip('Select a cached project directory or enter a new path')
-        self._combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self._combo.setMinimumContentsLength(40)
-        self._combo.currentIndexChanged.connect(self._on_selection_changed)
-        grid.addWidget(self._combo, 0, 0)
-        grid.setColumnStretch(0, 1)
+        # Right — stacked previews + empty placeholder
+        right = QVBoxLayout()
+        right.setContentsMargins(*COMPACT_MARGINS)
+        right.setSpacing(0)
 
-        self._browse_btn = QPushButton('Browse…')
-        self._browse_btn.clicked.connect(self._on_browse)
-        grid.addWidget(self._browse_btn, 0, 1)
+        self._stack = QStackedWidget()
+        right.addWidget(self._stack, stretch=1)
 
-        self._remove_btn = QPushButton('Remove')
-        self._remove_btn.setToolTip('Remove the selected directory from the cache')
-        self._remove_btn.clicked.connect(self._on_remove)
-        self._remove_btn.setEnabled(False)
-        grid.addWidget(self._remove_btn, 0, 2)
+        # Empty placeholder shown when there are no manifests
+        self._empty_placeholder = QLabel('No projects. Click + Add Project to get started.')
+        self._empty_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_placeholder.setStyleSheet('color: grey; font-size: 13px;')
+        self._stack.addWidget(self._empty_placeholder)
 
-        # Row 1 — Shared preview widget (takes majority of space)
-        self._preview = SetupPreviewWidget(self._porringer, self, show_close=False, config=self._config)
-        self._preview.install_finished.connect(self._on_install_finished)
-        grid.addWidget(self._preview, 1, 0, 1, 3)
-        grid.setRowStretch(1, 1)
+        outer.addLayout(right, stretch=1)
 
-        # Floating overlay spinner — not in the grid layout.
-        # Positioned in resizeEvent to cover the full widget area.
+        # Floating overlay spinner — positioned in resizeEvent
         self._loading_spinner = SpinnerWidget('Loading projects\u2026', parent=self)
         self._loading_spinner.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._loading_spinner.raise_()
@@ -572,162 +564,137 @@ class ProjectsView(QWidget):
         """Schedule an asynchronous refresh of the cached directories."""
         if self._refresh_in_progress:
             return
-        asyncio.ensure_future(self._async_refresh())
+        asyncio.create_task(self._async_refresh())
 
     async def _async_refresh(self) -> None:
-        """Refresh the cached directories combo box from porringer cache."""
+        """Refresh the sidebar and stacked widgets from the porringer cache."""
         self._refresh_in_progress = True
         self._loading_spinner.start()
-        self._combo.setEnabled(False)
-        self._browse_btn.setEnabled(False)
-        self._remove_btn.setEnabled(False)
+        self._sidebar.set_enabled(False)
 
         try:
+            previous = self._pending_select or self._sidebar.selected_path
+            self._pending_select = None
+
             loop = asyncio.get_running_loop()
             results: list[DirectoryValidationResult] = await loop.run_in_executor(
                 None,
                 lambda: self._porringer.cache.validate_directories(check_manifest=True),
             )
 
-            self._combo.blockSignals(True)
-            current_text = self._combo.currentText()
-            self._combo.clear()
-
+            directories: list[tuple[Path, str, bool]] = []
+            current_paths: set[Path] = set()
             for result in results:
-                directory = result.directory
-                display = str(directory.path)
-                tooltip = directory.name or ''
+                d = result.directory
+                valid = result.exists and result.has_manifest is not False
+                path = Path(d.path)
+                directories.append((path, d.name or '', valid))
+                current_paths.add(path)
 
-                idx = self._combo.count()
-                self._combo.addItem(display)
-                self._combo.setItemData(idx, tooltip, Qt.ItemDataRole.ToolTipRole)
-                self._combo.setItemData(idx, str(directory.path), Qt.ItemDataRole.UserRole)
+            # Remove widgets for directories no longer in cache
+            for path in list(self._widgets):
+                if path not in current_paths:
+                    widget = self._widgets.pop(path)
+                    self._stack.removeWidget(widget)
+                    widget.reset()
+                    widget.deleteLater()
 
-                if not result.exists:
-                    # Grey out entries whose path no longer exists on disk
-                    self._grey_out_item(idx, tooltip, 'Path not found')
-                elif result.has_manifest is False:
-                    # Dim entries where the path exists but no manifest is found
-                    self._grey_out_item(idx, tooltip, 'No manifest found')
+            # Create new widgets for new directories
+            for path, _name, valid in directories:
+                if path not in self._widgets and valid:
+                    widget = SetupPreviewWidget(
+                        self._porringer,
+                        self,
+                        show_close=False,
+                        config=self._config,
+                    )
+                    widget.install_finished.connect(self._on_install_finished)
+                    widget.phase_changed.connect(
+                        lambda phase, p=path: self._on_widget_phase_changed(p, phase),
+                    )
+                    self._widgets[path] = widget
+                    self._stack.addWidget(widget)
 
-            # Restore previous selection if it still exists
-            idx = self._combo.findText(current_text)
-            if idx >= 0:
-                self._combo.setCurrentIndex(idx)
-            elif self._combo.count() > 0:
-                self._combo.setCurrentIndex(0)
+            # Rebuild sidebar
+            self._sidebar.set_directories(directories)
+            self._sidebar.select(previous)
 
-            self._combo.blockSignals(False)
-            self._update_remove_btn()
+            # Load all stacked widgets in parallel
+            for path, _name, valid in directories:
+                widget = self._widgets.get(path)
+                if widget is not None and valid:
+                    widget.load(
+                        str(path),
+                        project_directory=path if path.is_dir() else path.parent,
+                        detect_updates=self._config.detect_updates,
+                    )
 
-            # Trigger preview for the current selection
-            if self._combo.currentText():
-                path_text = self._combo.currentText().strip()
-                selected = Path(path_text)
-                self._preview.load(
-                    path_text,
-                    project_directory=selected if selected.is_dir() else selected.parent,
-                    detect_updates=self._config.detect_updates,
-                )
         except Exception:
             logger.exception('Failed to refresh projects')
         finally:
             self._loading_spinner.stop()
-            self._loading_spinner.lower()  # put behind content after loading
-            self._combo.setEnabled(True)
-            self._browse_btn.setEnabled(True)
-            self._update_remove_btn()
+            self._loading_spinner.lower()
+            self._sidebar.set_enabled(True)
             self._refresh_in_progress = False
-
-    def _grey_out_item(self, idx: int, tooltip: str, reason: str) -> None:
-        """Grey out a combo box item and append a reason to its tooltip."""
-        model = self._combo.model()
-        item = model.item(idx) if hasattr(model, 'item') else None
-        if isinstance(item, QStandardItem):
-            item.setForeground(self.palette().placeholderText())
-            item.setToolTip(f'{tooltip} \u2014 {reason}' if tooltip else reason)
 
     # --- Event handlers ---
 
-    def _on_selection_changed(self, _index: int) -> None:
-        """Handle combo box selection changes — delegate to the preview widget."""
-        self._update_remove_btn()
-        path_text = self._combo.currentText().strip()
-        if path_text:
-            selected = Path(path_text)
-            self._preview.load(
-                str(selected),
-                project_directory=selected if selected.is_dir() else selected.parent,
-                detect_updates=self._config.detect_updates,
-            )
+    def _on_selection_changed(self, path: Path) -> None:
+        """Handle sidebar selection — switch the stacked widget."""
+        widget = self._widgets.get(path)
+        if widget is not None:
+            self._stack.setCurrentWidget(widget)
+        else:
+            self._stack.setCurrentWidget(self._empty_placeholder)
 
-    def _on_browse(self) -> None:
-        """Open a file picker filtered to recognised manifest filenames."""
+    def _on_widget_phase_changed(self, path: Path, phase: PreviewPhase) -> None:
+        """Update the sidebar item's phase indicator."""
+        item = self._sidebar.get_item(path)
+        if item is not None:
+            item.set_phase(phase)
+
+    def _on_add(self) -> None:
+        """Open a file picker and immediately cache the chosen directory."""
         filenames = self._porringer.sync.manifest_filenames()
         filter_str = 'Manifests (' + ' '.join(filenames) + ');;All Files (*)'
         chosen, _ = QFileDialog.getOpenFileName(
             self,
             'Select Manifest File',
-            self._combo.currentText() or '',
+            '',
             filter_str,
         )
-        if chosen:
-            self._combo.setEditText(chosen)
-            selected = Path(chosen)
-            self._preview.load(
-                chosen,
-                project_directory=selected if selected.is_dir() else selected.parent,
-                detect_updates=self._config.detect_updates,
-            )
-
-    def _on_remove(self) -> None:
-        """Remove the currently selected directory from the cache."""
-        idx = self._combo.currentIndex()
-        if idx < 0:
+        if not chosen:
             return
 
-        path_str = self._combo.itemData(idx, Qt.ItemDataRole.UserRole)
-        if path_str:
-            self._porringer.cache.remove_directory(Path(path_str))
+        selected = Path(chosen)
+        directory = selected if selected.is_dir() else selected.parent
+
+        try:
+            self._porringer.cache.add_directory(directory)
+            logger.info('Cached new project directory: %s', directory)
+        except ValueError:
+            logger.debug('Directory already cached: %s', directory)
+
+        self._pending_select = directory
+        self.refresh()
+
+    def _on_remove(self, path: Path) -> None:
+        """Remove a directory from the porringer cache."""
+        self._porringer.cache.remove_directory(path)
+        logger.info('Removed project directory from cache: %s', path)
+
+        # Tear down the widget immediately
+        widget = self._widgets.pop(path, None)
+        if widget is not None:
+            self._stack.removeWidget(widget)
+            widget.reset()
+            widget.deleteLater()
 
         self.refresh()
 
     def _on_install_finished(self, _results: object) -> None:
-        """Register a new path in the cache after successful install.
-
-        The directory is added to the porringer cache and the combo box
-        is updated *without* reloading the preview, so the execution
-        log remains visible.  Combo signals are blocked during the
-        update to prevent ``_on_selection_changed`` from firing a
-        redundant :meth:`SetupPreviewWidget.load` (which would be
-        skipped anyway due to the DONE-phase guard, but blocking
-        is cleaner).
-        """
-        current_text = self._combo.currentText().strip()
-        if not current_text:
-            return
-
-        idx = self._combo.findText(current_text)
-        item_data = self._combo.itemData(idx, Qt.ItemDataRole.UserRole) if idx >= 0 else None
-        if item_data is None:
-            try:
-                self._porringer.cache.add_directory(Path(current_text))
-                logger.info('Registered new project directory: %s', current_text)
-                self._combo.blockSignals(True)
-                new_idx = self._combo.count()
-                self._combo.addItem(current_text)
-                self._combo.setItemData(new_idx, current_text, Qt.ItemDataRole.UserRole)
-                self._combo.setCurrentIndex(new_idx)
-                self._combo.blockSignals(False)
-                self._update_remove_btn()
-            except ValueError:
-                logger.debug('Directory already cached or invalid: %s', current_text)
-
-    def _update_remove_btn(self) -> None:
-        """Enable the Remove button only for cached (non-freeform) entries."""
-        idx = self._combo.currentIndex()
-        has_data = idx >= 0 and self._combo.itemData(idx, Qt.ItemDataRole.UserRole) is not None
-        self._remove_btn.setEnabled(has_data)
+        """Refresh after a successful install."""
+        self.refresh()
 
 
 class MainWindow(QMainWindow):

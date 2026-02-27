@@ -8,7 +8,7 @@ code focused on layout and behaviour rather than pixel tweaking.
 # Window sizes (width, height)
 # ---------------------------------------------------------------------------
 INSTALL_PREVIEW_MIN_SIZE = (650, 400)
-MAIN_WINDOW_MIN_SIZE = (600, 400)
+MAIN_WINDOW_MIN_SIZE = (900, 600)
 
 # ---------------------------------------------------------------------------
 # Layout margins (left, top, right, bottom)
@@ -359,3 +359,94 @@ UPDATE_BANNER_PROGRESS_STYLE = (
     '}'
 )
 """Thin inline progress bar for the downloading state."""
+
+# ---------------------------------------------------------------------------
+# Manifest sidebar
+# ---------------------------------------------------------------------------
+SIDEBAR_WIDTH = 220
+"""Fixed width for the manifest sidebar panel."""
+
+SIDEBAR_ITEM_HEIGHT = 32
+"""Fixed height for each manifest item row."""
+
+SIDEBAR_SPACING = 2
+"""Vertical spacing between manifest items."""
+
+SIDEBAR_STYLE = 'QFrame#sidebar {  background: #252526;  border-right: 1px solid palette(mid);}'
+"""Container style for the sidebar panel."""
+
+SIDEBAR_ITEM_STYLE = (
+    'QFrame#sidebarItem {'
+    '  background: transparent;'
+    '  border-radius: 4px;'
+    '  padding: 2px 8px;'
+    '}'
+    'QFrame#sidebarItem:hover {'
+    '  background: #2a2d2e;'
+    '}'
+)
+"""Default style for a manifest sidebar item."""
+
+SIDEBAR_ITEM_SELECTED_STYLE = 'QFrame#sidebarItem {  background: #094771;  border-radius: 4px;  padding: 2px 8px;}'
+"""Selected manifest sidebar item style — blue highlight."""
+
+SIDEBAR_ITEM_DIMMED_STYLE = (
+    'QFrame#sidebarItem {'
+    '  background: transparent;'
+    '  border-radius: 4px;'
+    '  padding: 2px 8px;'
+    '  border: 1px dashed palette(mid);'
+    '}'
+)
+"""Dimmed sidebar item for directories whose path or manifest is missing."""
+
+SIDEBAR_LABEL_STYLE = 'font-size: 12px; color: #cccccc;'
+"""Sidebar item text label style."""
+
+SIDEBAR_LABEL_DIMMED_STYLE = 'font-size: 12px; color: grey;'
+"""Sidebar item text label for dimmed/invalid entries."""
+
+SIDEBAR_CLOSE_STYLE = (
+    'QPushButton {'
+    '  border: none;'
+    '  font-size: 12px;'
+    '  color: transparent;'
+    '  padding: 0px 2px;'
+    '  min-width: 18px;'
+    '  max-width: 18px;'
+    '}'
+    'QFrame#sidebarItem:hover QPushButton { color: #808080; }'
+    'QPushButton:hover { color: #d4d4d4 !important; }'
+)
+"""Close (×) button — hidden until parent row is hovered."""
+
+SIDEBAR_ADD_STYLE = (
+    'QPushButton {'
+    '  background: transparent;'
+    '  border: 1px dashed palette(mid);'
+    '  border-radius: 4px;'
+    '  font-size: 16px;'
+    '  color: #808080;'
+    '  padding: 4px;'
+    '}'
+    'QPushButton:hover { color: #d4d4d4; border-color: #3794ff; }'
+)
+"""Add (+) button styled at the bottom of the sidebar."""
+
+SIDEBAR_HEADER_STYLE = 'font-size: 11px; font-weight: bold; color: #808080; text-transform: uppercase;'
+"""Style for the sidebar section heading."""
+
+SIDEBAR_PHASE_LOADING_STYLE = 'font-size: 10px; color: #3794ff;'
+"""Sidebar phase indicator — loading."""
+
+SIDEBAR_PHASE_READY_STYLE = 'font-size: 10px; color: #89d185;'
+"""Sidebar phase indicator — ready."""
+
+SIDEBAR_PHASE_ERROR_STYLE = 'font-size: 10px; color: #f48771;'
+"""Sidebar phase indicator — error."""
+
+SIDEBAR_PHASE_INSTALLING_STYLE = 'font-size: 10px; color: #d7ba7d;'
+"""Sidebar phase indicator — installing."""
+
+SIDEBAR_PHASE_DONE_STYLE = 'font-size: 10px; color: #89d185;'
+"""Sidebar phase indicator — done."""
