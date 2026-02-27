@@ -62,15 +62,19 @@ async def download_update(
 
 async def run_tool_updates(
     porringer: API,
-    plugins: list[str] | None = None,
+    plugins: set[str] | None = None,
+    include_packages: set[str] | None = None,
 ) -> int:
     """Re-sync all cached project manifests.
 
     Args:
         porringer: The porringer API instance.
-        plugins: Optional include-list of plugin names.  When set, only
+        plugins: Optional include-set of plugin names.  When set, only
             actions handled by these plugins are executed.  ``None``
             means all plugins.
+        include_packages: Optional include-set of package names.  When
+            set, only actions whose package name is in this set are
+            executed.  ``None`` means all packages.
 
     Returns:
         Number of manifests processed.
@@ -94,6 +98,7 @@ async def run_tool_updates(
             project_directory=path if path.is_dir() else None,
             strategy=SyncStrategy.LATEST,
             plugins=plugins,
+            include_packages=include_packages,
         )
         async for _event in porringer.sync.execute_stream(params):
             pass  # consume events to completion

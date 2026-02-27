@@ -9,6 +9,7 @@ from packaging.version import Version
 from synodic_client.config import BuildConfig, UserConfig
 from synodic_client.resolution import (
     ResolvedConfig,
+    resolve_auto_update_scope,
     resolve_config,
     resolve_enabled_plugins,
     resolve_update_config,
@@ -256,6 +257,91 @@ class TestResolveEnabledPlugins:
         config = _make_resolved(plugin_auto_update={})
         result = resolve_enabled_plugins(config, ['pip'])
         assert result is None
+
+    @staticmethod
+    def test_nested_dict_is_not_false() -> None:
+        """Verify a nested dict entry is not treated as disabled."""
+        config = _make_resolved(plugin_auto_update={'uv': {'ruff': True}})
+        result = resolve_enabled_plugins(config, ['uv', 'pip'])
+        # 'uv' has a dict value (not False) so it should still be enabled
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# resolve_auto_update_scope
+# ---------------------------------------------------------------------------
+
+
+class TestResolveAutoUpdateScope:
+    """Tests for resolve_auto_update_scope."""
+
+    @staticmethod
+    def test_no_mapping_returns_none_pair() -> None:
+        """Verify (None, None) when plugin_auto_update is unset."""
+        config = _make_resolved()
+        plugins, packages = resolve_auto_update_scope(config, ['pip', 'uv'])
+        assert plugins is None
+        assert packages is None
+
+    @staticmethod
+    def test_all_enabled_returns_none_pair() -> None:
+        """Verify (None, None) when all entries are True."""
+        config = _make_resolved(plugin_auto_update={'pip': True, 'uv': True})
+        plugins, packages = resolve_auto_update_scope(config, ['pip', 'uv'])
+        assert plugins is None
+        assert packages is None
+
+    @staticmethod
+    def test_plugin_disabled() -> None:
+        """Verify a disabled plugin is excluded."""
+        config = _make_resolved(plugin_auto_update={'pip': False})
+        plugins, packages = resolve_auto_update_scope(config, ['pip', 'uv'])
+        assert plugins is not None
+        assert 'pip' not in plugins
+        assert 'uv' in plugins
+        # No per-package filtering needed
+        assert packages is None
+
+    @staticmethod
+    def test_nested_dict_filters_packages() -> None:
+        """Verify nested dict creates a package allowlist."""
+        config = _make_resolved(
+            plugin_auto_update={'uv': {'ruff': True, 'mypy': False}},
+        )
+        plugins, packages = resolve_auto_update_scope(
+            config,
+            ['uv', 'pip'],
+            manifest_packages={'uv': {'ruff', 'black'}},
+        )
+        # 'uv' is not disabled at plugin level
+        assert plugins is None or 'uv' in plugins
+        # Package allowlist: ruff = True (explicit), black = True (manifest default),
+        # mypy = False (explicit) → only ruff and black
+        assert packages is not None
+        assert 'ruff' in packages
+        assert 'black' in packages
+        assert 'mypy' not in packages
+
+    @staticmethod
+    def test_mixed_entries() -> None:
+        """Verify a mix of bool and dict entries."""
+        config = _make_resolved(
+            plugin_auto_update={
+                'pip': False,
+                'uv': {'ruff': True},
+            },
+        )
+        plugins, packages = resolve_auto_update_scope(
+            config,
+            ['pip', 'uv', 'git'],
+        )
+        assert plugins is not None
+        assert 'pip' not in plugins
+        assert 'uv' in plugins
+        assert 'git' in plugins
+        # 'uv' has a nested dict → package filtering
+        assert packages is not None
+        assert 'ruff' in packages
 
 
 # ---------------------------------------------------------------------------

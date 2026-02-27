@@ -21,8 +21,8 @@ from synodic_client.application.workers import check_for_update, download_update
 from synodic_client.client import Client
 from synodic_client.resolution import (
     ResolvedConfig,
+    resolve_auto_update_scope,
     resolve_config,
-    resolve_enabled_plugins,
     resolve_update_config,
 )
 from synodic_client.updater import UpdateInfo
@@ -81,11 +81,11 @@ class TrayScreen:
         self._tool_update_timer: QTimer | None = None
         self._restart_tool_update_timer()
 
-        # Connect PluginsView signals when available
-        plugins_view = window.plugins_view
-        if plugins_view is not None:
-            plugins_view.update_all_requested.connect(self._on_tool_update)
-            plugins_view.plugin_update_requested.connect(self._on_single_plugin_update)
+        # Connect ToolsView signals when available
+        tools_view = window.tools_view
+        if tools_view is not None:
+            tools_view.update_all_requested.connect(self._on_tool_update)
+            tools_view.plugin_update_requested.connect(self._on_single_plugin_update)
 
         # Connect update banner signals
         self._banner = window.update_banner
@@ -327,10 +327,17 @@ class TrayScreen:
 
         all_plugins = await loop.run_in_executor(None, _list_plugins)
         all_names = [p.name for p in all_plugins if p.installed]
-        enabled = resolve_enabled_plugins(config, all_names)
+        enabled_plugins, include_packages = resolve_auto_update_scope(
+            config,
+            all_names,
+        )
 
         try:
-            count = await run_tool_updates(porringer, plugins=enabled)
+            count = await run_tool_updates(
+                porringer,
+                plugins=enabled_plugins,
+                include_packages=include_packages,
+            )
             self._on_tool_update_finished(count)
         except Exception as exc:
             logger.exception('Tool update failed')
@@ -350,8 +357,23 @@ class TrayScreen:
 
     async def _async_single_plugin_update(self, porringer: API, plugin_name: str) -> None:
         """Run a single-plugin tool update and route results."""
+        config = self._resolve_config()
+        mapping = config.plugin_auto_update or {}
+        pkg_entry = mapping.get(plugin_name)
+
+        # Resolve per-package filtering for this plugin
+        include_packages: set[str] | None = None
+        if isinstance(pkg_entry, dict):
+            enabled_pkgs = {name for name, enabled in pkg_entry.items() if enabled}
+            if enabled_pkgs:
+                include_packages = enabled_pkgs
+
         try:
-            count = await run_tool_updates(porringer, plugins=[plugin_name])
+            count = await run_tool_updates(
+                porringer,
+                plugins={plugin_name},
+                include_packages=include_packages,
+            )
             self._on_tool_update_finished(count)
         except Exception as exc:
             logger.exception('Tool update failed')

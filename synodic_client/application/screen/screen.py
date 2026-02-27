@@ -3,26 +3,30 @@
 import asyncio
 import logging
 from collections import OrderedDict
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from porringer.api import API
-from porringer.schema import DirectoryValidationResult, ManifestDirectory, PluginInfo
+from porringer.schema import (
+    DirectoryValidationResult,
+    ManifestDirectory,
+    PluginInfo,
+    ProgressEventKind,
+    SetupAction,
+    SetupParameters,
+)
 from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMainWindow,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
-    QTableWidget,
-    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -30,20 +34,25 @@ from PySide6.QtWidgets import (
 
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen import plugin_kind_group_label
-from synodic_client.application.screen.card import CHEVRON_DOWN, CHEVRON_RIGHT, ClickableHeader
 from synodic_client.application.screen.install import PreviewPhase, SetupPreviewWidget
 from synodic_client.application.screen.sidebar import ManifestSidebar
 from synodic_client.application.screen.spinner import SpinnerWidget
 from synodic_client.application.screen.update_banner import UpdateBanner
 from synodic_client.application.theme import (
     COMPACT_MARGINS,
-    LOG_CHEVRON_STYLE,
-    LOG_SECTION_TITLE_STYLE,
     MAIN_WINDOW_MIN_SIZE,
-    PLUGIN_GROUP_HEADER_STYLE,
-    PLUGIN_GROUP_SECTION_SPACING,
-    PLUGIN_GROUP_TITLE_STYLE,
-    PLUGIN_SECTION_HEADER_STYLE,
+    PLUGIN_KIND_HEADER_STYLE,
+    PLUGIN_PROVIDER_NAME_STYLE,
+    PLUGIN_PROVIDER_STATUS_INSTALLED_STYLE,
+    PLUGIN_PROVIDER_STATUS_MISSING_STYLE,
+    PLUGIN_PROVIDER_STYLE,
+    PLUGIN_PROVIDER_VERSION_STYLE,
+    PLUGIN_ROW_GLOBAL_STYLE,
+    PLUGIN_ROW_NAME_STYLE,
+    PLUGIN_ROW_PROJECT_STYLE,
+    PLUGIN_ROW_STYLE,
+    PLUGIN_ROW_TOGGLE_STYLE,
+    PLUGIN_ROW_VERSION_STYLE,
     PLUGIN_SECTION_SPACING,
     PLUGIN_TOGGLE_STYLE,
     PLUGIN_UPDATE_STYLE,
@@ -56,242 +65,208 @@ logger = logging.getLogger(__name__)
 # Plugin kinds that support auto-update and per-plugin upgrade.
 _UPDATABLE_KINDS = frozenset({PluginKind.TOOL, PluginKind.PACKAGE})
 
-
-@dataclass
-class PluginSectionData:
-    """Data needed to construct a :class:`PluginSection`."""
-
-    name: str
-    version: str
-    packages: list[tuple[str, str]] = field(default_factory=list)
-    auto_update: bool = True
-    show_controls: bool = False
-    installed: bool = True
+# Preferred display ordering — Tools first, then alphabetical for the rest.
+_KIND_DISPLAY_ORDER: dict[PluginKind, int] = {
+    PluginKind.TOOL: 0,
+    PluginKind.PACKAGE: 1,
+    PluginKind.RUNTIME: 2,
+    PluginKind.PROJECT: 3,
+    PluginKind.SCM: 4,
+}
 
 
-class PluginSection(QWidget):
-    """Collapsible section displaying a single plugin and its managed packages."""
+# ---------------------------------------------------------------------------
+# Plugin kind header — uppercase section divider
+# ---------------------------------------------------------------------------
+
+
+class PluginKindHeader(QLabel):
+    """Uppercase, muted section divider for a plugin-kind group.
+
+    Displays a label like ``TOOLS`` or ``PACKAGES`` with a subtle bottom
+    border, matching VS Code's sidebar heading style.
+    """
+
+    def __init__(self, kind: PluginKind, parent: QWidget | None = None) -> None:
+        super().__init__(plugin_kind_group_label(kind).upper(), parent)
+        self.setObjectName('pluginKindHeader')
+        self.setStyleSheet(PLUGIN_KIND_HEADER_STYLE)
+
+
+# ---------------------------------------------------------------------------
+# Plugin provider header — thin row for the managing plugin
+# ---------------------------------------------------------------------------
+
+
+class PluginProviderHeader(QFrame):
+    """Thin sub-header row identifying the plugin that provides a set of tools.
+
+    Shows the plugin name, version, installed status, and — for updatable
+    kinds — ``Auto`` and ``Update`` buttons.
+    """
 
     auto_update_toggled = Signal(str, bool)
     """Emitted with ``(plugin_name, enabled)`` when the auto-update toggle changes."""
 
     update_requested = Signal(str)
-    """Emitted with the plugin name when the per-plugin Update button is clicked."""
-
-    def __init__(self, data: PluginSectionData, parent: QWidget | None = None) -> None:
-        """Initialise the section.
-
-        Args:
-            data: Plugin metadata and package list.
-            parent: Optional parent widget.
-        """
-        super().__init__(parent)
-        self._plugin_name = data.name
-        self._expanded = False
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        self._header = self._build_header(
-            data.name,
-            data.version,
-            data.auto_update,
-            data.show_controls,
-            installed=data.installed,
-        )
-        layout.addWidget(self._header)
-
-        self._body = self._build_body(data.packages)
-        self._body.setVisible(False)
-        layout.addWidget(self._body)
-
-    # --- Header / body builders ---
-
-    def _build_header(
-        self,
-        plugin_name: str,
-        version: str,
-        auto_update: bool,
-        show_controls: bool,
-        *,
-        installed: bool = True,
-    ) -> ClickableHeader:
-        """Construct the clickable header row."""
-        header = ClickableHeader('pluginHeader', PLUGIN_SECTION_HEADER_STYLE)
-        header.clicked.connect(self._toggle)
-
-        header_layout = header.header_layout
-
-        self._chevron = QLabel(CHEVRON_RIGHT)
-        self._chevron.setStyleSheet(LOG_CHEVRON_STYLE)
-        self._chevron.setFixedWidth(14)
-        header_layout.addWidget(self._chevron)
-
-        title = QLabel(plugin_name)
-        title.setStyleSheet(LOG_SECTION_TITLE_STYLE)
-        header_layout.addWidget(title)
-
-        version_label = QLabel(version)
-        version_label.setStyleSheet('color: grey;')
-        header_layout.addWidget(version_label)
-
-        header_layout.addStretch()
-
-        if show_controls:
-            self._toggle_btn = QPushButton('Auto')
-            self._toggle_btn.setCheckable(True)
-            self._toggle_btn.setChecked(auto_update)
-            self._toggle_btn.setStyleSheet(PLUGIN_TOGGLE_STYLE)
-            self._toggle_btn.setToolTip('Enable automatic updates for this plugin')
-            self._toggle_btn.clicked.connect(self._on_toggle_clicked)
-            header_layout.addWidget(self._toggle_btn)
-
-            update_btn = QPushButton('Update')
-            update_btn.setStyleSheet(PLUGIN_UPDATE_STYLE)
-            update_btn.setToolTip(f'Upgrade packages via {plugin_name} now')
-            update_btn.clicked.connect(
-                lambda: self.update_requested.emit(self._plugin_name),
-            )
-            header_layout.addWidget(update_btn)
-
-            if not installed:
-                self._toggle_btn.setEnabled(False)
-                self._toggle_btn.setChecked(False)
-                self._toggle_btn.setToolTip('Not installed \u2014 cannot auto-update')
-                update_btn.setEnabled(False)
-                update_btn.setToolTip('Not installed \u2014 cannot update')
-
-        return header
-
-    @staticmethod
-    def _build_body(packages: list[tuple[str, str]]) -> QWidget:
-        """Construct the collapsible body with a package table."""
-        body = QWidget()
-        body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(20, 4, 0, 4)
-        body_layout.setSpacing(2)
-
-        if packages:
-            table = QTableWidget(len(packages), 2)
-            table.setHorizontalHeaderLabels(['Package', 'Project'])
-            table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-            table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-            table.setAlternatingRowColors(True)
-            table.verticalHeader().setVisible(False)
-            h = table.horizontalHeader()
-            h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-            h.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-            for row, (pkg, proj) in enumerate(packages):
-                table.setItem(row, 0, QTableWidgetItem(pkg))
-                table.setItem(row, 1, QTableWidgetItem(proj))
-            body_layout.addWidget(table)
-        else:
-            body_layout.addWidget(QLabel('No packages found'))
-
-        return body
-
-    # --- Collapse / expand ---
-
-    def _toggle(self) -> None:
-        """Toggle the body visibility."""
-        self._expanded = not self._expanded
-        self._body.setVisible(self._expanded)
-        self._chevron.setText(CHEVRON_DOWN if self._expanded else CHEVRON_RIGHT)
-
-    # --- Callbacks ---
-
-    def _on_toggle_clicked(self, checked: bool) -> None:
-        """Forward auto-update toggle state change."""
-        self.auto_update_toggled.emit(self._plugin_name, checked)
-
-
-class PluginGroupSection(QWidget):
-    """Collapsible group of :class:`PluginSection` widgets sharing the same kind.
-
-    The group header displays a human-readable label derived from the
-    :class:`~porringer.schema.PluginKind`.  New kinds are handled
-    automatically via :func:`plugin_kind_group_label`.
-    """
+    """Emitted with the plugin name when the per-plugin *Update* button is clicked."""
 
     def __init__(
         self,
-        kind: PluginKind,
+        plugin: PluginInfo,
+        auto_update: bool = True,
+        *,
+        show_controls: bool = False,
         parent: QWidget | None = None,
     ) -> None:
-        """Initialise the group section.
-
-        Args:
-            kind: The plugin kind this group represents.
-            parent: Optional parent widget.
-        """
         super().__init__(parent)
-        self._kind = kind
-        self._expanded = True
-        self._sections: list[PluginSection] = []
+        self.setObjectName('pluginProvider')
+        self.setStyleSheet(PLUGIN_PROVIDER_STYLE)
+        self._plugin_name = plugin.name
 
-        layout = QVBoxLayout(self)
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setSpacing(6)
 
-        self._header = self._build_header(kind)
-        layout.addWidget(self._header)
+        # Plugin name
+        name_label = QLabel(plugin.name)
+        name_label.setStyleSheet(PLUGIN_PROVIDER_NAME_STYLE)
+        layout.addWidget(name_label)
 
-        self._body = QWidget()
-        self._body_layout = QVBoxLayout(self._body)
-        self._body_layout.setContentsMargins(8, 0, 0, 0)
-        self._body_layout.setSpacing(PLUGIN_GROUP_SECTION_SPACING)
-        layout.addWidget(self._body)
+        # Version
+        version_text = (
+            str(plugin.tool_version)
+            if plugin.tool_version is not None
+            else 'Installed'
+            if plugin.installed
+            else 'Not installed'
+        )
+        version_label = QLabel(version_text)
+        version_label.setStyleSheet(PLUGIN_PROVIDER_VERSION_STYLE)
+        layout.addWidget(version_label)
 
-    # --- Header builder ---
+        # Installed indicator
+        status_label = QLabel('\u25cf' if plugin.installed else '\u25cb')
+        status_label.setStyleSheet(
+            PLUGIN_PROVIDER_STATUS_INSTALLED_STYLE if plugin.installed else PLUGIN_PROVIDER_STATUS_MISSING_STYLE
+        )
+        status_label.setToolTip('Installed' if plugin.installed else 'Not installed')
+        layout.addWidget(status_label)
 
-    def _build_header(self, kind: PluginKind) -> ClickableHeader:
-        """Construct the clickable group header row."""
-        header = ClickableHeader('pluginGroupHeader', PLUGIN_GROUP_HEADER_STYLE)
-        header.clicked.connect(self._toggle)
+        layout.addStretch()
 
-        header_layout = header.header_layout
+        # Auto / Update controls (only for updatable kinds)
+        if show_controls:
+            toggle_btn = QPushButton('Auto')
+            toggle_btn.setCheckable(True)
+            toggle_btn.setChecked(auto_update)
+            toggle_btn.setStyleSheet(PLUGIN_TOGGLE_STYLE)
+            toggle_btn.setToolTip('Enable automatic updates for this plugin')
+            toggle_btn.clicked.connect(
+                lambda checked: self.auto_update_toggled.emit(self._plugin_name, checked),
+            )
+            layout.addWidget(toggle_btn)
 
-        self._chevron = QLabel(CHEVRON_DOWN)
-        self._chevron.setStyleSheet(LOG_CHEVRON_STYLE)
-        self._chevron.setFixedWidth(14)
-        header_layout.addWidget(self._chevron)
+            update_btn = QPushButton('Update')
+            update_btn.setStyleSheet(PLUGIN_UPDATE_STYLE)
+            update_btn.setToolTip(f'Upgrade packages via {plugin.name} now')
+            update_btn.clicked.connect(
+                lambda: self.update_requested.emit(self._plugin_name),
+            )
+            layout.addWidget(update_btn)
 
-        title = QLabel(plugin_kind_group_label(kind))
-        title.setStyleSheet(PLUGIN_GROUP_TITLE_STYLE)
-        header_layout.addWidget(title)
-
-        header_layout.addStretch()
-        return header
-
-    # --- Public helpers ---
-
-    @property
-    def kind(self) -> PluginKind:
-        """Return the plugin kind for this group."""
-        return self._kind
-
-    @property
-    def sections(self) -> list[PluginSection]:
-        """Return the child plugin sections."""
-        return list(self._sections)
-
-    def add_section(self, section: PluginSection) -> None:
-        """Append a :class:`PluginSection` to this group."""
-        self._body_layout.addWidget(section)
-        self._sections.append(section)
-
-    # --- Collapse / expand ---
-
-    def _toggle(self) -> None:
-        """Toggle the body visibility."""
-        self._expanded = not self._expanded
-        self._body.setVisible(self._expanded)
-        self._chevron.setText(CHEVRON_DOWN if self._expanded else CHEVRON_RIGHT)
+            if not plugin.installed:
+                toggle_btn.setEnabled(False)
+                toggle_btn.setChecked(False)
+                toggle_btn.setToolTip('Not installed \u2014 cannot auto-update')
+                update_btn.setEnabled(False)
+                update_btn.setToolTip('Not installed \u2014 cannot update')
 
 
-class PluginsView(QWidget):
-    """Scrollable list of collapsible plugin sections with auto-update controls."""
+# ---------------------------------------------------------------------------
+# Plugin row — compact package / tool entry
+# ---------------------------------------------------------------------------
+
+
+class PluginRow(QFrame):
+    """Compact row showing an individual package or tool managed by a plugin.
+
+    Displays the package name, the project it belongs to, and its version.
+    The row highlights on hover using VS Code dark-theme colours.
+
+    When *show_toggle* is ``True`` an inline **Auto** button lets the user
+    toggle per-package auto-update.  If *is_global* is ``True`` and no
+    *project* is given, a muted ``(global)`` annotation is shown.
+    """
+
+    auto_update_toggled = Signal(str, str, bool)
+    """Emitted with ``(plugin_name, package_name, enabled)`` on toggle."""
+
+    def __init__(
+        self,
+        name: str,
+        project: str = '',
+        version: str = '',
+        *,
+        plugin_name: str = '',
+        auto_update: bool = False,
+        show_toggle: bool = False,
+        is_global: bool = False,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName('pluginRow')
+        self.setStyleSheet(PLUGIN_ROW_STYLE)
+        self._plugin_name = plugin_name
+        self._package_name = name
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        name_label = QLabel(name)
+        name_label.setStyleSheet(PLUGIN_ROW_NAME_STYLE)
+        layout.addWidget(name_label)
+
+        if project:
+            project_label = QLabel(project)
+            project_label.setStyleSheet(PLUGIN_ROW_PROJECT_STYLE)
+            layout.addWidget(project_label)
+        elif is_global:
+            global_label = QLabel('(global)')
+            global_label.setStyleSheet(PLUGIN_ROW_GLOBAL_STYLE)
+            layout.addWidget(global_label)
+
+        layout.addStretch()
+
+        if show_toggle:
+            toggle_btn = QPushButton('Auto')
+            toggle_btn.setCheckable(True)
+            toggle_btn.setChecked(auto_update)
+            toggle_btn.setStyleSheet(PLUGIN_ROW_TOGGLE_STYLE)
+            toggle_btn.setToolTip('Auto-update this package')
+            toggle_btn.clicked.connect(
+                lambda checked: self.auto_update_toggled.emit(
+                    self._plugin_name,
+                    self._package_name,
+                    checked,
+                ),
+            )
+            layout.addWidget(toggle_btn)
+
+        if version:
+            version_label = QLabel(version)
+            version_label.setStyleSheet(PLUGIN_ROW_VERSION_STYLE)
+            layout.addWidget(version_label)
+
+
+class ToolsView(QWidget):
+    """Central update hub showing installed tools and packages.
+
+    Only displays ``TOOL`` and ``PACKAGE`` kind plugins that have a
+    ``tool_version`` or managed packages.  Each tool has ``Auto`` /
+    ``Update`` controls.  Empty plugins are hidden.
+    """
 
     update_all_requested = Signal()
     """Emitted when the global *Update All* button is clicked."""
@@ -305,7 +280,7 @@ class PluginsView(QWidget):
         config: ResolvedConfig,
         parent: QWidget | None = None,
     ) -> None:
-        """Initialize the plugins view.
+        """Initialize the tools view.
 
         Args:
             porringer: The porringer API instance.
@@ -315,7 +290,7 @@ class PluginsView(QWidget):
         super().__init__(parent)
         self._porringer = porringer
         self._config = config
-        self._groups: list[PluginGroupSection] = []
+        self._section_widgets: list[QWidget] = []
         self._refresh_in_progress = False
         self._init_ui()
 
@@ -324,8 +299,8 @@ class PluginsView(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(*COMPACT_MARGINS)
 
-        # Loading indicator (shown while data is fetched asynchronously)
-        self._loading_spinner = SpinnerWidget('Loading plugins\u2026')
+        # Loading indicator
+        self._loading_spinner = SpinnerWidget('Loading tools\u2026')
         outer.addWidget(self._loading_spinner)
 
         # Toolbar
@@ -354,13 +329,19 @@ class PluginsView(QWidget):
     # --- Public API ---
 
     def refresh(self) -> None:
-        """Schedule an asynchronous rebuild of the plugin sections."""
+        """Schedule an asynchronous rebuild of the tool list."""
         if self._refresh_in_progress:
             return
         asyncio.create_task(self._async_refresh())
 
     async def _async_refresh(self) -> None:
-        """Rebuild the plugin sections from porringer data, grouped by kind."""
+        """Rebuild the tool list from porringer data.
+
+        Walks every cached project manifest to determine which packages
+        are *manifest-referenced* vs. *global*.  Manifest packages
+        default to auto-update **on**; global packages default to **off**.
+        Per-package toggles honour the nested-dict config shape.
+        """
         self._refresh_in_progress = True
         self._loading_spinner.start()
 
@@ -368,11 +349,11 @@ class PluginsView(QWidget):
             loop = asyncio.get_running_loop()
             plugins, directories = await loop.run_in_executor(
                 None,
-                self._fetch_plugin_data,
+                self._fetch_data,
             )
 
-            # Gather packages for updatable plugins (async)
-            packages_map: dict[str, list[tuple[str, str]]] = {}
+            # Gather packages for updatable plugins
+            packages_map: dict[str, list[tuple[str, str, str]]] = {}
             for plugin in plugins:
                 if plugin.kind in _UPDATABLE_KINDS:
                     packages_map[plugin.name] = await self._gather_packages(
@@ -380,91 +361,147 @@ class PluginsView(QWidget):
                         directories,
                     )
 
-            # Clear existing groups
-            for group in self._groups:
-                self._container_layout.removeWidget(group)
-                group.deleteLater()
-            self._groups.clear()
+            # Gather manifest requirements → plugin_name → set of package names
+            manifest_packages: dict[str, set[str]] = {}
+            for directory in directories:
+                actions = await self._gather_project_requirements(directory)
+                for action in actions:
+                    if action.package and action.installer:
+                        manifest_packages.setdefault(action.installer, set()).add(
+                            str(action.package.name),
+                        )
+
+            # Clear existing widgets
+            for widget in self._section_widgets:
+                self._container_layout.removeWidget(widget)
+                widget.deleteLater()
+            self._section_widgets.clear()
 
             auto_update_map = self._config.plugin_auto_update or {}
 
-            # Bucket plugins by kind, preserving discovery order within each bucket
-            kind_buckets: OrderedDict[PluginKind, list[PluginInfo]] = OrderedDict()
-            for plugin in plugins:
-                kind_buckets.setdefault(plugin.kind, []).append(plugin)
+            # Only show TOOL / PACKAGE kinds that have content
+            updatable = [p for p in plugins if p.kind in _UPDATABLE_KINDS]
 
-            for kind, bucket in kind_buckets.items():
-                group = PluginGroupSection(kind, parent=self._container)
+            # Bucket by kind
+            kind_buckets: OrderedDict[PluginKind, list[PluginInfo]] = OrderedDict()
+            for plugin in updatable:
+                has_version = plugin.tool_version is not None
+                has_packages = bool(packages_map.get(plugin.name))
+                if has_version or has_packages:
+                    kind_buckets.setdefault(plugin.kind, []).append(plugin)
+
+            sorted_kinds = sorted(
+                kind_buckets.keys(),
+                key=lambda k: _KIND_DISPLAY_ORDER.get(k, 99),
+            )
+
+            for kind in sorted_kinds:
+                bucket = kind_buckets[kind]
+
+                kind_header = PluginKindHeader(kind, parent=self._container)
+                idx = self._container_layout.count() - 1
+                self._container_layout.insertWidget(idx, kind_header)
+                self._section_widgets.append(kind_header)
 
                 for plugin in bucket:
-                    packages = packages_map.get(plugin.name, [])
-                    section = PluginsView._build_plugin_section(
-                        plugin,
-                        packages,
-                        auto_update_map,
-                        parent=group,
-                    )
-                    section.auto_update_toggled.connect(self._on_auto_update_toggled)
-                    section.update_requested.connect(self.plugin_update_requested.emit)
-                    group.add_section(section)
+                    auto_val = auto_update_map.get(plugin.name, True)
+                    provider_checked = auto_val is not False
 
-                # Insert before the trailing stretch
-                idx = self._container_layout.count() - 1
-                self._container_layout.insertWidget(idx, group)
-                self._groups.append(group)
+                    provider = PluginProviderHeader(
+                        plugin,
+                        provider_checked,
+                        show_controls=True,
+                        parent=self._container,
+                    )
+                    provider.auto_update_toggled.connect(self._on_auto_update_toggled)
+                    provider.update_requested.connect(self.plugin_update_requested.emit)
+                    idx = self._container_layout.count() - 1
+                    self._container_layout.insertWidget(idx, provider)
+                    self._section_widgets.append(provider)
+
+                    plugin_manifest = manifest_packages.get(plugin.name, set())
+                    raw_packages = packages_map.get(plugin.name, [])
+
+                    # Merge duplicates: same package from multiple
+                    # directories becomes one row with a combined
+                    # project label.  Global packages are always
+                    # deduplicated; manifest packages merge their
+                    # project names with ", ".
+                    merged: OrderedDict[str, tuple[list[str], str, bool]] = OrderedDict()
+                    for pkg_name, proj_name, pkg_version in raw_packages:
+                        is_global = pkg_name not in plugin_manifest
+                        if pkg_name in merged:
+                            existing_projects, _, _ = merged[pkg_name]
+                            if not is_global and proj_name and proj_name not in existing_projects:
+                                existing_projects.append(proj_name)
+                        else:
+                            projects = [] if is_global else ([proj_name] if proj_name else [])
+                            merged[pkg_name] = (projects, pkg_version, is_global)
+
+                    if merged:
+                        for pkg_name, (
+                            projects,
+                            pkg_version,
+                            is_global,
+                        ) in merged.items():
+                            # Determine per-package auto-update state
+                            if isinstance(auto_val, dict):
+                                pkg_auto = auto_val.get(pkg_name, not is_global)
+                            elif auto_val is False:
+                                pkg_auto = False
+                            else:
+                                pkg_auto = not is_global
+
+                            row = PluginRow(
+                                pkg_name,
+                                project=', '.join(projects),
+                                version=pkg_version,
+                                plugin_name=plugin.name,
+                                auto_update=pkg_auto,
+                                show_toggle=True,
+                                is_global=is_global,
+                                parent=self._container,
+                            )
+                            row.auto_update_toggled.connect(
+                                self._on_package_auto_update_toggled,
+                            )
+                            idx = self._container_layout.count() - 1
+                            self._container_layout.insertWidget(idx, row)
+                            self._section_widgets.append(row)
+                    else:
+                        version_text = str(plugin.tool_version) if plugin.tool_version is not None else ''
+                        row = PluginRow(
+                            plugin.name,
+                            version=version_text,
+                            parent=self._container,
+                        )
+                        idx = self._container_layout.count() - 1
+                        self._container_layout.insertWidget(idx, row)
+                        self._section_widgets.append(row)
+
         except Exception:
-            logger.exception('Failed to refresh plugins')
+            logger.exception('Failed to refresh tools')
         finally:
             self._loading_spinner.stop()
             self._refresh_in_progress = False
 
-    def _fetch_plugin_data(
-        self,
-    ) -> tuple[list[PluginInfo], list[ManifestDirectory]]:
-        """Fetch plugin list and directories from porringer (sync, run in executor)."""
+    def _fetch_data(self) -> tuple[list[PluginInfo], list[ManifestDirectory]]:
+        """Fetch plugin list and directories (sync, run in executor)."""
         plugins = self._porringer.plugin.list()
         directories = self._porringer.cache.list_directories()
         return plugins, directories
-
-    @staticmethod
-    def _build_plugin_section(
-        plugin: PluginInfo,
-        packages: list[tuple[str, str]],
-        auto_update_map: dict[str, bool],
-        *,
-        parent: QWidget | None = None,
-    ) -> PluginSection:
-        """Create a :class:`PluginSection` for a single plugin."""
-        installed = plugin.installed
-        version = (
-            str(plugin.tool_version)
-            if plugin.tool_version is not None
-            else 'Installed'
-            if installed
-            else 'Not installed'
-        )
-        show_controls = plugin.kind in _UPDATABLE_KINDS
-        auto_update = auto_update_map.get(plugin.name, True)
-
-        return PluginSection(
-            PluginSectionData(
-                name=plugin.name,
-                version=version,
-                packages=packages,
-                auto_update=auto_update,
-                show_controls=show_controls,
-                installed=installed,
-            ),
-            parent=parent,
-        )
 
     async def _gather_packages(
         self,
         plugin_name: str,
         directories: list[ManifestDirectory],
-    ) -> list[tuple[str, str]]:
-        """Collect packages managed by *plugin_name* across cached projects."""
-        packages: list[tuple[str, str]] = []
+    ) -> list[tuple[str, str, str]]:
+        """Collect packages managed by *plugin_name* across cached projects.
+
+        Returns:
+            A list of ``(package_name, project_label, version)`` tuples.
+        """
+        packages: list[tuple[str, str, str]] = []
         for directory in directories:
             try:
                 pkgs = await self._porringer.plugin.list_packages(
@@ -473,7 +510,11 @@ class PluginsView(QWidget):
                 )
                 for pkg in pkgs:
                     packages.append(
-                        (str(pkg.name), directory.name or str(directory.path)),
+                        (
+                            str(pkg.name),
+                            directory.name or str(directory.path),
+                            str(pkg.version) if pkg.version else '',
+                        ),
                     )
             except Exception:
                 logger.debug(
@@ -484,10 +525,46 @@ class PluginsView(QWidget):
                 )
         return packages
 
+    async def _gather_project_requirements(
+        self,
+        directory: ManifestDirectory,
+    ) -> list[SetupAction]:
+        """Run a dry-run execute_stream for *directory* and collect actions."""
+        actions: list[SetupAction] = []
+        try:
+            path = Path(directory.path)
+            filenames = self._porringer.sync.manifest_filenames()
+            manifest_path: Path | None = None
+            for fname in filenames:
+                candidate = path / fname
+                if candidate.exists():
+                    manifest_path = candidate
+                    break
+
+            if manifest_path is None:
+                return actions
+
+            params = SetupParameters(
+                paths=[str(manifest_path)],
+                dry_run=True,
+                project_directory=path,
+            )
+            async for event in self._porringer.sync.execute_stream(params):
+                if event.kind == ProgressEventKind.MANIFEST_PARSED and event.manifest:
+                    actions.extend(event.manifest.actions)
+                    break
+        except Exception:
+            logger.debug(
+                'Could not gather requirements for %s',
+                directory.path,
+                exc_info=True,
+            )
+        return actions
+
     # --- Callbacks ---
 
     def _on_auto_update_toggled(self, plugin_name: str, enabled: bool) -> None:
-        """Persist the auto-update toggle change to config."""
+        """Persist the plugin-level auto-update toggle change to config."""
         mapping = dict(self._config.plugin_auto_update or {})
 
         if enabled:
@@ -495,10 +572,40 @@ class PluginsView(QWidget):
         else:
             mapping[plugin_name] = False
 
-        # Clean up the dict if all plugins are enabled
         new_value = mapping if mapping else None
         self._config = update_user_config(plugin_auto_update=new_value)
         logger.info('Auto-update for %s set to %s', plugin_name, enabled)
+
+    def _on_package_auto_update_toggled(
+        self,
+        plugin_name: str,
+        package_name: str,
+        enabled: bool,
+    ) -> None:
+        """Persist a per-package auto-update override to the nested config dict."""
+        mapping = dict(self._config.plugin_auto_update or {})
+        current = mapping.get(plugin_name)
+
+        if isinstance(current, dict):
+            pkg_dict: dict[str, bool] = dict(current)
+        else:
+            pkg_dict = {}
+
+        pkg_dict[package_name] = enabled
+
+        if pkg_dict:
+            mapping[plugin_name] = pkg_dict
+        else:
+            mapping.pop(plugin_name, None)
+
+        new_value = mapping if mapping else None
+        self._config = update_user_config(plugin_auto_update=new_value)
+        logger.info(
+            'Auto-update for %s/%s set to %s',
+            plugin_name,
+            package_name,
+            enabled,
+        )
 
 
 class ProjectsView(QWidget):
@@ -712,7 +819,7 @@ class MainWindow(QMainWindow):
     """Emitted when the user clicks the settings gear button."""
 
     _tabs: QTabWidget | None = None
-    _plugins_view: PluginsView | None = None
+    _tools_view: ToolsView | None = None
     _projects_view: ProjectsView | None = None
 
     def __init__(
@@ -742,9 +849,9 @@ class MainWindow(QMainWindow):
         return self._porringer
 
     @property
-    def plugins_view(self) -> PluginsView | None:
-        """Return the plugins view, if initialised."""
-        return self._plugins_view
+    def tools_view(self) -> ToolsView | None:
+        """Return the tools view, if initialised."""
+        return self._tools_view
 
     @property
     def update_banner(self) -> UpdateBanner:
@@ -759,8 +866,8 @@ class MainWindow(QMainWindow):
             self._projects_view = ProjectsView(self._porringer, self._config, self)
             self._tabs.addTab(self._projects_view, 'Projects')
 
-            self._plugins_view = PluginsView(self._porringer, self._config, self)
-            self._tabs.addTab(self._plugins_view, 'Plugins')
+            self._tools_view = ToolsView(self._porringer, self._config, self)
+            self._tabs.addTab(self._tools_view, 'Tools')
 
             gear_btn = QPushButton('\u2699')
             gear_btn.setStyleSheet(SETTINGS_GEAR_STYLE)
@@ -781,8 +888,8 @@ class MainWindow(QMainWindow):
         # Paint the window immediately, then refresh data asynchronously
         super().show()
 
-        if self._plugins_view is not None:
-            self._plugins_view.refresh()
+        if self._tools_view is not None:
+            self._tools_view.refresh()
         if self._projects_view is not None:
             self._projects_view.refresh()
 

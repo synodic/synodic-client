@@ -58,7 +58,7 @@ class ResolvedConfig:
     update_channel: str
     auto_update_interval_minutes: int
     tool_update_interval_minutes: int
-    plugin_auto_update: dict[str, bool] | None
+    plugin_auto_update: dict[str, bool | dict[str, bool]] | None
     detect_updates: bool
     prerelease_packages: dict[str, list[str]] | None
     auto_start: bool
@@ -258,8 +258,80 @@ def resolve_enabled_plugins(
     if not mapping:
         return None
 
-    disabled = {name for name, enabled in mapping.items() if not enabled}
+    disabled = {name for name, enabled in mapping.items() if enabled is False}
     if not disabled:
         return None
 
     return [n for n in all_plugin_names if n not in disabled]
+
+
+def resolve_auto_update_scope(
+    config: ResolvedConfig,
+    all_plugin_names: list[str],
+    manifest_packages: dict[str, set[str]] | None = None,
+) -> tuple[set[str] | None, set[str] | None]:
+    """Derive plugin and package include-lists for auto-update.
+
+    Walks ``plugin_auto_update`` to determine which plugins and packages
+    should participate in automatic updates.  When a plugin entry is a
+    nested ``dict[str, bool]``, individual packages can be toggled on or
+    off.  Packages not listed in the config inherit a manifest-aware
+    default: **ON** if the package appears in *manifest_packages* for
+    that plugin, **OFF** otherwise.
+
+    Args:
+        config: A resolved configuration snapshot.
+        all_plugin_names: Every known (installed) plugin name.
+        manifest_packages: Mapping of ``plugin_name`` → set of package
+            names declared in cached manifests.  ``None`` means treat
+            all packages as manifest-referenced (conservative default).
+
+    Returns:
+        A ``(enabled_plugins, include_packages)`` tuple.  Either element
+        may be ``None`` meaning "no filtering".
+    """
+    mapping = config.plugin_auto_update
+
+    # --- Determine enabled plugins ---
+    disabled_plugins: set[str] = set()
+    per_package_entries: dict[str, dict[str, bool]] = {}
+
+    if mapping:
+        for name, value in mapping.items():
+            if value is False:
+                disabled_plugins.add(name)
+            elif isinstance(value, dict):
+                per_package_entries[name] = value
+
+    enabled_plugins: set[str] | None = None
+    if disabled_plugins:
+        enabled_plugins = {n for n in all_plugin_names if n not in disabled_plugins}
+
+    # --- Determine include_packages ---
+    # Only build the set when there are per-package overrides or
+    # manifest data that distinguishes global from manifest-required.
+    include_packages: set[str] | None = None
+
+    if per_package_entries or manifest_packages:
+        # Start with manifest-referenced packages (auto-update ON by default)
+        pkg_set: set[str] = set()
+        if manifest_packages:
+            for plugin_name, pkgs in manifest_packages.items():
+                if plugin_name in disabled_plugins:
+                    continue
+                pkg_set |= pkgs
+
+        # Apply per-package config overrides
+        for plugin_name, pkg_map in per_package_entries.items():
+            if plugin_name in disabled_plugins:
+                continue
+            for pkg_name, enabled in pkg_map.items():
+                if enabled:
+                    pkg_set.add(pkg_name)
+                else:
+                    pkg_set.discard(pkg_name)
+
+        if pkg_set:
+            include_packages = pkg_set
+
+    return enabled_plugins, include_packages

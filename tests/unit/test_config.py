@@ -68,6 +68,18 @@ class TestUserConfig:
         assert restored.plugin_auto_update == mapping
 
     @staticmethod
+    def test_plugin_auto_update_nested_dict_round_trip() -> None:
+        """Verify nested per-package dict survives JSON round-trip."""
+        mapping: dict[str, bool | dict[str, bool]] = {
+            'uv': {'cppython': True, 'ruff': False},
+            'pip': False,
+        }
+        original = UserConfig(plugin_auto_update=mapping)
+        data = json.loads(original.model_dump_json())
+        restored = UserConfig.model_validate(data)
+        assert restored.plugin_auto_update == mapping
+
+    @staticmethod
     def test_auto_start_round_trip() -> None:
         """Verify auto_start survives JSON round-trip."""
         for value in (True, False, None):

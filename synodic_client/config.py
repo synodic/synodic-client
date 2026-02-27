@@ -104,10 +104,18 @@ class UserConfig(BaseModel):
     # 0 disables automatic checking.  None uses the default (20 minutes).
     tool_update_interval_minutes: int | None = None
 
-    # Per-plugin auto-update toggle.  Maps plugin name to enabled state.
-    # None or absent means all plugins auto-update.  Explicitly False
-    # entries disable auto-update for that plugin.
-    plugin_auto_update: dict[str, bool] | None = None
+    # Per-plugin and per-package auto-update toggle.
+    #
+    # Maps plugin name to:
+    #   - ``True``  — all packages under this plugin auto-update (default).
+    #   - ``False`` — the entire plugin is disabled from auto-update.
+    #   - ``dict[str, bool]`` — per-package overrides within this plugin.
+    #     Packages with ``True`` auto-update; ``False`` are skipped.
+    #     Packages not listed inherit the manifest-aware default (ON for
+    #     manifest-referenced packages, OFF for global packages).
+    #
+    # ``None`` or absent means all plugins auto-update with manifest-aware defaults.
+    plugin_auto_update: dict[str, bool | dict[str, bool]] | None = None
 
     # Check for updates during dry-run previews.  When True the preview
     # will query package indices for newer versions.
