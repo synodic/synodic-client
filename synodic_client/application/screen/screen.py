@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections import OrderedDict
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from porringer.api import API
@@ -13,10 +14,11 @@ from porringer.schema import (
     ProgressEventKind,
     SetupAction,
     SetupParameters,
+    SkipReason,
 )
 from porringer.schema.plugin import PluginKind
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QResizeEvent
+from PySide6.QtCore import QRect, Qt, QTimer, Signal
+from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -25,7 +27,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QStackedWidget,
     QTabWidget,
     QVBoxLayout,
@@ -48,10 +49,13 @@ from synodic_client.application.theme import (
     PLUGIN_PROVIDER_STYLE,
     PLUGIN_PROVIDER_VERSION_STYLE,
     PLUGIN_ROW_GLOBAL_STYLE,
+    PLUGIN_ROW_HOST_STYLE,
     PLUGIN_ROW_NAME_STYLE,
     PLUGIN_ROW_PROJECT_STYLE,
+    PLUGIN_ROW_REMOVE_STYLE,
     PLUGIN_ROW_STYLE,
     PLUGIN_ROW_TOGGLE_STYLE,
+    PLUGIN_ROW_UPDATE_STYLE,
     PLUGIN_ROW_VERSION_STYLE,
     PLUGIN_SECTION_SPACING,
     PLUGIN_TOGGLE_STYLE,
@@ -65,6 +69,12 @@ logger = logging.getLogger(__name__)
 # Plugin kinds that support auto-update and per-plugin upgrade.
 _UPDATABLE_KINDS = frozenset({PluginKind.TOOL, PluginKind.PACKAGE})
 
+# Inline row-spinner constants
+_ROW_SPINNER_SIZE = 12
+_ROW_SPINNER_PEN = 2
+_ROW_SPINNER_INTERVAL = 50
+_ROW_SPINNER_ARC = 90
+
 # Preferred display ordering — Tools first, then alphabetical for the rest.
 _KIND_DISPLAY_ORDER: dict[PluginKind, int] = {
     PluginKind.TOOL: 0,
@@ -73,6 +83,109 @@ _KIND_DISPLAY_ORDER: dict[PluginKind, int] = {
     PluginKind.PROJECT: 3,
     PluginKind.SCM: 4,
 }
+
+
+# ---------------------------------------------------------------------------
+# Data models for package gathering and display
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class PackageEntry:
+    """A single package returned by a gather query.
+
+    Replaces ad-hoc tuples returned by ``_gather_packages`` and
+    ``_gather_tool_plugins``.
+    """
+
+    name: str
+    """Package name (e.g. ``"pdm"``, ``"ruff"``)."""
+
+    project_label: str = ''
+    """Human-readable project directory label, or empty for global packages."""
+
+    version: str = ''
+    """Installed version string, or empty if unknown."""
+
+    host_tool: str = ''
+    """Name of the host package when injected (e.g. ``"pdm"``), otherwise empty."""
+
+    project_path: str = ''
+    """Directory path string for project-scoped packages, or empty for global ones."""
+
+
+@dataclass(slots=True)
+class MergedPackage:
+    """Accumulated view of a package after deduplication across directories.
+
+    Used during ``_async_refresh`` to merge multiple
+    :class:`PackageEntry` instances referencing the same package name
+    into a single row description.
+    """
+
+    projects: list[str] = field(default_factory=list)
+    """Display names of the projects referencing this package."""
+
+    project_paths: list[str] = field(default_factory=list)
+    """Filesystem paths of the project directories."""
+
+    version: str = ''
+    """Installed version string."""
+
+    is_global: bool = False
+    """``True`` when the package is not referenced by any project manifest."""
+
+    host_tool: str = ''
+    """Host-tool annotation for injected packages."""
+
+
+# ---------------------------------------------------------------------------
+# _RowSpinner — tiny inline spinner for plugin rows
+# ---------------------------------------------------------------------------
+
+
+class _RowSpinner(QWidget):
+    """Tiny spinning arc shown inline while checking for updates."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._angle = 0
+        self.setFixedSize(_ROW_SPINNER_SIZE, _ROW_SPINNER_SIZE)
+        self._timer = QTimer(self)
+        self._timer.setInterval(_ROW_SPINNER_INTERVAL)
+        self._timer.timeout.connect(self._tick)
+        self.hide()
+
+    def paintEvent(self, _event: object) -> None:
+        """Draw the muted track and animated highlight arc."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        m = _ROW_SPINNER_PEN // 2 + 1
+        rect = QRect(m, m, _ROW_SPINNER_SIZE - 2 * m, _ROW_SPINNER_SIZE - 2 * m)
+        for colour, span in ((self.palette().mid(), 360), (self.palette().highlight(), _ROW_SPINNER_ARC)):
+            pen = QPen(colour, _ROW_SPINNER_PEN)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            if span == 360:
+                painter.drawEllipse(rect)
+            else:
+                painter.drawArc(rect, self._angle * 16, span * 16)
+        painter.end()
+
+    def _tick(self) -> None:
+        self._angle = (self._angle - 10) % 360
+        self.update()
+
+    def start(self) -> None:
+        """Show the spinner and start the animation."""
+        self._angle = 0
+        self.show()
+        self._timer.start()
+
+    def stop(self) -> None:
+        """Stop the animation and hide."""
+        self._timer.stop()
+        self.hide()
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +215,8 @@ class PluginProviderHeader(QFrame):
     """Thin sub-header row identifying the plugin that provides a set of tools.
 
     Shows the plugin name, version, installed status, and — for updatable
-    kinds — ``Auto`` and ``Update`` buttons.
+    kinds — ``Auto`` and ``Update`` buttons.  The ``Update`` button is
+    only visible when *has_updates* is ``True``.
     """
 
     auto_update_toggled = Signal(str, bool)
@@ -117,12 +231,15 @@ class PluginProviderHeader(QFrame):
         auto_update: bool = True,
         *,
         show_controls: bool = False,
+        has_updates: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName('pluginProvider')
         self.setStyleSheet(PLUGIN_PROVIDER_STYLE)
         self._plugin_name = plugin.name
+        self._update_btn: QPushButton | None = None
+        self._checking_spinner: _RowSpinner | None = None
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -167,12 +284,17 @@ class PluginProviderHeader(QFrame):
             )
             layout.addWidget(toggle_btn)
 
+            self._checking_spinner = _RowSpinner(self)
+            layout.addWidget(self._checking_spinner)
+
             update_btn = QPushButton('Update')
             update_btn.setStyleSheet(PLUGIN_UPDATE_STYLE)
             update_btn.setToolTip(f'Upgrade packages via {plugin.name} now')
             update_btn.clicked.connect(
                 lambda: self.update_requested.emit(self._plugin_name),
             )
+            update_btn.setVisible(has_updates)
+            self._update_btn = update_btn
             layout.addWidget(update_btn)
 
             if not plugin.installed:
@@ -181,6 +303,28 @@ class PluginProviderHeader(QFrame):
                 toggle_btn.setToolTip('Not installed \u2014 cannot auto-update')
                 update_btn.setEnabled(False)
                 update_btn.setToolTip('Not installed \u2014 cannot update')
+
+    def set_updating(self, updating: bool) -> None:
+        """Toggle the button between *Updating…* and *Update* states."""
+        if self._update_btn is None:
+            return
+        if updating:
+            self._update_btn.setText('Updating\u2026')
+            self._update_btn.setEnabled(False)
+        else:
+            self._update_btn.setText('Update')
+            self._update_btn.setEnabled(True)
+
+    def set_checking(self, checking: bool) -> None:
+        """Show or hide the inline checking spinner."""
+        if self._checking_spinner is None:
+            return
+        if checking:
+            self._checking_spinner.start()
+            if self._update_btn is not None:
+                self._update_btn.hide()
+        else:
+            self._checking_spinner.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -197,10 +341,25 @@ class PluginRow(QFrame):
     When *show_toggle* is ``True`` an inline **Auto** button lets the user
     toggle per-package auto-update.  If *is_global* is ``True`` and no
     *project* is given, a muted ``(global)`` annotation is shown.
+
+    When *host_tool* is non-empty a muted ``→ <host>`` label appears
+    after the name indicating the package is injected into that host.
+
+    When *has_update* is ``True`` a small inline **Update** button appears
+    so the user can upgrade this specific package on demand.
     """
 
     auto_update_toggled = Signal(str, str, bool)
     """Emitted with ``(plugin_name, package_name, enabled)`` on toggle."""
+
+    update_requested = Signal(str, str)
+    """Emitted with ``(plugin_name, package_name)`` when update is clicked."""
+
+    remove_requested = Signal(str, str)
+    """Emitted with ``(plugin_name, package_name)`` when remove is clicked."""
+
+    navigate_to_project = Signal(str)
+    """Emitted with a project path when a manifest-managed package tooltip link is clicked."""
 
     def __init__(
         self,
@@ -211,7 +370,10 @@ class PluginRow(QFrame):
         plugin_name: str = '',
         auto_update: bool = False,
         show_toggle: bool = False,
+        has_update: bool = False,
         is_global: bool = False,
+        host_tool: str = '',
+        project_paths: list[str] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -219,6 +381,11 @@ class PluginRow(QFrame):
         self.setStyleSheet(PLUGIN_ROW_STYLE)
         self._plugin_name = plugin_name
         self._package_name = name
+        self._update_btn: QPushButton | None = None
+        self._remove_btn: QPushButton | None = None
+        self._checking_spinner: _RowSpinner | None = None
+        self._host_label: QLabel | None = None
+        self._project_paths: list[str] = project_paths or []
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -227,6 +394,11 @@ class PluginRow(QFrame):
         name_label = QLabel(name)
         name_label.setStyleSheet(PLUGIN_ROW_NAME_STYLE)
         layout.addWidget(name_label)
+
+        if host_tool:
+            self._host_label = QLabel(f'\u2192 {host_tool}')
+            self._host_label.setStyleSheet(PLUGIN_ROW_HOST_STYLE)
+            layout.addWidget(self._host_label)
 
         if project:
             project_label = QLabel(project)
@@ -254,10 +426,74 @@ class PluginRow(QFrame):
             )
             layout.addWidget(toggle_btn)
 
+            self._checking_spinner = _RowSpinner(self)
+            layout.addWidget(self._checking_spinner)
+
+        if has_update:
+            update_btn = QPushButton('Update')
+            update_btn.setStyleSheet(PLUGIN_ROW_UPDATE_STYLE)
+            update_btn.setToolTip(f'Update {name}')
+            update_btn.clicked.connect(
+                lambda: self.update_requested.emit(self._plugin_name, self._package_name),
+            )
+            self._update_btn = update_btn
+            layout.addWidget(update_btn)
+
         if version:
             version_label = QLabel(version)
             version_label.setStyleSheet(PLUGIN_ROW_VERSION_STYLE)
             layout.addWidget(version_label)
+
+        # Remove button — always present, enabled only for global packages
+        remove_btn = QPushButton('\u00d7')
+        remove_btn.setFixedSize(18, 18)
+        remove_btn.setStyleSheet(PLUGIN_ROW_REMOVE_STYLE)
+        remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        if is_global:
+            remove_btn.setToolTip(f'Remove {name}')
+            remove_btn.clicked.connect(
+                lambda: self.remove_requested.emit(self._plugin_name, self._package_name),
+            )
+        else:
+            remove_btn.setEnabled(False)
+            tooltip = f"Managed by project '{project}'" if project else 'Managed by a project manifest'
+            remove_btn.setToolTip(tooltip)
+            remove_btn.setCursor(Qt.CursorShape.ArrowCursor)
+        self._remove_btn = remove_btn
+        layout.addWidget(remove_btn)
+
+    def set_updating(self, updating: bool) -> None:
+        """Toggle the button between *Updating…* and *Update* states."""
+        if self._update_btn is None:
+            return
+        if updating:
+            self._update_btn.setText('Updating\u2026')
+            self._update_btn.setEnabled(False)
+        else:
+            self._update_btn.setText('Update')
+            self._update_btn.setEnabled(True)
+
+    def set_checking(self, checking: bool) -> None:
+        """Show or hide the inline checking spinner."""
+        if self._checking_spinner is None:
+            return
+        if checking:
+            self._checking_spinner.start()
+            if self._update_btn is not None:
+                self._update_btn.hide()
+        else:
+            self._checking_spinner.stop()
+
+    def set_removing(self, removing: bool) -> None:
+        """Toggle the remove button between *Removing…* and *×* states."""
+        if self._remove_btn is None:
+            return
+        if removing:
+            self._remove_btn.setText('Removing\u2026')
+            self._remove_btn.setEnabled(False)
+        else:
+            self._remove_btn.setText('\u00d7')
+            self._remove_btn.setEnabled(True)
 
 
 class ToolsView(QWidget):
@@ -273,6 +509,15 @@ class ToolsView(QWidget):
 
     plugin_update_requested = Signal(str)
     """Emitted with a plugin name when its per-plugin *Update* button is clicked."""
+
+    package_update_requested = Signal(str, str)
+    """Emitted with ``(plugin_name, package_name)`` for a per-package update."""
+
+    package_remove_requested = Signal(str, str)
+    """Emitted with ``(plugin_name, package_name)`` for a per-package removal."""
+
+    navigate_to_project_requested = Signal(str)
+    """Emitted with a project path string to navigate to the Projects tab."""
 
     def __init__(
         self,
@@ -292,6 +537,10 @@ class ToolsView(QWidget):
         self._config = config
         self._section_widgets: list[QWidget] = []
         self._refresh_in_progress = False
+        self._check_in_progress = False
+        self._updates_checked = False
+        self._updates_available: dict[str, set[str]] = {}
+        self._directories: list[ManifestDirectory] = []
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -299,13 +548,16 @@ class ToolsView(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(*COMPACT_MARGINS)
 
-        # Loading indicator
-        self._loading_spinner = SpinnerWidget('Loading tools\u2026')
-        outer.addWidget(self._loading_spinner)
-
         # Toolbar
         toolbar = QHBoxLayout()
         toolbar.addStretch()
+
+        check_btn = QPushButton('Check for Updates')
+        check_btn.setToolTip('Scan all manifests for available package updates')
+        check_btn.clicked.connect(self._on_check_for_updates)
+        toolbar.addWidget(check_btn)
+        self._check_btn = check_btn
+
         update_all_btn = QPushButton('Update All')
         update_all_btn.setToolTip('Upgrade all auto-update-enabled plugins now')
         update_all_btn.clicked.connect(self.update_all_requested.emit)
@@ -326,6 +578,8 @@ class ToolsView(QWidget):
         self._scroll.setWidget(self._container)
         outer.addWidget(self._scroll)
 
+        self._loading_spinner = SpinnerWidget('Loading tools\u2026', parent=self)
+
     # --- Public API ---
 
     def refresh(self) -> None:
@@ -341,9 +595,15 @@ class ToolsView(QWidget):
         are *manifest-referenced* vs. *global*.  Manifest packages
         default to auto-update **on**; global packages default to **off**.
         Per-package toggles honour the nested-dict config shape.
+
+        Package listing and manifest requirement gathering run in
+        parallel via ``asyncio.TaskGroup`` to avoid O(P×D) serial
+        round-trips.  Update-availability detection is deferred to a
+        background task so the widget tree renders immediately.
         """
         self._refresh_in_progress = True
         self._loading_spinner.start()
+        directories: list[ManifestDirectory] = []
 
         try:
             loop = asyncio.get_running_loop()
@@ -351,25 +611,50 @@ class ToolsView(QWidget):
                 None,
                 self._fetch_data,
             )
+            self._directories = directories
 
-            # Gather packages for updatable plugins
-            packages_map: dict[str, list[tuple[str, str, str]]] = {}
-            for plugin in plugins:
-                if plugin.kind in _UPDATABLE_KINDS:
-                    packages_map[plugin.name] = await self._gather_packages(
-                        plugin.name,
-                        directories,
-                    )
-
-            # Gather manifest requirements → plugin_name → set of package names
+            # Gather packages and manifest requirements — in parallel
+            updatable_plugins = [p for p in plugins if p.kind in _UPDATABLE_KINDS]
+            packages_map: dict[str, list[tuple[str, str, str, str]]] = {}
             manifest_packages: dict[str, set[str]] = {}
-            for directory in directories:
-                actions = await self._gather_project_requirements(directory)
-                for action in actions:
+            requirement_actions: list[list[SetupAction]] = []
+
+            async with asyncio.TaskGroup() as tg:
+                # Per-plugin package listing
+                pkg_tasks = {
+                    plugin.name: tg.create_task(
+                        self._gather_packages(plugin.name, directories),
+                    )
+                    for plugin in updatable_plugins
+                }
+                # Per-directory manifest requirement gathering
+                req_tasks = [tg.create_task(self._gather_project_requirements(d)) for d in directories]
+                # Natively-managed tool plugins (e.g. pdm self add)
+                tool_plugins_task = tg.create_task(self._gather_tool_plugins())
+
+            for name, task in pkg_tasks.items():
+                packages_map[name] = task.result()
+
+            # Merge tool-managed sub-plugins into the environment plugin
+            # that owns the host tool (e.g. cppython → pipx's pdm entry).
+            tool_plugins = tool_plugins_task.result()
+            for host_tool, sub_packages in tool_plugins.items():
+                for _env_name, env_packages in packages_map.items():
+                    if any(entry.name == host_tool for entry in env_packages):
+                        env_packages.extend(sub_packages)
+                        break
+
+            for task in req_tasks:
+                for action in task.result():
                     if action.package and action.installer:
                         manifest_packages.setdefault(action.installer, set()).add(
                             str(action.package.name),
                         )
+
+            # Snapshot current update availability for widget creation.
+            # If not yet checked, schedule a background detection task
+            # *after* the widget tree renders so the UI appears fast.
+            need_deferred_check = not self._updates_checked
 
             # Clear existing widgets
             for widget in self._section_widgets:
@@ -407,10 +692,12 @@ class ToolsView(QWidget):
                     auto_val = auto_update_map.get(plugin.name, True)
                     provider_checked = auto_val is not False
 
+                    plugin_updates = self._updates_available.get(plugin.name, set())
                     provider = PluginProviderHeader(
                         plugin,
                         provider_checked,
                         show_controls=True,
+                        has_updates=bool(plugin_updates),
                         parent=self._container,
                     )
                     provider.auto_update_toggled.connect(self._on_auto_update_toggled)
@@ -427,43 +714,58 @@ class ToolsView(QWidget):
                     # project label.  Global packages are always
                     # deduplicated; manifest packages merge their
                     # project names with ", ".
-                    merged: OrderedDict[str, tuple[list[str], str, bool]] = OrderedDict()
-                    for pkg_name, proj_name, pkg_version in raw_packages:
-                        is_global = pkg_name not in plugin_manifest
-                        if pkg_name in merged:
-                            existing_projects, _, _ = merged[pkg_name]
-                            if not is_global and proj_name and proj_name not in existing_projects:
-                                existing_projects.append(proj_name)
+                    merged: OrderedDict[str, MergedPackage] = OrderedDict()
+                    for entry in raw_packages:
+                        is_global = entry.name not in plugin_manifest
+                        if entry.name in merged:
+                            existing = merged[entry.name]
+                            if not is_global and entry.project_label and entry.project_label not in existing.projects:
+                                existing.projects.append(entry.project_label)
+                            if not is_global and entry.project_path and entry.project_path not in existing.project_paths:
+                                existing.project_paths.append(entry.project_path)
                         else:
-                            projects = [] if is_global else ([proj_name] if proj_name else [])
-                            merged[pkg_name] = (projects, pkg_version, is_global)
+                            merged[entry.name] = MergedPackage(
+                                projects=[] if is_global else ([entry.project_label] if entry.project_label else []),
+                                project_paths=[] if is_global else ([entry.project_path] if entry.project_path else []),
+                                version=entry.version,
+                                is_global=is_global,
+                                host_tool=entry.host_tool,
+                            )
 
                     if merged:
-                        for pkg_name, (
-                            projects,
-                            pkg_version,
-                            is_global,
-                        ) in merged.items():
+                        for pkg_name, pkg in merged.items():
                             # Determine per-package auto-update state
                             if isinstance(auto_val, dict):
-                                pkg_auto = auto_val.get(pkg_name, not is_global)
+                                pkg_auto = auto_val.get(pkg_name, not pkg.is_global)
                             elif auto_val is False:
                                 pkg_auto = False
                             else:
-                                pkg_auto = not is_global
+                                pkg_auto = not pkg.is_global
 
                             row = PluginRow(
                                 pkg_name,
-                                project=', '.join(projects),
-                                version=pkg_version,
+                                project=', '.join(pkg.projects),
+                                version=pkg.version,
                                 plugin_name=plugin.name,
                                 auto_update=pkg_auto,
                                 show_toggle=True,
-                                is_global=is_global,
+                                has_update=pkg_name in plugin_updates,
+                                is_global=pkg.is_global,
+                                host_tool=pkg.host_tool,
+                                project_paths=pkg.project_paths,
                                 parent=self._container,
                             )
                             row.auto_update_toggled.connect(
                                 self._on_package_auto_update_toggled,
+                            )
+                            row.update_requested.connect(
+                                self.package_update_requested.emit,
+                            )
+                            row.remove_requested.connect(
+                                self.package_remove_requested.emit,
+                            )
+                            row.navigate_to_project.connect(
+                                self.navigate_to_project_requested.emit,
                             )
                             idx = self._container_layout.count() - 1
                             self._container_layout.insertWidget(idx, row)
@@ -481,9 +783,15 @@ class ToolsView(QWidget):
 
         except Exception:
             logger.exception('Failed to refresh tools')
+            need_deferred_check = False
         finally:
             self._loading_spinner.stop()
             self._refresh_in_progress = False
+
+        # Fire-and-forget: detect updates in the background, then patch
+        # the just-rendered widget tree with update badges.
+        if need_deferred_check:
+            asyncio.create_task(self._deferred_update_check(directories))
 
     def _fetch_data(self) -> tuple[list[PluginInfo], list[ManifestDirectory]]:
         """Fetch plugin list and directories (sync, run in executor)."""
@@ -495,27 +803,54 @@ class ToolsView(QWidget):
         self,
         plugin_name: str,
         directories: list[ManifestDirectory],
-    ) -> list[tuple[str, str, str]]:
-        """Collect packages managed by *plugin_name* across cached projects.
+    ) -> list[PackageEntry]:
+        """Collect packages managed by *plugin_name*.
+
+        A global query (``project_path=None``) is always issued so that
+        globally-scoped plugins (pipx, apt, brew) report their packages
+        — including injected packages — even when no directories are
+        cached.  Per-directory queries run in parallel alongside it to
+        capture project-scoped packages.
 
         Returns:
-            A list of ``(package_name, project_label, version)`` tuples.
+            A list of :class:`PackageEntry` instances.
         """
-        packages: list[tuple[str, str, str]] = []
-        for directory in directories:
+        packages: list[PackageEntry] = []
+
+        async def _list_global() -> None:
+            try:
+                pkgs = await self._porringer.plugin.list_packages(plugin_name)
+                packages.extend(
+                    PackageEntry(
+                        name=str(pkg.name),
+                        version=str(pkg.version) if pkg.version else '',
+                        host_tool=pkg.relation.host if pkg.relation else '',
+                    )
+                    for pkg in pkgs
+                )
+            except Exception:
+                logger.debug(
+                    'Could not list global packages for %s',
+                    plugin_name,
+                    exc_info=True,
+                )
+
+        async def _list_one(directory: ManifestDirectory) -> None:
             try:
                 pkgs = await self._porringer.plugin.list_packages(
                     plugin_name,
                     Path(directory.path),
                 )
-                for pkg in pkgs:
-                    packages.append(
-                        (
-                            str(pkg.name),
-                            directory.name or str(directory.path),
-                            str(pkg.version) if pkg.version else '',
-                        ),
+                packages.extend(
+                    PackageEntry(
+                        name=str(pkg.name),
+                        project_label=directory.name or str(directory.path),
+                        version=str(pkg.version) if pkg.version else '',
+                        host_tool=pkg.relation.host if pkg.relation else '',
+                        project_path=str(directory.path),
                     )
+                    for pkg in pkgs
+                )
             except Exception:
                 logger.debug(
                     'Could not list packages for %s in %s',
@@ -523,7 +858,82 @@ class ToolsView(QWidget):
                     directory.path,
                     exc_info=True,
                 )
+
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(_list_global())
+            for d in directories:
+                tg.create_task(_list_one(d))
         return packages
+
+    # ------------------------------------------------------------------
+    # PluginManager sub-plugin discovery
+    # ------------------------------------------------------------------
+
+    async def _gather_tool_plugins(
+        self,
+    ) -> dict[str, list[PackageEntry]]:
+        """Query :class:`PluginManager` instances for natively managed sub-plugins.
+
+        Discovers project-environment plugins that implement the
+        ``PluginManager`` protocol (e.g. PDM, Poetry) and calls
+        ``installed_plugins()`` on each.  Each returned
+        :class:`Package` carries a :class:`PackageRelation` whose
+        *host* field identifies the parent tool.
+
+        Returns:
+            A dict mapping host-tool name (e.g. ``"pdm"``) to a list of
+            :class:`PackageEntry` instances.
+        """
+        results: dict[str, list[PackageEntry]] = {}
+
+        loop = asyncio.get_running_loop()
+        managers = await loop.run_in_executor(None, self._discover_plugin_managers)
+
+        async def _query(tool_name: str, manager: object) -> None:
+            try:
+                plugins = await manager.installed_plugins()  # type: ignore[union-attr]
+                results[tool_name] = [
+                    PackageEntry(
+                        name=str(pkg.name),
+                        version=str(pkg.version) if pkg.version else '',
+                        host_tool=pkg.relation.host if pkg.relation else tool_name,
+                    )
+                    for pkg in plugins
+                ]
+            except Exception:
+                logger.debug(
+                    'Could not list plugins for %s',
+                    tool_name,
+                    exc_info=True,
+                )
+
+        async with asyncio.TaskGroup() as tg:
+            for tool_name, manager in managers.items():
+                tg.create_task(_query(tool_name, manager))
+
+        return results
+
+    @staticmethod
+    def _discover_plugin_managers() -> dict[str, object]:
+        """Discover project-environment plugins implementing ``PluginManager`` (sync).
+
+        Imports are deferred to avoid hard-coupling the screen module to
+        porringer backend internals at import time.
+
+        Returns:
+            A dict mapping tool name to :class:`PluginManager` instance.
+        """
+        from porringer.backend.builder import Builder
+        from porringer.core.plugin_schema.plugin_manager import PluginManager
+        from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+
+        project_types = Builder.find_plugins('project_environment', ProjectEnvironment)
+        instances = Builder.build_plugins(project_types)
+        managers: dict[str, object] = {}
+        for info, inst in zip(project_types, instances, strict=True):
+            if isinstance(inst, PluginManager) and type(inst).is_available():
+                managers[type(inst).tool_name()] = inst
+        return managers
 
     async def _gather_project_requirements(
         self,
@@ -607,6 +1017,203 @@ class ToolsView(QWidget):
             enabled,
         )
 
+    def _on_check_for_updates(self) -> None:
+        """Start an inline update check with per-row spinners."""
+        if self._check_in_progress or self._refresh_in_progress:
+            return
+        self._check_btn.setEnabled(False)
+        self._check_btn.setText('Checking\u2026')
+        self._set_all_checking(True)
+        asyncio.create_task(self._run_inline_update_check())
+
+    async def _run_inline_update_check(self) -> None:
+        """Check for updates with inline spinners (no overlay / rebuild)."""
+        self._check_in_progress = True
+        try:
+            self._updates_available = await self._check_for_updates(self._directories)
+            self._updates_checked = True
+            self._apply_update_badges()
+        except Exception:
+            logger.debug('Inline update check failed', exc_info=True)
+        finally:
+            self._set_all_checking(False)
+            self._check_btn.setEnabled(True)
+            self._check_btn.setText('Check for Updates')
+            self._check_in_progress = False
+
+    async def _check_for_updates(
+        self,
+        directories: list[ManifestDirectory],
+    ) -> dict[str, set[str]]:
+        """Detect available updates across cached manifests via dry-run.
+
+        All directories are checked in parallel via ``asyncio.TaskGroup``.
+
+        Returns a mapping of ``{plugin_name: {package_names…}}`` for
+        packages that have a newer version available.
+        """
+        available: dict[str, set[str]] = {}
+
+        async def _check_one(directory: ManifestDirectory) -> None:
+            partial = await self._check_directory_updates(directory)
+            for installer, packages in partial.items():
+                available.setdefault(installer, set()).update(packages)
+
+        async with asyncio.TaskGroup() as tg:
+            for d in directories:
+                tg.create_task(_check_one(d))
+
+        return available
+
+    async def _check_directory_updates(
+        self,
+        directory: ManifestDirectory,
+    ) -> dict[str, set[str]]:
+        """Check a single directory for available updates (dry-run)."""
+        available: dict[str, set[str]] = {}
+        try:
+            path = Path(directory.path)
+            filenames = self._porringer.sync.manifest_filenames()
+            manifest_path: Path | None = None
+            for fname in filenames:
+                candidate = path / fname
+                if candidate.exists():
+                    manifest_path = candidate
+                    break
+
+            if manifest_path is None:
+                return available
+
+            params = SetupParameters(
+                paths=[str(manifest_path)],
+                dry_run=True,
+                detect_updates=True,
+                project_directory=path,
+            )
+            async for event in self._porringer.sync.execute_stream(params):
+                if (
+                    event.kind == ProgressEventKind.ACTION_COMPLETED
+                    and event.result is not None
+                    and event.result.skip_reason == SkipReason.UPDATE_AVAILABLE
+                ):
+                    action = event.result.action
+                    if action.installer and action.package:
+                        available.setdefault(action.installer, set()).add(
+                            str(action.package.name),
+                        )
+        except Exception:
+            logger.debug(
+                'Could not detect updates for %s',
+                directory.path,
+                exc_info=True,
+            )
+        return available
+
+    async def _deferred_update_check(
+        self,
+        directories: list[ManifestDirectory],
+    ) -> None:
+        """Run update detection in the background, then patch the widget tree.
+
+        Called after the initial render so the user sees the tool list
+        immediately while update badges are populated asynchronously.
+        Inline per-row spinners provide visual feedback.
+        """
+        self._check_in_progress = True
+        self._check_btn.setEnabled(False)
+        self._check_btn.setText('Checking\u2026')
+        self._set_all_checking(True)
+        try:
+            self._updates_available = await self._check_for_updates(directories)
+            self._updates_checked = True
+            self._apply_update_badges()
+        except Exception:
+            logger.debug('Deferred update check failed', exc_info=True)
+        finally:
+            self._set_all_checking(False)
+            self._check_btn.setEnabled(True)
+            self._check_btn.setText('Check for Updates')
+            self._check_in_progress = False
+
+    def _apply_update_badges(self) -> None:
+        """Walk existing widgets and show/hide Update buttons based on detection results."""
+        current_plugin: str = ''
+        for widget in self._section_widgets:
+            if isinstance(widget, PluginProviderHeader):
+                current_plugin = widget._plugin_name
+                plugin_updates = self._updates_available.get(current_plugin, set())
+                has = bool(plugin_updates)
+                if widget._update_btn is not None:
+                    widget._update_btn.setVisible(has)
+            elif isinstance(widget, PluginRow) and widget._plugin_name:
+                plugin_updates = self._updates_available.get(widget._plugin_name, set())
+                has = widget._package_name in plugin_updates
+                if widget._update_btn is not None:
+                    widget._update_btn.setVisible(has)
+                elif has:
+                    # Need to create the button that wasn't built at render time
+                    self._inject_update_button(widget)
+
+    def _inject_update_button(self, row: PluginRow) -> None:
+        """Dynamically add an Update button to a row that was built without one."""
+        update_btn = QPushButton('Update')
+        update_btn.setStyleSheet(PLUGIN_ROW_UPDATE_STYLE)
+        update_btn.setToolTip(f'Update {row._package_name}')
+        update_btn.clicked.connect(
+            lambda: row.update_requested.emit(row._plugin_name, row._package_name),
+        )
+        row._update_btn = update_btn
+        # Insert before the version label (last widget) if present, else append
+        layout = row.layout()
+        if layout is not None:
+            count = layout.count()
+            layout.insertWidget(max(count - 1, 0), update_btn)
+
+    def _set_all_checking(self, checking: bool) -> None:
+        """Show or hide inline checking spinners on all plugin rows."""
+        for widget in self._section_widgets:
+            if isinstance(widget, (PluginProviderHeader, PluginRow)):
+                widget.set_checking(checking)
+
+    def set_plugin_updating(self, plugin_name: str, updating: bool) -> None:
+        """Toggle the *Updating…* state on the header for *plugin_name*."""
+        for widget in self._section_widgets:
+            if isinstance(widget, PluginProviderHeader) and widget._plugin_name == plugin_name:
+                widget.set_updating(updating)
+                break
+
+    def set_package_updating(
+        self,
+        plugin_name: str,
+        package_name: str,
+        updating: bool,
+    ) -> None:
+        """Toggle the *Updating…* state on a specific package row."""
+        for widget in self._section_widgets:
+            if (
+                isinstance(widget, PluginRow)
+                and widget._plugin_name == plugin_name
+                and widget._package_name == package_name
+            ):
+                widget.set_updating(updating)
+                break
+
+    def set_package_removing(
+        self,
+        plugin_name: str,
+        package_name: str,
+        removing: bool,
+    ) -> None:
+        """Toggle the *Removing…* state on a specific package row."""
+        for widget in self._section_widgets:
+            if (
+                isinstance(widget, PluginRow)
+                and widget._plugin_name == plugin_name
+                and widget._package_name == package_name
+            ):
+                widget.set_removing(removing)
+                break
+
 
 class ProjectsView(QWidget):
     """Widget for managing project directories and previewing their manifests.
@@ -662,16 +1269,7 @@ class ProjectsView(QWidget):
 
         outer.addLayout(right, stretch=1)
 
-        # Floating overlay spinner — positioned in resizeEvent
         self._loading_spinner = SpinnerWidget('Loading projects\u2026', parent=self)
-        self._loading_spinner.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self._loading_spinner.raise_()
-
-    # ------------------------------------------------------------------
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        """Keep the overlay spinner filling the entire view."""
-        super().resizeEvent(event)
-        self._loading_spinner.setGeometry(self.rect())
 
     # --- Public API ---
 
@@ -748,7 +1346,6 @@ class ProjectsView(QWidget):
             logger.exception('Failed to refresh projects')
         finally:
             self._loading_spinner.stop()
-            self._loading_spinner.lower()
             self._sidebar.set_enabled(True)
             self._refresh_in_progress = False
 
@@ -869,6 +1466,9 @@ class MainWindow(QMainWindow):
             self._tools_view = ToolsView(self._porringer, self._config, self)
             self._tabs.addTab(self._tools_view, 'Tools')
 
+            # Navigate-to-project: switch to Projects tab and select directory
+            self._tools_view.navigate_to_project_requested.connect(self._navigate_to_project)
+
             gear_btn = QPushButton('\u2699')
             gear_btn.setStyleSheet(SETTINGS_GEAR_STYLE)
             gear_btn.setToolTip('Settings')
@@ -892,6 +1492,12 @@ class MainWindow(QMainWindow):
             self._tools_view.refresh()
         if self._projects_view is not None:
             self._projects_view.refresh()
+
+    def _navigate_to_project(self, path_str: str) -> None:
+        """Switch to the Projects tab and select the given directory."""
+        if self._tabs is not None and self._projects_view is not None:
+            self._tabs.setCurrentIndex(0)
+            self._projects_view._sidebar.select(Path(path_str))
 
 
 class Screen:

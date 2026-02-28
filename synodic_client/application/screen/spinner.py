@@ -2,13 +2,18 @@
 
 Provides :class:`SpinnerWidget` — a palette-aware spinning arc with an
 optional text label.  Call ``start()`` to show and ``stop()`` to hide.
+
+When constructed with a *parent*, the spinner automatically installs
+itself as a floating overlay that tracks the parent's geometry.
+Consumers never need to override ``resizeEvent``, manage z-order, or
+set a size policy — just call ``start()`` / ``stop()``.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRect, Qt, QTimer
+from PySide6.QtCore import QEvent, QRect, Qt, QTimer
 from PySide6.QtGui import QPainter, QPen
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 _SIZE = 24
 _PEN = 3
@@ -53,9 +58,11 @@ class _Canvas(QWidget):
 class SpinnerWidget(QWidget):
     """Animated spinner circle with optional text label.
 
-    The widget centres itself in whatever space the parent layout
-    provides — callers just need ``layout.addWidget(spinner)`` (with an
-    optional stretch factor for vertical centering in empty areas).
+    When a *parent* is provided the widget configures itself as a
+    floating overlay that fills the parent's geometry automatically.
+    No ``resizeEvent`` override, ``setSizePolicy``, ``raise_()``, or
+    ``lower()`` call is needed by the consumer — just ``start()`` and
+    ``stop()``.
     """
 
     def __init__(self, text: str = '', parent: QWidget | None = None) -> None:
@@ -63,7 +70,8 @@ class SpinnerWidget(QWidget):
 
         Args:
             text: Optional label shown beside the spinner arc.
-            parent: Optional parent widget.
+            parent: Optional parent widget.  When set, the spinner
+                becomes a floating overlay that tracks the parent size.
         """
         super().__init__(parent)
         self.hide()
@@ -89,13 +97,31 @@ class SpinnerWidget(QWidget):
         outer.addLayout(row)
         outer.addStretch()
 
+        # Auto-overlay: track parent geometry via event filter
+        if parent is not None:
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            parent.installEventFilter(self)
+            self.setGeometry(parent.rect())
+
+    # -- Event filter (overlay geometry tracking) --------------------------
+
+    def eventFilter(self, obj: object, event: QEvent) -> bool:
+        """Resize to match the parent whenever it resizes."""
+        if event.type() == QEvent.Type.Resize and obj is self.parent():
+            self.setGeometry(self.parent().rect())  # type: ignore[union-attr]
+        return False
+
+    # -- Public API --------------------------------------------------------
+
     def start(self) -> None:
-        """Show the widget and start the animation."""
+        """Show the overlay and start the animation."""
+        self.raise_()
         self.show()
         self._canvas._angle = 0
         self._timer.start()
 
     def stop(self) -> None:
-        """Stop the animation and hide the widget."""
+        """Stop the animation, hide, and move below siblings."""
         self._timer.stop()
         self.hide()
+        self.lower()

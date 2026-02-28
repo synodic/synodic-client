@@ -17,7 +17,13 @@ from PySide6.QtWidgets import (
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.screen import MainWindow
 from synodic_client.application.screen.settings import SettingsWindow
-from synodic_client.application.workers import check_for_update, download_update, run_tool_updates
+from synodic_client.application.workers import (
+    ToolUpdateResult,
+    check_for_update,
+    download_update,
+    run_package_remove,
+    run_tool_updates,
+)
 from synodic_client.client import Client
 from synodic_client.resolution import (
     ResolvedConfig,
@@ -86,6 +92,8 @@ class TrayScreen:
         if tools_view is not None:
             tools_view.update_all_requested.connect(self._on_tool_update)
             tools_view.plugin_update_requested.connect(self._on_single_plugin_update)
+            tools_view.package_update_requested.connect(self._on_single_package_update)
+            tools_view.package_remove_requested.connect(self._on_single_package_remove)
 
         # Connect update banner signals
         self._banner = window.update_banner
@@ -333,12 +341,12 @@ class TrayScreen:
         )
 
         try:
-            count = await run_tool_updates(
+            result = await run_tool_updates(
                 porringer,
                 plugins=enabled_plugins,
                 include_packages=include_packages,
             )
-            self._on_tool_update_finished(count)
+            self._on_tool_update_finished(result)
         except Exception as exc:
             logger.exception('Tool update failed')
             self._on_tool_update_error(str(exc))
@@ -351,6 +359,9 @@ class TrayScreen:
             return
 
         logger.info('Starting update for plugin: %s', plugin_name)
+        tools_view = self._window.tools_view
+        if tools_view is not None:
+            tools_view.set_plugin_updating(plugin_name, True)
         self._tool_task = asyncio.create_task(
             self._async_single_plugin_update(porringer, plugin_name),
         )
@@ -369,19 +380,85 @@ class TrayScreen:
                 include_packages = enabled_pkgs
 
         try:
-            count = await run_tool_updates(
+            result = await run_tool_updates(
                 porringer,
                 plugins={plugin_name},
                 include_packages=include_packages,
             )
-            self._on_tool_update_finished(count)
+            self._on_tool_update_finished(result, updating_plugin=plugin_name)
         except Exception as exc:
             logger.exception('Tool update failed')
             self._on_tool_update_error(str(exc))
+            tools_view = self._window.tools_view
+            if tools_view is not None:
+                tools_view.set_plugin_updating(plugin_name, False)
 
-    def _on_tool_update_finished(self, count: int) -> None:
+    def _on_single_package_update(self, plugin_name: str, package_name: str) -> None:
+        """Upgrade a single package managed by *plugin_name*."""
+        porringer = self._window.porringer
+        if porringer is None:
+            logger.warning('Single package update skipped: porringer not available')
+            return
+
+        logger.info('Starting update for %s/%s', plugin_name, package_name)
+        tools_view = self._window.tools_view
+        if tools_view is not None:
+            tools_view.set_package_updating(plugin_name, package_name, True)
+        self._tool_task = asyncio.create_task(
+            self._async_single_package_update(porringer, plugin_name, package_name),
+        )
+
+    async def _async_single_package_update(
+        self,
+        porringer: API,
+        plugin_name: str,
+        package_name: str,
+    ) -> None:
+        """Run a single-package tool update and route results."""
+        try:
+            result = await run_tool_updates(
+                porringer,
+                plugins={plugin_name},
+                include_packages={package_name},
+            )
+            self._on_tool_update_finished(
+                result,
+                updating_package=(plugin_name, package_name),
+            )
+        except Exception as exc:
+            logger.exception('Package update failed')
+            self._on_tool_update_error(str(exc))
+            tools_view = self._window.tools_view
+            if tools_view is not None:
+                tools_view.set_package_updating(plugin_name, package_name, False)
+
+    def _on_tool_update_finished(
+        self,
+        result: ToolUpdateResult,
+        *,
+        updating_plugin: str | None = None,
+        updating_package: tuple[str, str] | None = None,
+    ) -> None:
         """Handle tool update completion."""
-        logger.info('Tool update completed: %d manifest(s) processed', count)
+        logger.info(
+            'Tool update completed: %d manifest(s), %d updated, %d already latest, %d failed',
+            result.manifests_processed,
+            result.updated,
+            result.already_latest,
+            result.failed,
+        )
+
+        # Clear updating state on widgets
+        tools_view = self._window.tools_view
+        if tools_view is not None:
+            if updating_plugin is not None:
+                tools_view.set_plugin_updating(updating_plugin, False)
+            if updating_package is not None:
+                tools_view.set_package_updating(*updating_package, False)
+            # Refresh to pick up version changes and re-detect updates
+            tools_view._updates_checked = False
+            tools_view.refresh()
+
         self._window.show()
 
     def _on_tool_update_error(self, error: str) -> None:
@@ -392,6 +469,61 @@ class TrayScreen:
             f'An error occurred during tool update: {error}',
             QSystemTrayIcon.MessageIcon.Warning,
         )
+
+    # -- Package removal --
+
+    def _on_single_package_remove(self, plugin_name: str, package_name: str) -> None:
+        """Remove a single global package managed by *plugin_name*."""
+        porringer = self._window.porringer
+        if porringer is None:
+            logger.warning('Package remove skipped: porringer not available')
+            return
+
+        logger.info('Starting removal for %s/%s', plugin_name, package_name)
+        tools_view = self._window.tools_view
+        if tools_view is not None:
+            tools_view.set_package_removing(plugin_name, package_name, True)
+        self._tool_task = asyncio.create_task(
+            self._async_single_package_remove(porringer, plugin_name, package_name),
+        )
+
+    async def _async_single_package_remove(
+        self,
+        porringer: API,
+        plugin_name: str,
+        package_name: str,
+    ) -> None:
+        """Run a single-package removal and route results."""
+        try:
+            result = await run_package_remove(porringer, plugin_name, package_name)
+            self._on_package_remove_finished(result, plugin_name, package_name)
+        except Exception as exc:
+            logger.exception('Package removal failed')
+            self.tray.showMessage(
+                'Package Removal Error',
+                f'Failed to remove {package_name}: {exc}',
+                QSystemTrayIcon.MessageIcon.Warning,
+            )
+            tools_view = self._window.tools_view
+            if tools_view is not None:
+                tools_view.set_package_removing(plugin_name, package_name, False)
+
+    def _on_package_remove_finished(
+        self,
+        result: object,
+        plugin_name: str,
+        package_name: str,
+    ) -> None:
+        """Handle package removal completion."""
+        logger.info('Package removal completed for %s/%s', plugin_name, package_name)
+
+        tools_view = self._window.tools_view
+        if tools_view is not None:
+            tools_view.set_package_removing(plugin_name, package_name, False)
+            tools_view._updates_checked = False
+            tools_view.refresh()
+
+        self._window.show()
 
     # -- Self-update download & apply --
 

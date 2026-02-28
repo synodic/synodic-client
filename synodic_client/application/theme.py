@@ -167,6 +167,9 @@ PLUGIN_ROW_VERSION_STYLE = 'font-size: 11px; color: grey;'
 PLUGIN_ROW_GLOBAL_STYLE = 'font-size: 11px; color: #808080; font-style: italic;'
 """Muted italic annotation label for non-manifest (global) packages."""
 
+PLUGIN_ROW_HOST_STYLE = 'font-size: 11px; color: #808080;'
+"""Host-tool annotation label (e.g. "→ pdm") for injected packages."""
+
 PLUGIN_ROW_TOGGLE_STYLE = (
     'QPushButton { padding: 1px 4px; border: 1px solid palette(mid); border-radius: 2px;'
     '  font-size: 10px; min-width: 36px; max-width: 36px; }'
@@ -175,6 +178,22 @@ PLUGIN_ROW_TOGGLE_STYLE = (
     'QPushButton:checked:disabled { background: transparent; color: palette(mid); }'
 )
 """Small inline auto-update toggle for individual package rows."""
+
+PLUGIN_ROW_UPDATE_STYLE = (
+    'QPushButton { padding: 1px 4px; border: 1px solid palette(mid); border-radius: 2px;'
+    '  font-size: 10px; min-width: 48px; max-width: 60px; }'
+    'QPushButton:disabled { color: palette(mid); border-color: palette(mid); background: transparent; }'
+)
+"""Small inline update button for individual package rows."""
+
+PLUGIN_ROW_REMOVE_STYLE = (
+    'QPushButton { border: none; font-size: 12px; color: #808080;'
+    '  padding: 0px 2px; min-width: 18px; max-width: 18px; }'
+    'QPushButton:hover { color: #f48771; }'
+    'QPushButton:pressed { color: #d4d4d4; }'
+    'QPushButton:disabled { color: palette(mid); }'
+)
+"""Small inline remove (×) button for individual package rows."""
 
 PLUGIN_ROW_SPACING = 1
 """Pixels between individual tool/package rows."""

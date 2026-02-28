@@ -9,10 +9,13 @@ to avoid stalling the GUI.
 import asyncio
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from porringer.api import API
-from porringer.schema import SetupParameters, SyncStrategy
+from porringer.core.schema import PackageRef
+from porringer.schema import ProgressEventKind, SetupParameters, SkipReason, SyncStrategy
+from porringer.schema.execution import SetupActionResult
 
 from synodic_client.client import Client
 from synodic_client.updater import UpdateInfo
@@ -60,11 +63,23 @@ async def download_update(
     return await loop.run_in_executor(None, _run)
 
 
+@dataclass(slots=True)
+class ToolUpdateResult:
+    """Summary of a tool-update run across cached manifests."""
+
+    manifests_processed: int = 0
+    updated: int = 0
+    already_latest: int = 0
+    failed: int = 0
+    updated_packages: set[str] = field(default_factory=set)
+    """Package names that were successfully upgraded."""
+
+
 async def run_tool_updates(
     porringer: API,
     plugins: set[str] | None = None,
     include_packages: set[str] | None = None,
-) -> int:
+) -> ToolUpdateResult:
     """Re-sync all cached project manifests.
 
     Args:
@@ -77,19 +92,25 @@ async def run_tool_updates(
             executed.  ``None`` means all packages.
 
     Returns:
-        Number of manifests processed.
+        A :class:`ToolUpdateResult` summarising the run.
     """
     loop = asyncio.get_running_loop()
     directories = await loop.run_in_executor(None, porringer.cache.list_directories)
 
     # Check all directories for manifests in parallel
     paths = [Path(d.path) for d in directories]
-    has_results = await asyncio.gather(
-        *(loop.run_in_executor(None, porringer.sync.has_manifest, p) for p in paths),
-    )
+    has_map: dict[Path, bool] = {}
 
-    count = 0
-    for path, has in zip(paths, has_results, strict=True):
+    async def _check_manifest(p: Path) -> None:
+        has_map[p] = await loop.run_in_executor(None, porringer.sync.has_manifest, p)
+
+    async with asyncio.TaskGroup() as tg:
+        for p in paths:
+            tg.create_task(_check_manifest(p))
+
+    result = ToolUpdateResult()
+    for path in paths:
+        has = has_map[path]
         if not has:
             logger.debug('Skipping path without manifest: %s', path)
             continue
@@ -100,7 +121,43 @@ async def run_tool_updates(
             plugins=plugins,
             include_packages=include_packages,
         )
-        async for _event in porringer.sync.execute_stream(params):
-            pass  # consume events to completion
-        count += 1
-    return count
+        async for event in porringer.sync.execute_stream(params):
+            if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result is not None:
+                action_result = event.result
+                if action_result.skipped:
+                    if (
+                        action_result.skip_reason == SkipReason.ALREADY_LATEST
+                        or action_result.skip_reason == SkipReason.ALREADY_INSTALLED
+                    ):
+                        result.already_latest += 1
+                elif action_result.success:
+                    result.updated += 1
+                    if action_result.action.package:
+                        result.updated_packages.add(str(action_result.action.package.name))
+                else:
+                    result.failed += 1
+        result.manifests_processed += 1
+    return result
+
+
+async def run_package_remove(
+    porringer: API,
+    plugin_name: str,
+    package_name: str,
+) -> SetupActionResult:
+    """Uninstall a single package off the main thread.
+
+    Args:
+        porringer: The porringer API instance.
+        plugin_name: The installer plugin name (e.g. ``"pipx"``).
+        package_name: The package to remove.
+
+    Returns:
+        A :class:`SetupActionResult` describing the outcome.
+    """
+    loop = asyncio.get_running_loop()
+    package_ref = PackageRef(name=package_name)
+    return await loop.run_in_executor(
+        None,
+        lambda: porringer.uninstall(plugin_name, package_ref),
+    )
