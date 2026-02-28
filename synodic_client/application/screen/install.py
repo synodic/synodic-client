@@ -1259,8 +1259,7 @@ async def _resolve_manifest_path(url: str) -> tuple[Path, str | None]:
     dest = Path(temp_dir) / 'porringer.json'
 
     params = DownloadParameters(url=url, destination=dest, timeout=3)
-    loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, lambda: API.download(params))
+    result = await API.download(params)
 
     if not result.success:
         _safe_rmtree(temp_dir)

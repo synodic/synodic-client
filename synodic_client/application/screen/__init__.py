@@ -43,6 +43,7 @@ def plugin_kind_group_label(kind: PluginKind) -> str:
 
 SKIP_REASON_LABELS: dict[SkipReason, str] = {
     SkipReason.ALREADY_INSTALLED: 'Already installed',
+    SkipReason.NOT_INSTALLED: 'Not installed',
     SkipReason.ALREADY_LATEST: 'Already latest',
     SkipReason.NO_PROJECT_DIRECTORY: 'No project directory',
     SkipReason.UPDATE_AVAILABLE: 'Update available',

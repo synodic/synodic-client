@@ -320,16 +320,17 @@ class TestPreviewWorker:
     def test_emits_error_on_download_failure(monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify run_preview raises when download fails."""
         porringer = MagicMock()
-        monkeypatch.setattr(
-            _DOWNLOAD_PATCH,
-            lambda params, progress_callback=None: DownloadResult(
+
+        async def _mock_download(params: Any, progress_callback: Any = None) -> DownloadResult:
+            return DownloadResult(
                 success=False,
                 path=None,
                 verified=False,
                 size=0,
                 message='Network error',
-            ),
-        )
+            )
+
+        monkeypatch.setattr(_DOWNLOAD_PATCH, _mock_download)
 
         with pytest.raises(RuntimeError, match='Network error'):
             asyncio.run(run_preview(porringer, 'https://example.com/bad.json'))
@@ -342,16 +343,16 @@ class TestPreviewWorker:
         dest = tmp_path / 'porringer.json'
         dest.write_text('{}')
 
-        monkeypatch.setattr(
-            _DOWNLOAD_PATCH,
-            lambda params, progress_callback=None: DownloadResult(
+        async def _mock_download(params: Any, progress_callback: Any = None) -> DownloadResult:
+            return DownloadResult(
                 success=True,
                 path=dest,
                 verified=True,
                 size=100,
                 message='OK',
-            ),
-        )
+            )
+
+        monkeypatch.setattr(_DOWNLOAD_PATCH, _mock_download)
 
         expected = SetupResults(actions=[])
         manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=expected)

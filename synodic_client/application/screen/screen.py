@@ -985,9 +985,9 @@ class ToolsView(QWidget):
         loop = asyncio.get_running_loop()
         managers = await loop.run_in_executor(None, self._discover_plugin_managers)
 
-        async def _query(tool_name: str, manager: object) -> None:
+        async def _query(tool_name: str, manager: PluginManager) -> None:
             try:
-                plugins = await manager.installed_plugins()  # type: ignore[union-attr]
+                plugins = await manager.installed_plugins()
                 results[tool_name] = [
                     PackageEntry(
                         name=str(pkg.name),
@@ -1010,7 +1010,7 @@ class ToolsView(QWidget):
         return results
 
     @staticmethod
-    def _discover_plugin_managers() -> dict[str, object]:
+    def _discover_plugin_managers() -> dict[str, PluginManager]:
         """Discover project-environment plugins implementing ``PluginManager`` (sync).
 
         Returns:
@@ -1018,7 +1018,7 @@ class ToolsView(QWidget):
         """
         project_types = Builder.find_plugins('project_environment', ProjectEnvironment)
         instances = Builder.build_plugins(project_types)
-        managers: dict[str, object] = {}
+        managers: dict[str, PluginManager] = {}
         for _info, inst in zip(project_types, instances, strict=True):
             if isinstance(inst, PluginManager) and inst.is_available():
                 managers[inst.tool_name()] = inst

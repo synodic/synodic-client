@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from porringer.api import API
 from porringer.schema import PluginInfo
+from porringer.schema.execution import SetupActionResult
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
@@ -496,6 +497,15 @@ class TrayScreen:
         """Run a single-package removal and route results."""
         try:
             result = await run_package_remove(porringer, plugin_name, package_name)
+            logger.info(
+                'Removal result for %s/%s: success=%s, skipped=%s, skip_reason=%s, message=%s',
+                plugin_name,
+                package_name,
+                result.success,
+                result.skipped,
+                result.skip_reason,
+                result.message,
+            )
             self._on_package_remove_finished(result, plugin_name, package_name)
         except Exception as exc:
             logger.exception('Package removal failed')
@@ -510,14 +520,27 @@ class TrayScreen:
 
     def _on_package_remove_finished(
         self,
-        result: object,
+        result: SetupActionResult,
         plugin_name: str,
         package_name: str,
     ) -> None:
         """Handle package removal completion."""
+        tools_view = self._window.tools_view
+
+        if not result.success or result.skipped:
+            detail = result.message or 'Unknown error'
+            logger.warning('Package removal failed for %s/%s: %s', plugin_name, package_name, detail)
+            self.tray.showMessage(
+                'Package Removal Failed',
+                f'Could not remove {package_name}: {detail}',
+                QSystemTrayIcon.MessageIcon.Warning,
+            )
+            if tools_view is not None:
+                tools_view.set_package_removing(plugin_name, package_name, False)
+            return
+
         logger.info('Package removal completed for %s/%s', plugin_name, package_name)
 
-        tools_view = self._window.tools_view
         if tools_view is not None:
             tools_view.set_package_removing(plugin_name, package_name, False)
             tools_view._updates_checked = False

@@ -107,8 +107,9 @@ class SpinnerWidget(QWidget):
 
     def eventFilter(self, obj: object, event: QEvent) -> bool:
         """Resize to match the parent whenever it resizes."""
-        if event.type() == QEvent.Type.Resize and obj is self.parent():
-            self.setGeometry(self.parent().rect())  # type: ignore[union-attr]
+        parent = self.parent()
+        if event.type() == QEvent.Type.Resize and obj is parent and isinstance(parent, QWidget):
+            self.setGeometry(parent.rect())
         return False
 
     # -- Public API --------------------------------------------------------

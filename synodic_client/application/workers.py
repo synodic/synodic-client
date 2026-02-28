@@ -145,7 +145,7 @@ async def run_package_remove(
     plugin_name: str,
     package_name: str,
 ) -> SetupActionResult:
-    """Uninstall a single package off the main thread.
+    """Uninstall a single package via the porringer API.
 
     Args:
         porringer: The porringer API instance.
@@ -155,9 +155,5 @@ async def run_package_remove(
     Returns:
         A :class:`SetupActionResult` describing the outcome.
     """
-    loop = asyncio.get_running_loop()
     package_ref = PackageRef(name=package_name)
-    return await loop.run_in_executor(
-        None,
-        lambda: porringer.uninstall(plugin_name, package_ref),
-    )
+    return await porringer.uninstall(plugin_name, package_ref)

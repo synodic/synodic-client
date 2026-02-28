@@ -184,8 +184,8 @@ class TestPorringerLogLevel:
 
         # Ensure frozen is not set
         had_frozen = hasattr(sys, 'frozen')
+        old_frozen = getattr(sys, 'frozen', None)
         if had_frozen:
-            old_frozen = sys.frozen  # type: ignore[attr-defined]
             delattr(sys, 'frozen')
 
         try:
@@ -194,7 +194,7 @@ class TestPorringerLogLevel:
             assert porringer_logger.level == logging.INFO
         finally:
             if had_frozen:
-                sys.frozen = old_frozen  # type: ignore[attr-defined]
+                sys.__dict__['frozen'] = old_frozen
 
             # Clean up
             for h in list(app_logger.handlers):
