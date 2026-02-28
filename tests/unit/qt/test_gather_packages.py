@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 from porringer.core.schema import Package, PackageRelation, PackageRelationKind
 from porringer.schema import ManifestDirectory
 
-from synodic_client.application.screen.screen import PackageEntry, ToolsView
+from synodic_client.application.screen.screen import ToolsView
 from synodic_client.resolution import ResolvedConfig
 
 
@@ -58,7 +58,7 @@ class TestGatherPackages:
         view = ToolsView(porringer, _make_config())
         result = asyncio.run(view._gather_packages('pipx', []))
 
-        names = {e.name for e in result}
+        assert {e.name for e in result} == {'pdm', 'cppython'}
 
     @staticmethod
     def test_global_query_returns_packages_with_empty_project_path() -> None:
@@ -75,7 +75,7 @@ class TestGatherPackages:
 
         matching = [e for e in result if e.name == 'pdm']
         assert len(matching) == 1
-        assert matching[0].project_path == '', 'global packages should have empty project_path'
+        assert not matching[0].project_path, 'global packages should have empty project_path'
 
     @staticmethod
     def test_global_query_called_without_project_path() -> None:
@@ -88,7 +88,13 @@ class TestGatherPackages:
 
         # At least one call should have been made with only plugin_name (no path)
         calls = porringer.plugin.list_packages.call_args_list
-        global_calls = [c for c in calls if len(c.args) == 1 or (len(c.args) >= 2 and c.args[1] is None)]
+        plugin_name_only = 1
+        min_args_with_path = 2
+        global_calls = [
+            c
+            for c in calls
+            if len(c.args) == plugin_name_only or (len(c.args) >= min_args_with_path and c.args[1] is None)
+        ]
         assert len(global_calls) >= 1, f'Expected a global call (no project_path), got: {calls}'
 
     @staticmethod
@@ -144,7 +150,7 @@ class TestGatherPackages:
 
         matching = [e for e in result if e.name == 'cppython']
         assert len(matching) == 1
-        assert matching[0].project_label == '', 'global packages should have empty project label'
+        assert not matching[0].project_label, 'global packages should have empty project label'
         assert matching[0].version == '0.5.0'
 
     @staticmethod
@@ -168,7 +174,8 @@ class TestGatherPackages:
 
         names = {entry.name for entry in result}
         assert 'django' in names
-        assert call_count == 2  # one global + one directory
+        expected_calls = 2  # one global + one directory
+        assert call_count == expected_calls
 
     @staticmethod
     def test_relation_host_extracted_into_host_tool() -> None:
@@ -193,7 +200,7 @@ class TestGatherPackages:
 
         by_name = {entry.name: entry.host_tool for entry in result}
         assert by_name['cppython'] == 'pdm', 'injected package should carry host'
-        assert by_name['pdm'] == '', 'non-injected package should have empty host'
+        assert not by_name['pdm'], 'non-injected package should have empty host'
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +240,7 @@ class TestGatherToolPlugins:
         assert len(result['pdm']) == 1
         entry = result['pdm'][0]
         assert entry.name == 'cppython'
-        assert entry.project_label == ''
+        assert not entry.project_label
         assert entry.version == '0.5.0'
         assert entry.host_tool == 'pdm'
 

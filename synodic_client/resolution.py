@@ -308,30 +308,46 @@ def resolve_auto_update_scope(
         enabled_plugins = {n for n in all_plugin_names if n not in disabled_plugins}
 
     # --- Determine include_packages ---
-    # Only build the set when there are per-package overrides or
-    # manifest data that distinguishes global from manifest-required.
-    include_packages: set[str] | None = None
-
-    if per_package_entries or manifest_packages:
-        # Start with manifest-referenced packages (auto-update ON by default)
-        pkg_set: set[str] = set()
-        if manifest_packages:
-            for plugin_name, pkgs in manifest_packages.items():
-                if plugin_name in disabled_plugins:
-                    continue
-                pkg_set |= pkgs
-
-        # Apply per-package config overrides
-        for plugin_name, pkg_map in per_package_entries.items():
-            if plugin_name in disabled_plugins:
-                continue
-            for pkg_name, enabled in pkg_map.items():
-                if enabled:
-                    pkg_set.add(pkg_name)
-                else:
-                    pkg_set.discard(pkg_name)
-
-        if pkg_set:
-            include_packages = pkg_set
+    include_packages = _build_include_packages(
+        per_package_entries,
+        manifest_packages,
+        disabled_plugins,
+    )
 
     return enabled_plugins, include_packages
+
+
+def _build_include_packages(
+    per_package_entries: dict[str, dict[str, bool]],
+    manifest_packages: dict[str, set[str]] | None,
+    disabled_plugins: set[str],
+) -> set[str] | None:
+    """Build the set of package names eligible for auto-update.
+
+    Only builds the set when there are per-package overrides or
+    manifest data that distinguishes global from manifest-required.
+
+    Returns:
+        A set of package names, or ``None`` when no filtering is needed.
+    """
+    if not per_package_entries and not manifest_packages:
+        return None
+
+    # Start with manifest-referenced packages (auto-update ON by default)
+    pkg_set: set[str] = set()
+    if manifest_packages:
+        for plugin_name, pkgs in manifest_packages.items():
+            if plugin_name not in disabled_plugins:
+                pkg_set |= pkgs
+
+    # Apply per-package config overrides
+    for plugin_name, pkg_map in per_package_entries.items():
+        if plugin_name in disabled_plugins:
+            continue
+        for pkg_name, enabled in pkg_map.items():
+            if enabled:
+                pkg_set.add(pkg_name)
+            else:
+                pkg_set.discard(pkg_name)
+
+    return pkg_set or None

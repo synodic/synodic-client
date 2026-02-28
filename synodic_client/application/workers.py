@@ -125,10 +125,10 @@ async def run_tool_updates(
             if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result is not None:
                 action_result = event.result
                 if action_result.skipped:
-                    if (
-                        action_result.skip_reason == SkipReason.ALREADY_LATEST
-                        or action_result.skip_reason == SkipReason.ALREADY_INSTALLED
-                    ):
+                    if action_result.skip_reason in {
+                        SkipReason.ALREADY_LATEST,
+                        SkipReason.ALREADY_INSTALLED,
+                    }:
                         result.already_latest += 1
                 elif action_result.success:
                     result.updated += 1

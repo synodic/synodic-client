@@ -8,7 +8,7 @@ from packaging.version import Version
 from porringer.schema import PluginInfo
 from porringer.schema.plugin import PluginKind
 
-from synodic_client.application.screen.screen import PluginProviderHeader, PluginRow
+from synodic_client.application.screen.screen import PluginProviderHeader, PluginRow, PluginRowData
 
 
 def _make_plugin(
@@ -167,17 +167,19 @@ class TestPluginRowUpdates:
     @staticmethod
     def test_no_update_button_by_default() -> None:
         """With has_update=False the row has no update button."""
-        row = PluginRow('pdm', plugin_name='pipx', show_toggle=True)
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx', show_toggle=True))
         assert row._update_btn is None
 
     @staticmethod
     def test_update_button_visible_when_has_update() -> None:
         """With has_update=True the row shows an inline update button."""
         row = PluginRow(
-            'pdm',
-            plugin_name='pipx',
-            show_toggle=True,
-            has_update=True,
+            PluginRowData(
+                name='pdm',
+                plugin_name='pipx',
+                show_toggle=True,
+                has_update=True,
+            )
         )
         assert row._update_btn is not None
         assert not row._update_btn.isHidden()
@@ -186,10 +188,12 @@ class TestPluginRowUpdates:
     def test_set_updating_true_disables() -> None:
         """set_updating(True) shows 'Updating…' and disables."""
         row = PluginRow(
-            'pdm',
-            plugin_name='pipx',
-            show_toggle=True,
-            has_update=True,
+            PluginRowData(
+                name='pdm',
+                plugin_name='pipx',
+                show_toggle=True,
+                has_update=True,
+            )
         )
         row.set_updating(True)
         assert row._update_btn is not None
@@ -200,10 +204,12 @@ class TestPluginRowUpdates:
     def test_set_updating_false_restores() -> None:
         """set_updating(False) restores 'Update' and re-enables."""
         row = PluginRow(
-            'pdm',
-            plugin_name='pipx',
-            show_toggle=True,
-            has_update=True,
+            PluginRowData(
+                name='pdm',
+                plugin_name='pipx',
+                show_toggle=True,
+                has_update=True,
+            )
         )
         row.set_updating(True)
         row.set_updating(False)
@@ -215,10 +221,12 @@ class TestPluginRowUpdates:
     def test_update_requested_signal() -> None:
         """Clicking update emits update_requested(plugin_name, package_name)."""
         row = PluginRow(
-            'pdm',
-            plugin_name='pipx',
-            show_toggle=True,
-            has_update=True,
+            PluginRowData(
+                name='pdm',
+                plugin_name='pipx',
+                show_toggle=True,
+                has_update=True,
+            )
         )
         spy = MagicMock()
         row.update_requested.connect(spy)
@@ -229,7 +237,7 @@ class TestPluginRowUpdates:
     @staticmethod
     def test_set_updating_noop_without_button() -> None:
         """set_updating is a no-op when no update button exists."""
-        row = PluginRow('pdm', plugin_name='pipx', show_toggle=True)
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx', show_toggle=True))
         # Should not raise
         row.set_updating(True)
         assert row._update_btn is None
@@ -238,10 +246,12 @@ class TestPluginRowUpdates:
     def test_set_checking_shows_spinner() -> None:
         """set_checking(True) starts the inline spinner and hides update button."""
         row = PluginRow(
-            'pdm',
-            plugin_name='pipx',
-            show_toggle=True,
-            has_update=True,
+            PluginRowData(
+                name='pdm',
+                plugin_name='pipx',
+                show_toggle=True,
+                has_update=True,
+            )
         )
         row.set_checking(True)
         assert row._checking_spinner is not None
@@ -253,10 +263,12 @@ class TestPluginRowUpdates:
     def test_set_checking_false_hides_spinner() -> None:
         """set_checking(False) stops the spinner."""
         row = PluginRow(
-            'pdm',
-            plugin_name='pipx',
-            show_toggle=True,
-            has_update=True,
+            PluginRowData(
+                name='pdm',
+                plugin_name='pipx',
+                show_toggle=True,
+                has_update=True,
+            )
         )
         row.set_checking(True)
         row.set_checking(False)
@@ -266,14 +278,14 @@ class TestPluginRowUpdates:
     @staticmethod
     def test_set_checking_noop_without_toggle() -> None:
         """set_checking is a no-op when show_toggle is False (no spinner created)."""
-        row = PluginRow('pdm', plugin_name='pipx')
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx'))
         row.set_checking(True)
         assert row._checking_spinner is None
 
     @staticmethod
     def test_host_tool_label_shown_when_set() -> None:
         """A host_tool value adds a '\u2192 <host>' label after the name."""
-        row = PluginRow('cppython', plugin_name='pipx', host_tool='pdm')
+        row = PluginRow(PluginRowData(name='cppython', plugin_name='pipx', host_tool='pdm'))
         assert row._host_label is not None
         assert row._host_label.text() == '\u2192 pdm'
         assert not row._host_label.isHidden()
@@ -281,7 +293,7 @@ class TestPluginRowUpdates:
     @staticmethod
     def test_host_tool_label_absent_when_empty() -> None:
         """No host label is created when host_tool is empty."""
-        row = PluginRow('pdm', plugin_name='pipx')
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx'))
         assert row._host_label is None
 
 
@@ -296,41 +308,41 @@ class TestPluginRowRemove:
     @staticmethod
     def test_remove_button_present() -> None:
         """A remove button is always created on PluginRow."""
-        row = PluginRow('pdm', plugin_name='pipx', is_global=True)
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx', is_global=True))
         assert row._remove_btn is not None
 
     @staticmethod
     def test_remove_button_enabled_for_global() -> None:
         """The remove button is enabled when is_global=True."""
-        row = PluginRow('pdm', plugin_name='pipx', is_global=True)
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx', is_global=True))
         assert row._remove_btn is not None
         assert row._remove_btn.isEnabled()
 
     @staticmethod
     def test_remove_button_disabled_for_manifest() -> None:
         """The remove button is disabled when is_global=False (manifest-referenced)."""
-        row = PluginRow('pdm', plugin_name='pipx', is_global=False, project='myproject')
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx', is_global=False, project='myproject'))
         assert row._remove_btn is not None
         assert not row._remove_btn.isEnabled()
 
     @staticmethod
     def test_remove_button_tooltip_global() -> None:
         """Tooltip for global packages says 'Remove <name>'."""
-        row = PluginRow('pdm', plugin_name='pipx', is_global=True)
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx', is_global=True))
         assert row._remove_btn is not None
         assert 'Remove pdm' in row._remove_btn.toolTip()
 
     @staticmethod
     def test_remove_button_tooltip_manifest() -> None:
         """Tooltip for manifest packages mentions the project name."""
-        row = PluginRow('pdm', plugin_name='pipx', is_global=False, project='myproject')
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx', is_global=False, project='myproject'))
         assert row._remove_btn is not None
         assert 'myproject' in row._remove_btn.toolTip()
 
     @staticmethod
     def test_remove_requested_signal() -> None:
         """Clicking remove emits remove_requested(plugin_name, package_name)."""
-        row = PluginRow('pdm', plugin_name='pipx', is_global=True)
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx', is_global=True))
         spy = MagicMock()
         row.remove_requested.connect(spy)
         assert row._remove_btn is not None
@@ -340,7 +352,7 @@ class TestPluginRowRemove:
     @staticmethod
     def test_remove_signal_not_emitted_when_disabled() -> None:
         """Clicking a disabled remove button does not emit remove_requested."""
-        row = PluginRow('pdm', plugin_name='pipx', is_global=False, project='myproject')
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx', is_global=False, project='myproject'))
         spy = MagicMock()
         row.remove_requested.connect(spy)
         assert row._remove_btn is not None
@@ -350,7 +362,7 @@ class TestPluginRowRemove:
     @staticmethod
     def test_set_removing_true() -> None:
         """set_removing(True) shows 'Removing\u2026' and disables."""
-        row = PluginRow('pdm', plugin_name='pipx', is_global=True)
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx', is_global=True))
         row.set_removing(True)
         assert row._remove_btn is not None
         assert row._remove_btn.text() == 'Removing\u2026'
@@ -359,7 +371,7 @@ class TestPluginRowRemove:
     @staticmethod
     def test_set_removing_false() -> None:
         """set_removing(False) restores '\u00d7' and re-enables."""
-        row = PluginRow('pdm', plugin_name='pipx', is_global=True)
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx', is_global=True))
         row.set_removing(True)
         row.set_removing(False)
         assert row._remove_btn is not None
@@ -370,10 +382,12 @@ class TestPluginRowRemove:
     def test_project_paths_stored() -> None:
         """PluginRow stores project_paths for navigation."""
         row = PluginRow(
-            'pdm',
-            plugin_name='pipx',
-            is_global=False,
-            project='myproject',
-            project_paths=['/fake/project'],
+            PluginRowData(
+                name='pdm',
+                plugin_name='pipx',
+                is_global=False,
+                project='myproject',
+                project_paths=['/fake/project'],
+            )
         )
         assert row._project_paths == ['/fake/project']

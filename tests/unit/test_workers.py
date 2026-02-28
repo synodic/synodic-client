@@ -21,18 +21,23 @@ class TestToolUpdateResult:
     @staticmethod
     def test_fields_are_assignable() -> None:
         """Verify fields can be set via constructor."""
+        expected_manifests = 3
+        expected_updated = 2
+        expected_latest = 1
+        expected_failed = 0
+        expected_packages = {'pdm', 'ruff'}
         result = ToolUpdateResult(
-            manifests_processed=3,
-            updated=2,
-            already_latest=1,
-            failed=0,
-            updated_packages={'pdm', 'ruff'},
+            manifests_processed=expected_manifests,
+            updated=expected_updated,
+            already_latest=expected_latest,
+            failed=expected_failed,
+            updated_packages=expected_packages,
         )
-        assert result.manifests_processed == 3
-        assert result.updated == 2
-        assert result.already_latest == 1
-        assert result.failed == 0
-        assert result.updated_packages == {'pdm', 'ruff'}
+        assert result.manifests_processed == expected_manifests
+        assert result.updated == expected_updated
+        assert result.already_latest == expected_latest
+        assert result.failed == expected_failed
+        assert result.updated_packages == expected_packages
 
     @staticmethod
     def test_updated_packages_mutation() -> None:
