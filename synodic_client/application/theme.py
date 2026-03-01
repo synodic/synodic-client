@@ -195,6 +195,9 @@ PLUGIN_ROW_REMOVE_STYLE = (
 )
 """Small inline remove (×) button for individual package rows."""
 
+PLUGIN_ROW_ERROR_STYLE = 'font-size: 11px; color: #f48771;'
+"""Transient inline error label shown on a row after a failed action."""
+
 PLUGIN_ROW_SPACING = 1
 """Pixels between individual tool/package rows."""
 

@@ -51,6 +51,7 @@ from synodic_client.application.theme import (
     PLUGIN_PROVIDER_STATUS_MISSING_STYLE,
     PLUGIN_PROVIDER_STYLE,
     PLUGIN_PROVIDER_VERSION_STYLE,
+    PLUGIN_ROW_ERROR_STYLE,
     PLUGIN_ROW_GLOBAL_STYLE,
     PLUGIN_ROW_HOST_STYLE,
     PLUGIN_ROW_NAME_STYLE,
@@ -331,6 +332,12 @@ class PluginProviderHeader(QFrame):
 
         layout.addStretch()
 
+        # Transient inline error label (hidden by default)
+        self._status_label = QLabel()
+        self._status_label.setStyleSheet(PLUGIN_ROW_ERROR_STYLE)
+        self._status_label.hide()
+        layout.addWidget(self._status_label)
+
         # Auto / Update controls (only for updatable kinds)
         if show_controls:
             toggle_btn = QPushButton('Auto')
@@ -384,6 +391,16 @@ class PluginProviderHeader(QFrame):
                 self._update_btn.hide()
         else:
             self._checking_spinner.stop()
+
+    def set_error(self, message: str) -> None:
+        """Show a transient inline error that auto-hides after ~5 seconds."""
+        self._status_label.setText(message)
+        self._status_label.show()
+        QTimer.singleShot(5000, self._status_label.hide)
+
+    def clear_error(self) -> None:
+        """Immediately hide the inline error label."""
+        self._status_label.hide()
 
 
 # ---------------------------------------------------------------------------
@@ -478,6 +495,13 @@ class PluginRow(QFrame):
             version_label = QLabel(data.version)
             version_label.setStyleSheet(PLUGIN_ROW_VERSION_STYLE)
             layout.addWidget(version_label)
+
+        # Transient inline error label (hidden by default)
+        self._status_label = QLabel()
+        self._status_label.setStyleSheet(PLUGIN_ROW_ERROR_STYLE)
+        self._status_label.hide()
+        layout.addWidget(self._status_label)
+
         self._build_remove_button(layout, data)
 
     def _build_toggle(self, layout: QHBoxLayout, data: PluginRowData) -> None:
@@ -561,6 +585,16 @@ class PluginRow(QFrame):
         else:
             self._remove_btn.setText('\u00d7')
             self._remove_btn.setEnabled(True)
+
+    def set_error(self, message: str) -> None:
+        """Show a transient inline error that auto-hides after ~5 seconds."""
+        self._status_label.setText(message)
+        self._status_label.show()
+        QTimer.singleShot(5000, self._status_label.hide)
+
+    def clear_error(self) -> None:
+        """Immediately hide the inline error label."""
+        self._status_label.hide()
 
 
 class ToolsView(QWidget):
@@ -1303,6 +1337,29 @@ class ToolsView(QWidget):
                 widget.set_removing(removing)
                 break
 
+    def set_package_error(
+        self,
+        plugin_name: str,
+        package_name: str,
+        message: str,
+    ) -> None:
+        """Show a transient inline error on a specific package row."""
+        for widget in self._section_widgets:
+            if (
+                isinstance(widget, PluginRow)
+                and widget._plugin_name == plugin_name
+                and widget._package_name == package_name
+            ):
+                widget.set_error(message)
+                break
+
+    def set_plugin_error(self, plugin_name: str, message: str) -> None:
+        """Show a transient inline error on the header for *plugin_name*."""
+        for widget in self._section_widgets:
+            if isinstance(widget, PluginProviderHeader) and widget._plugin_name == plugin_name:
+                widget.set_error(message)
+                break
+
 
 class ProjectsView(QWidget):
     """Widget for managing project directories and previewing their manifests.
@@ -1504,6 +1561,9 @@ class MainWindow(QMainWindow):
     settings_requested = Signal()
     """Emitted when the user clicks the settings gear button."""
 
+    tools_view_created = Signal(ToolsView)
+    """Emitted once when the :class:`ToolsView` is lazily initialised."""
+
     _tabs: QTabWidget | None = None
     _tools_view: ToolsView | None = None
     _projects_view: ProjectsView | None = None
@@ -1554,6 +1614,7 @@ class MainWindow(QMainWindow):
 
             self._tools_view = ToolsView(self._porringer, self._config, self)
             self._tabs.addTab(self._tools_view, 'Tools')
+            self.tools_view_created.emit(self._tools_view)
 
             # Navigate-to-project: switch to Projects tab and select directory
             self._tools_view.navigate_to_project_requested.connect(self._navigate_to_project)

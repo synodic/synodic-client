@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from synodic_client.application.icon import app_icon
-from synodic_client.application.screen.screen import MainWindow
+from synodic_client.application.screen.screen import MainWindow, ToolsView
 from synodic_client.application.screen.settings import SettingsWindow
 from synodic_client.application.workers import (
     ToolUpdateResult,
@@ -88,13 +88,8 @@ class TrayScreen:
         self._tool_update_timer: QTimer | None = None
         self._restart_tool_update_timer()
 
-        # Connect ToolsView signals when available
-        tools_view = window.tools_view
-        if tools_view is not None:
-            tools_view.update_all_requested.connect(self._on_tool_update)
-            tools_view.plugin_update_requested.connect(self._on_single_plugin_update)
-            tools_view.package_update_requested.connect(self._on_single_package_update)
-            tools_view.package_remove_requested.connect(self._on_single_package_remove)
+        # Connect ToolsView signals — deferred because ToolsView is created lazily
+        window.tools_view_created.connect(self._connect_tools_view)
 
         # Connect update banner signals
         self._banner = window.update_banner
@@ -128,6 +123,15 @@ class TrayScreen:
         self.menu.addAction(self.quit_action)
 
         self.tray.setContextMenu(self.menu)
+
+    # -- Deferred ToolsView wiring --
+
+    def _connect_tools_view(self, tools_view: ToolsView) -> None:
+        """Wire ToolsView signals once the view is lazily created."""
+        tools_view.update_all_requested.connect(self._on_tool_update)
+        tools_view.plugin_update_requested.connect(self._on_single_plugin_update)
+        tools_view.package_update_requested.connect(self._on_single_package_update)
+        tools_view.package_remove_requested.connect(self._on_single_package_remove)
 
     # -- Config helpers --
 
@@ -389,10 +393,10 @@ class TrayScreen:
             self._on_tool_update_finished(result, updating_plugin=plugin_name)
         except Exception as exc:
             logger.exception('Tool update failed')
-            self._on_tool_update_error(str(exc))
             tools_view = self._window.tools_view
             if tools_view is not None:
                 tools_view.set_plugin_updating(plugin_name, False)
+                tools_view.set_plugin_error(plugin_name, f'Update failed: {exc}')
 
     def _on_single_package_update(self, plugin_name: str, package_name: str) -> None:
         """Upgrade a single package managed by *plugin_name*."""
@@ -428,10 +432,10 @@ class TrayScreen:
             )
         except Exception as exc:
             logger.exception('Package update failed')
-            self._on_tool_update_error(str(exc))
             tools_view = self._window.tools_view
             if tools_view is not None:
                 tools_view.set_package_updating(plugin_name, package_name, False)
+                tools_view.set_package_error(plugin_name, package_name, f'Update failed: {exc}')
 
     def _on_tool_update_finished(
         self,
@@ -509,14 +513,10 @@ class TrayScreen:
             self._on_package_remove_finished(result, plugin_name, package_name)
         except Exception as exc:
             logger.exception('Package removal failed')
-            self.tray.showMessage(
-                'Package Removal Error',
-                f'Failed to remove {package_name}: {exc}',
-                QSystemTrayIcon.MessageIcon.Warning,
-            )
             tools_view = self._window.tools_view
             if tools_view is not None:
                 tools_view.set_package_removing(plugin_name, package_name, False)
+                tools_view.set_package_error(plugin_name, package_name, f'Failed to remove {package_name}: {exc}')
 
     def _on_package_remove_finished(
         self,
@@ -530,13 +530,9 @@ class TrayScreen:
         if not result.success or result.skipped:
             detail = result.message or 'Unknown error'
             logger.warning('Package removal failed for %s/%s: %s', plugin_name, package_name, detail)
-            self.tray.showMessage(
-                'Package Removal Failed',
-                f'Could not remove {package_name}: {detail}',
-                QSystemTrayIcon.MessageIcon.Warning,
-            )
             if tools_view is not None:
                 tools_view.set_package_removing(plugin_name, package_name, False)
+                tools_view.set_package_error(plugin_name, package_name, f'Could not remove {package_name}: {detail}')
             return
 
         logger.info('Package removal completed for %s/%s', plugin_name, package_name)
