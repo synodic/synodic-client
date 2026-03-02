@@ -1,6 +1,7 @@
 """Screen class for the Synodic Client application."""
 
 import asyncio
+import contextlib
 import logging
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -727,10 +728,7 @@ class ToolsView(QWidget):
             A :class:`_RefreshData` bundle containing all data needed
             to build the widget tree.
         """
-        plugins, directories = await asyncio.get_running_loop().run_in_executor(
-            None,
-            self._fetch_data,
-        )
+        plugins, directories = await self._fetch_data()
         self._directories = directories
 
         updatable_plugins = [p for p in plugins if p.kind in _UPDATABLE_KINDS]
@@ -923,9 +921,9 @@ class ToolsView(QWidget):
         self._container_layout.insertWidget(idx, widget)
         self._section_widgets.append(widget)
 
-    def _fetch_data(self) -> tuple[list[PluginInfo], list[ManifestDirectory]]:
-        """Fetch plugin list and directories (sync, run in executor)."""
-        plugins = self._porringer.plugin.list()
+    async def _fetch_data(self) -> tuple[list[PluginInfo], list[ManifestDirectory]]:
+        """Fetch plugin list and directories."""
+        plugins = await self._porringer.plugin.list()
         directories = self._porringer.cache.list_directories()
         return plugins, directories
 
@@ -1082,10 +1080,11 @@ class ToolsView(QWidget):
                 dry_run=True,
                 project_directory=path,
             )
-            async for event in self._porringer.sync.execute_stream(params):
-                if event.kind == ProgressEventKind.MANIFEST_PARSED and event.manifest:
-                    actions.extend(event.manifest.actions)
-                    break
+            async with contextlib.aclosing(self._porringer.sync.execute_stream(params)) as stream:
+                async for event in stream:
+                    if event.kind == ProgressEventKind.MANIFEST_PARSED and event.manifest:
+                        actions.extend(event.manifest.actions)
+                        break
         except Exception:
             logger.debug(
                 'Could not gather requirements for %s',

@@ -30,7 +30,7 @@ def _make_config() -> ResolvedConfig:
 def _make_porringer() -> MagicMock:
     """Build a MagicMock standing in for the porringer API."""
     mock = MagicMock()
-    mock.plugin.list.return_value = []
+    mock.plugin.list = AsyncMock(return_value=[])
     mock.plugin.list_packages = AsyncMock(return_value=[])
     mock.cache.list_directories.return_value = []
     return mock

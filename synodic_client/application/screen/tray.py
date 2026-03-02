@@ -5,7 +5,6 @@ import logging
 from collections.abc import Callable
 
 from porringer.api import API
-from porringer.schema import PluginInfo
 from porringer.schema.execution import SetupActionResult
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction
@@ -332,13 +331,9 @@ class TrayScreen:
 
     async def _do_tool_update(self, porringer: API) -> None:
         """Resolve enabled plugins off-thread, then run the tool update."""
-        loop = asyncio.get_running_loop()
         config = self._resolve_config()
 
-        def _list_plugins() -> list[PluginInfo]:
-            return porringer.plugin.list()
-
-        all_plugins = await loop.run_in_executor(None, _list_plugins)
+        all_plugins = await porringer.plugin.list()
         all_names = [p.name for p in all_plugins if p.installed]
         enabled_plugins, include_packages = resolve_auto_update_scope(
             config,
@@ -390,7 +385,7 @@ class TrayScreen:
                 plugins={plugin_name},
                 include_packages=include_packages,
             )
-            self._on_tool_update_finished(result, updating_plugin=plugin_name)
+            self._on_tool_update_finished(result, updating_plugin=plugin_name, manual=True)
         except Exception as exc:
             logger.exception('Tool update failed')
             tools_view = self._window.tools_view
@@ -429,6 +424,7 @@ class TrayScreen:
             self._on_tool_update_finished(
                 result,
                 updating_package=(plugin_name, package_name),
+                manual=True,
             )
         except Exception as exc:
             logger.exception('Package update failed')
@@ -443,6 +439,7 @@ class TrayScreen:
         *,
         updating_plugin: str | None = None,
         updating_package: tuple[str, str] | None = None,
+        manual: bool = False,
     ) -> None:
         """Handle tool update completion."""
         logger.info(
@@ -464,7 +461,8 @@ class TrayScreen:
             tools_view._updates_checked = False
             tools_view.refresh()
 
-        self._window.show()
+        if manual:
+            self._window.show()
 
     def _on_tool_update_error(self, error: str) -> None:
         """Handle tool update error."""
