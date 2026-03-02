@@ -196,7 +196,7 @@ class TestInstallWorker:
 
         captured_params: list[Any] = []
 
-        async def mock_stream(params: Any) -> Any:
+        async def mock_stream(params: Any, **kwargs: Any) -> Any:
             captured_params.append(params)
             yield manifest_event
 
@@ -224,7 +224,7 @@ class TestInstallWorker:
 
         captured_params: list[Any] = []
 
-        async def mock_stream(params: Any) -> Any:
+        async def mock_stream(params: Any, **kwargs: Any) -> Any:
             captured_params.append(params)
             yield manifest_event
 
@@ -683,7 +683,7 @@ class TestPreviewWorkerUpdateDetection:
 
         captured_params: list[Any] = []
 
-        async def mock_stream(params: Any) -> Any:
+        async def mock_stream(params: Any, **kwargs: Any) -> Any:
             captured_params.append(params)
             yield manifest_event
 
@@ -716,7 +716,7 @@ class TestPreviewWorkerUpdateDetection:
 
         captured_params: list[Any] = []
 
-        async def mock_stream(params: Any) -> Any:
+        async def mock_stream(params: Any, **kwargs: Any) -> Any:
             captured_params.append(params)
             yield manifest_event
 
@@ -766,7 +766,7 @@ class TestPreviewWorkerProjectDirectory:
 
         captured_params: list[Any] = []
 
-        async def mock_stream(params: Any) -> Any:
+        async def mock_stream(params: Any, **kwargs: Any) -> Any:
             captured_params.append(params)
             yield manifest_event
 
@@ -795,7 +795,7 @@ class TestPreviewWorkerProjectDirectory:
 
         captured_params: list[Any] = []
 
-        async def mock_stream(params: Any) -> Any:
+        async def mock_stream(params: Any, **kwargs: Any) -> Any:
             captured_params.append(params)
             yield manifest_event
 

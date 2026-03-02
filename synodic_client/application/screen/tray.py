@@ -332,8 +332,16 @@ class TrayScreen:
     async def _do_tool_update(self, porringer: API) -> None:
         """Resolve enabled plugins off-thread, then run the tool update."""
         config = self._resolve_config()
+        coordinator = self._window.coordinator
 
-        all_plugins = await porringer.plugin.list()
+        if coordinator is not None:
+            snapshot = await coordinator.refresh()
+            all_plugins = snapshot.plugins
+            discovered = snapshot.discovered
+        else:
+            all_plugins = await porringer.plugin.list()
+            discovered = None
+
         all_names = [p.name for p in all_plugins if p.installed]
         enabled_plugins, include_packages = resolve_auto_update_scope(
             config,
@@ -345,7 +353,10 @@ class TrayScreen:
                 porringer,
                 plugins=enabled_plugins,
                 include_packages=include_packages,
+                discovered_plugins=discovered,
             )
+            if coordinator is not None:
+                coordinator.invalidate()
             self._on_tool_update_finished(result)
         except Exception as exc:
             logger.exception('Tool update failed')
@@ -371,6 +382,8 @@ class TrayScreen:
         config = self._resolve_config()
         mapping = config.plugin_auto_update or {}
         pkg_entry = mapping.get(plugin_name)
+        coordinator = self._window.coordinator
+        discovered = coordinator.discovered_plugins if coordinator is not None else None
 
         # Resolve per-package filtering for this plugin
         include_packages: set[str] | None = None
@@ -384,7 +397,10 @@ class TrayScreen:
                 porringer,
                 plugins={plugin_name},
                 include_packages=include_packages,
+                discovered_plugins=discovered,
             )
+            if coordinator is not None:
+                coordinator.invalidate()
             self._on_tool_update_finished(result, updating_plugin=plugin_name, manual=True)
         except Exception as exc:
             logger.exception('Tool update failed')
@@ -415,12 +431,17 @@ class TrayScreen:
         package_name: str,
     ) -> None:
         """Run a single-package tool update and route results."""
+        coordinator = self._window.coordinator
+        discovered = coordinator.discovered_plugins if coordinator is not None else None
         try:
             result = await run_tool_updates(
                 porringer,
                 plugins={plugin_name},
                 include_packages={package_name},
+                discovered_plugins=discovered,
             )
+            if coordinator is not None:
+                coordinator.invalidate()
             self._on_tool_update_finished(
                 result,
                 updating_package=(plugin_name, package_name),
@@ -497,8 +518,15 @@ class TrayScreen:
         package_name: str,
     ) -> None:
         """Run a single-package removal and route results."""
+        coordinator = self._window.coordinator
+        discovered = coordinator.discovered_plugins if coordinator is not None else None
         try:
-            result = await run_package_remove(porringer, plugin_name, package_name)
+            result = await run_package_remove(
+                porringer,
+                plugin_name,
+                package_name,
+                discovered_plugins=discovered,
+            )
             logger.info(
                 'Removal result for %s/%s: success=%s, skipped=%s, skip_reason=%s, message=%s',
                 plugin_name,
@@ -508,6 +536,8 @@ class TrayScreen:
                 result.skip_reason,
                 result.message,
             )
+            if coordinator is not None:
+                coordinator.invalidate()
             self._on_package_remove_finished(result, plugin_name, package_name)
         except Exception as exc:
             logger.exception('Package removal failed')

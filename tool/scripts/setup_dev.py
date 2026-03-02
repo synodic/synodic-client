@@ -34,7 +34,7 @@ def main() -> None:
     porringer = API(local_config)
 
     cached = porringer.cache.list_directories()
-    registered = {d.path.resolve(): d for d in cached}
+    registered = {dr.directory.path.resolve(): dr.directory for dr in cached}
     example_dirs = {child.resolve() for child in _EXAMPLES_DIR.iterdir() if child.is_dir()}
 
     # --- Prune stale entries whose directories no longer exist under examples/ ---

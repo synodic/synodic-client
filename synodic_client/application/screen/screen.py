@@ -1,7 +1,6 @@
 """Screen class for the Synodic Client application."""
 
 import asyncio
-import contextlib
 import logging
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -12,13 +11,13 @@ from porringer.backend.builder import Builder
 from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.schema import (
-    DirectoryValidationResult,
     ManifestDirectory,
     PluginInfo,
     ProgressEventKind,
     SetupAction,
     SetupParameters,
     SkipReason,
+    SyncStrategy,
 )
 from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import QRect, Qt, QTimer, Signal
@@ -37,6 +36,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from synodic_client.application.data import DataCoordinator
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen import plugin_kind_group_label
 from synodic_client.application.screen.install import PreviewPhase, SetupPreviewWidget
@@ -626,6 +626,8 @@ class ToolsView(QWidget):
         porringer: API,
         config: ResolvedConfig,
         parent: QWidget | None = None,
+        *,
+        coordinator: DataCoordinator | None = None,
     ) -> None:
         """Initialize the tools view.
 
@@ -633,10 +635,14 @@ class ToolsView(QWidget):
             porringer: The porringer API instance.
             config: Resolved configuration (for auto-update toggles).
             parent: Optional parent widget.
+            coordinator: Shared data coordinator.  When provided, the
+                view delegates plugin/directory fetching to the
+                coordinator instead of calling porringer directly.
         """
         super().__init__(parent)
         self._porringer = porringer
         self._config = config
+        self._coordinator = coordinator
         self._section_widgets: list[QWidget] = []
         self._refresh_in_progress = False
         self._check_in_progress = False
@@ -922,9 +928,12 @@ class ToolsView(QWidget):
         self._section_widgets.append(widget)
 
     async def _fetch_data(self) -> tuple[list[PluginInfo], list[ManifestDirectory]]:
-        """Fetch plugin list and directories."""
+        """Fetch plugin list and directories via the coordinator (or direct fallback)."""
+        if self._coordinator is not None:
+            snapshot = await self._coordinator.refresh()
+            return snapshot.plugins, snapshot.directories
         plugins = await self._porringer.plugin.list()
-        directories = self._porringer.cache.list_directories()
+        directories = [r.directory for r in self._porringer.cache.list_directories()]
         return plugins, directories
 
     async def _gather_packages(
@@ -944,10 +953,14 @@ class ToolsView(QWidget):
             A list of :class:`PackageEntry` instances.
         """
         packages: list[PackageEntry] = []
+        discovered = self._coordinator.discovered_plugins if self._coordinator else None
 
         async def _list_global() -> None:
             try:
-                pkgs = await self._porringer.plugin.list_packages(plugin_name)
+                pkgs = await self._porringer.plugin.list_packages(
+                    plugin_name,
+                    plugins=discovered,
+                )
                 packages.extend(
                     PackageEntry(
                         name=str(pkg.name),
@@ -968,6 +981,7 @@ class ToolsView(QWidget):
                 pkgs = await self._porringer.plugin.list_packages(
                     plugin_name,
                     Path(directory.path),
+                    plugins=discovered,
                 )
                 packages.extend(
                     PackageEntry(
@@ -1002,11 +1016,8 @@ class ToolsView(QWidget):
     ) -> dict[str, list[PackageEntry]]:
         """Query :class:`PluginManager` instances for natively managed sub-plugins.
 
-        Discovers project-environment plugins that implement the
-        ``PluginManager`` protocol (e.g. PDM, Poetry) and calls
-        ``installed_plugins()`` on each.  Each returned
-        :class:`Package` carries a :class:`PackageRelation` whose
-        *host* field identifies the parent tool.
+        Uses the coordinator's pre-discovered ``plugin_managers`` when
+        available, avoiding redundant ``Builder.find_plugins`` calls.
 
         Returns:
             A dict mapping host-tool name (e.g. ``"pdm"``) to a list of
@@ -1014,8 +1025,12 @@ class ToolsView(QWidget):
         """
         results: dict[str, list[PackageEntry]] = {}
 
-        loop = asyncio.get_running_loop()
-        managers = await loop.run_in_executor(None, self._discover_plugin_managers)
+        if self._coordinator is not None:
+            managers = self._coordinator.snapshot.plugin_managers
+        else:
+            # Fallback: discover from scratch (legacy path / tests)
+            loop = asyncio.get_running_loop()
+            managers = await loop.run_in_executor(None, self._discover_plugin_managers)
 
         async def _query(tool_name: str, manager: PluginManager) -> None:
             try:
@@ -1045,6 +1060,8 @@ class ToolsView(QWidget):
     def _discover_plugin_managers() -> dict[str, PluginManager]:
         """Discover project-environment plugins implementing ``PluginManager`` (sync).
 
+        Fallback for when no ``DataCoordinator`` is available.
+
         Returns:
             A dict mapping tool name to :class:`PluginManager` instance.
         """
@@ -1060,7 +1077,13 @@ class ToolsView(QWidget):
         self,
         directory: ManifestDirectory,
     ) -> list[SetupAction]:
-        """Run a dry-run execute_stream for *directory* and collect actions."""
+        """Load the manifest for *directory* and return its actions.
+
+        When a :class:`DataCoordinator` is available the efficient
+        ``async_load_manifest`` path is used (no streaming, no
+        ``aclosing`` needed).  The legacy ``execute_stream`` path is
+        kept as a fallback for tests and headless usage.
+        """
         actions: list[SetupAction] = []
         try:
             path = Path(directory.path)
@@ -1075,13 +1098,24 @@ class ToolsView(QWidget):
             if manifest_path is None:
                 return actions
 
-            params = SetupParameters(
-                paths=[str(manifest_path)],
-                dry_run=True,
-                project_directory=path,
-            )
-            async with contextlib.aclosing(self._porringer.sync.execute_stream(params)) as stream:
-                async for event in stream:
+            discovered = self._coordinator.discovered_plugins if self._coordinator else None
+
+            if discovered is not None:
+                # Fast path: single-shot manifest load
+                result = await self._porringer.sync.async_load_manifest(
+                    manifest_path,
+                    SyncStrategy.MINIMAL,
+                    plugins=discovered,
+                )
+                actions.extend(result.actions)
+            else:
+                # Legacy path: stream and break after first parse
+                params = SetupParameters(
+                    paths=[str(manifest_path)],
+                    dry_run=True,
+                    project_directory=path,
+                )
+                async for event in self._porringer.sync.execute_stream(params):
                     if event.kind == ProgressEventKind.MANIFEST_PARSED and event.manifest:
                         actions.extend(event.manifest.actions)
                         break
@@ -1167,13 +1201,20 @@ class ToolsView(QWidget):
         self,
         directories: list[ManifestDirectory],
     ) -> dict[str, set[str]]:
-        """Detect available updates across cached manifests via dry-run.
+        """Detect available updates across cached manifests.
 
-        All directories are checked in parallel via ``asyncio.TaskGroup``.
+        When a :class:`DataCoordinator` is available the efficient
+        ``check_updates()`` API is used (single call, no streaming).
+        Falls back to per-directory ``execute_stream`` dry-runs
+        otherwise.
 
         Returns a mapping of ``{plugin_name: {package_names…}}`` for
         packages that have a newer version available.
         """
+        if self._coordinator is not None:
+            return await self._check_updates_via_coordinator()
+
+        # Legacy per-directory fallback
         available: dict[str, set[str]] = {}
 
         async def _check_one(directory: ManifestDirectory) -> None:
@@ -1187,11 +1228,26 @@ class ToolsView(QWidget):
 
         return available
 
+    async def _check_updates_via_coordinator(self) -> dict[str, set[str]]:
+        """Use the coordinator's ``check_updates`` for efficient detection."""
+        assert self._coordinator is not None
+        results = await self._coordinator.check_updates()
+        available: dict[str, set[str]] = {}
+        for cr in results:
+            if cr.success:
+                updated = {pi.name for pi in cr.packages if pi.update_available}
+                if updated:
+                    available[cr.plugin] = updated
+        return available
+
     async def _check_directory_updates(
         self,
         directory: ManifestDirectory,
     ) -> dict[str, set[str]]:
-        """Check a single directory for available updates (dry-run)."""
+        """Check a single directory for available updates (dry-run).
+
+        Legacy fallback used when no coordinator is available.
+        """
         available: dict[str, set[str]] = {}
         try:
             path = Path(directory.path)
@@ -1369,17 +1425,27 @@ class ProjectsView(QWidget):
     in parallel on first refresh; switching between them is instant.
     """
 
-    def __init__(self, porringer: API, config: ResolvedConfig, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        porringer: API,
+        config: ResolvedConfig,
+        parent: QWidget | None = None,
+        *,
+        coordinator: DataCoordinator | None = None,
+    ) -> None:
         """Initialize the projects view.
 
         Args:
             porringer: The porringer API instance.
             config: Resolved configuration.
             parent: Optional parent widget.
+            coordinator: Shared data coordinator for validated directory
+                data.
         """
         super().__init__(parent)
         self._porringer = porringer
         self._config = config
+        self._coordinator = coordinator
         self._refresh_in_progress = False
         self._pending_select: Path | None = None
         self._widgets: dict[Path, SetupPreviewWidget] = {}
@@ -1434,17 +1500,24 @@ class ProjectsView(QWidget):
             previous = self._pending_select or self._sidebar.selected_path
             self._pending_select = None
 
-            loop = asyncio.get_running_loop()
-            results: list[DirectoryValidationResult] = await loop.run_in_executor(
-                None,
-                lambda: self._porringer.cache.validate_directories(check_manifest=True),
-            )
+            if self._coordinator is not None:
+                snapshot = await self._coordinator.refresh()
+                results = snapshot.validated_directories
+            else:
+                loop = asyncio.get_running_loop()
+                results = await loop.run_in_executor(
+                    None,
+                    lambda: self._porringer.cache.list_directories(
+                        validate=True,
+                        check_manifest=True,
+                    ),
+                )
 
             directories: list[tuple[Path, str, bool]] = []
             current_paths: set[Path] = set()
             for result in results:
                 d = result.directory
-                valid = result.exists and result.has_manifest is not False
+                valid = bool(result.exists and result.has_manifest is not False)
                 path = Path(d.path)
                 directories.append((path, d.name or '', valid))
                 current_paths.add(path)
@@ -1532,6 +1605,8 @@ class ProjectsView(QWidget):
         except ValueError:
             logger.debug('Directory already cached: %s', directory)
 
+        if self._coordinator is not None:
+            self._coordinator.invalidate()
         self._pending_select = directory
         self.refresh()
 
@@ -1547,10 +1622,14 @@ class ProjectsView(QWidget):
             widget.reset()
             widget.deleteLater()
 
+        if self._coordinator is not None:
+            self._coordinator.invalidate()
         self.refresh()
 
     def _on_install_finished(self, _results: object) -> None:
         """Refresh after a successful install."""
+        if self._coordinator is not None:
+            self._coordinator.invalidate()
         self.refresh()
 
 
@@ -1581,6 +1660,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._porringer = porringer
         self._config = config
+        self._coordinator: DataCoordinator | None = DataCoordinator(porringer) if porringer is not None else None
         self.setWindowTitle('Synodic Client')
         self.setMinimumSize(*MAIN_WINDOW_MIN_SIZE)
         self.setWindowIcon(app_icon())
@@ -1592,6 +1672,11 @@ class MainWindow(QMainWindow):
     def porringer(self) -> API | None:
         """Return the porringer API instance, if available."""
         return self._porringer
+
+    @property
+    def coordinator(self) -> DataCoordinator | None:
+        """Return the shared data coordinator, if available."""
+        return self._coordinator
 
     @property
     def tools_view(self) -> ToolsView | None:
@@ -1608,10 +1693,20 @@ class MainWindow(QMainWindow):
         if self._tabs is None and self._porringer is not None and self._config is not None:
             self._tabs = QTabWidget(self)
 
-            self._projects_view = ProjectsView(self._porringer, self._config, self)
+            self._projects_view = ProjectsView(
+                self._porringer,
+                self._config,
+                self,
+                coordinator=self._coordinator,
+            )
             self._tabs.addTab(self._projects_view, 'Projects')
 
-            self._tools_view = ToolsView(self._porringer, self._config, self)
+            self._tools_view = ToolsView(
+                self._porringer,
+                self._config,
+                self,
+                coordinator=self._coordinator,
+            )
             self._tabs.addTab(self._tools_view, 'Tools')
             self.tools_view_created.emit(self._tools_view)
 

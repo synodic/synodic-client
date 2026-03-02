@@ -6,21 +6,22 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from synodic_client.application.screen.tray import TrayScreen
 from synodic_client.application.workers import ToolUpdateResult
 
 
-@pytest.fixture()
+@pytest.fixture
 def tray_screen():
     """Build a minimal ``TrayScreen`` with mocked collaborators."""
-    with patch('synodic_client.application.screen.tray.resolve_config'), \
-         patch('synodic_client.application.screen.tray.resolve_update_config') as mock_ucfg:
+    with (
+        patch('synodic_client.application.screen.tray.resolve_config'),
+        patch('synodic_client.application.screen.tray.resolve_update_config') as mock_ucfg,
+    ):
         # Disable timers by setting intervals to 0
         mock_ucfg.return_value = MagicMock(
             auto_update_interval_minutes=0,
             tool_update_interval_minutes=0,
         )
-
-        from synodic_client.application.screen.tray import TrayScreen
 
         app = MagicMock()
         client = MagicMock()

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from porringer.api import API
+from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.core.schema import PackageRef
 from porringer.schema import ProgressEventKind, SetupParameters, SkipReason, SyncStrategy
 from porringer.schema.execution import SetupActionResult
@@ -79,6 +80,8 @@ async def run_tool_updates(
     porringer: API,
     plugins: set[str] | None = None,
     include_packages: set[str] | None = None,
+    *,
+    discovered_plugins: DiscoveredPlugins | None = None,
 ) -> ToolUpdateResult:
     """Re-sync all cached project manifests.
 
@@ -90,30 +93,25 @@ async def run_tool_updates(
         include_packages: Optional include-set of package names.  When
             set, only actions whose package name is in this set are
             executed.  ``None`` means all packages.
+        discovered_plugins: Pre-discovered plugins to pass through to
+            porringer, avoiding redundant discovery on each
+            ``execute_stream`` call.
 
     Returns:
         A :class:`ToolUpdateResult` summarising the run.
     """
     loop = asyncio.get_running_loop()
-    directories = await loop.run_in_executor(None, porringer.cache.list_directories)
-
-    # Check all directories for manifests in parallel
-    paths = [Path(d.path) for d in directories]
-    has_map: dict[Path, bool] = {}
-
-    async def _check_manifest(p: Path) -> None:
-        has_map[p] = await loop.run_in_executor(None, porringer.sync.has_manifest, p)
-
-    async with asyncio.TaskGroup() as tg:
-        for p in paths:
-            tg.create_task(_check_manifest(p))
+    dir_results = await loop.run_in_executor(
+        None,
+        lambda: porringer.cache.list_directories(validate=True, check_manifest=True),
+    )
 
     result = ToolUpdateResult()
-    for path in paths:
-        has = has_map[path]
-        if not has:
-            logger.debug('Skipping path without manifest: %s', path)
+    for dr in dir_results:
+        if not dr.has_manifest:
+            logger.debug('Skipping path without manifest: %s', dr.directory.path)
             continue
+        path = Path(dr.directory.path)
         params = SetupParameters(
             paths=[path],
             project_directory=path if path.is_dir() else None,
@@ -121,7 +119,10 @@ async def run_tool_updates(
             plugins=plugins,
             include_packages=include_packages,
         )
-        async for event in porringer.sync.execute_stream(params):
+        async for event in porringer.sync.execute_stream(
+            params,
+            plugins=discovered_plugins,
+        ):
             if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result is not None:
                 action_result = event.result
                 if action_result.skipped:
@@ -144,6 +145,8 @@ async def run_package_remove(
     porringer: API,
     plugin_name: str,
     package_name: str,
+    *,
+    discovered_plugins: DiscoveredPlugins | None = None,
 ) -> SetupActionResult:
     """Uninstall a single package via the porringer API.
 
@@ -151,9 +154,11 @@ async def run_package_remove(
         porringer: The porringer API instance.
         plugin_name: The installer plugin name (e.g. ``"pipx"``).
         package_name: The package to remove.
+        discovered_plugins: Pre-discovered plugins to pass through to
+            porringer, avoiding redundant discovery.
 
     Returns:
         A :class:`SetupActionResult` describing the outcome.
     """
     package_ref = PackageRef(name=package_name)
-    return await porringer.uninstall(plugin_name, package_ref)
+    return await porringer.uninstall(plugin_name, package_ref, plugins=discovered_plugins)

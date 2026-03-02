@@ -102,7 +102,7 @@ class TestGatherPackages:
         """Per-directory queries continue to run alongside the global query."""
         porringer = _make_porringer()
 
-        async def _mock_list(plugin_name: str, project_path: Path | None = None) -> list[Package]:
+        async def _mock_list(plugin_name: str, project_path: Path | None = None, **kwargs) -> list[Package]:
             if project_path is None:
                 return [Package(name='pdm', version='2.22.4')]
             return [Package(name='mylib', version='1.0.0')]
@@ -122,7 +122,7 @@ class TestGatherPackages:
         """Per-directory packages should include the directory path as project_path."""
         porringer = _make_porringer()
 
-        async def _mock_list(plugin_name: str, project_path: Path | None = None) -> list[Package]:
+        async def _mock_list(plugin_name: str, project_path: Path | None = None, **kwargs) -> list[Package]:
             if project_path is None:
                 return []
             return [Package(name='mylib', version='1.0.0')]
@@ -159,7 +159,7 @@ class TestGatherPackages:
         porringer = _make_porringer()
         call_count = 0
 
-        async def _mock_list(plugin_name: str, project_path: Path | None = None) -> list[Package]:
+        async def _mock_list(plugin_name: str, project_path: Path | None = None, **kwargs) -> list[Package]:
             nonlocal call_count
             call_count += 1
             if project_path is None:

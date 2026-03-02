@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 from porringer.api import API
+from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.schema import (
     DownloadParameters,
     ProgressEvent,
@@ -230,6 +231,8 @@ async def run_install(
     manifest_path: Path,
     config: InstallConfig | None = None,
     callbacks: InstallCallbacks | None = None,
+    *,
+    plugins: DiscoveredPlugins | None = None,
 ) -> SetupResults:
     """Execute setup actions via porringer and stream progress.
 
@@ -243,6 +246,8 @@ async def run_install(
         config: Optional execution parameters (directory, strategy,
             prerelease overrides).
         callbacks: Optional progress callbacks.
+        plugins: Pre-discovered plugins to pass through to porringer,
+            avoiding redundant discovery.
 
     Returns:
         Aggregated :class:`SetupResults`.
@@ -259,7 +264,7 @@ async def run_install(
     collected: list[SetupActionResult] = []
     manifest_result: SetupResults | None = None
 
-    async for event in porringer.sync.execute_stream(params):
+    async for event in porringer.sync.execute_stream(params, plugins=plugins):
         if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
             manifest_result = event.manifest
             actions = list(event.manifest.actions)
@@ -1313,6 +1318,7 @@ async def run_preview(
     *,
     config: PreviewConfig | None = None,
     callbacks: PreviewCallbacks | None = None,
+    plugins: DiscoveredPlugins | None = None,
 ) -> None:
     """Download a manifest and perform a dry-run preview.
 
@@ -1330,6 +1336,8 @@ async def run_preview(
         url: Manifest URL or local path.
         config: Optional preview configuration.
         callbacks: Optional preview callbacks.
+        plugins: Pre-discovered plugins to pass through to porringer,
+            avoiding redundant discovery.
     """
     logger.info('run_preview starting for: %s', url)
     temp_dir: str | None = None
@@ -1350,7 +1358,7 @@ async def run_preview(
         temp_dir_str = temp_dir or ''
         manifest_path_str = str(manifest_path)
 
-        async for event in porringer.sync.execute_stream(setup_params):
+        async for event in porringer.sync.execute_stream(setup_params, plugins=plugins):
             _dispatch_preview_event(
                 event,
                 manifest_path_str,
