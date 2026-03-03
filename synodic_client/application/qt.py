@@ -28,7 +28,6 @@ from synodic_client.resolution import (
     ResolvedConfig,
     resolve_config,
     resolve_update_config,
-    resolve_version,
 )
 from synodic_client.updater import initialize_velopack
 
@@ -52,7 +51,7 @@ def _init_services(logger: logging.Logger) -> tuple[Client, API, ResolvedConfig]
 
     logger.info(
         'Synodic Client v%s started (channel: %s, source: %s, cached_projects: %d)',
-        resolve_version(client),
+        client.version,
         update_config.channel.name,
         update_config.repo_url,
         len(cached_dirs),

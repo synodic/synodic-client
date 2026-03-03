@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from synodic_client import __version__
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.card import CardFrame
 from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE, UPDATE_STATUS_CHECKING_STYLE
@@ -58,16 +57,19 @@ class SettingsWindow(QMainWindow):
     def __init__(
         self,
         config: ResolvedConfig,
+        version: str = '',
         parent: QWidget | None = None,
     ) -> None:
         """Initialise the settings window.
 
         Args:
             config: The current resolved configuration snapshot.
+            version: The application version string to display.
             parent: Optional parent widget.
         """
         super().__init__(parent)
         self._config = config
+        self._version = version
         self.setWindowTitle('Synodic Settings')
         self.setMinimumSize(*SETTINGS_WINDOW_MIN_SIZE)
         self.setWindowIcon(app_icon())
@@ -93,7 +95,7 @@ class SettingsWindow(QMainWindow):
         layout.addWidget(self._build_advanced_section())
         layout.addStretch()
 
-        version_label = QLabel(f'Version {__version__}')
+        version_label = QLabel(f'Version {self._version}')
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.setStyleSheet('color: rgba(255, 255, 255, 0.4); font-size: 11px;')
         layout.addWidget(version_label)

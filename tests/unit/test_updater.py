@@ -16,6 +16,7 @@ from synodic_client.updater import (
     UpdateState,
     github_release_asset_url,
     initialize_velopack,
+    pep440_to_semver,
     platform_suffix,
 )
 
@@ -528,3 +529,43 @@ class TestGetVelopackManager:
 
         assert updater._current_version == Version('9.8.7')
         assert updater.current_version == Version('9.8.7')
+
+
+class TestPep440ToSemver:
+    """Tests for pep440_to_semver conversion."""
+
+    @staticmethod
+    def test_dev_version_two_part_base() -> None:
+        """PDM SCM 2-part base normalises to 3-part SemVer."""
+        assert pep440_to_semver('0.1.dev47+g799543c') == '0.1.0-dev.47'
+
+    @staticmethod
+    def test_dev_version_three_part_base() -> None:
+        """Three-part dev version converts correctly."""
+        assert pep440_to_semver('0.1.1.dev3') == '0.1.1-dev.3'
+
+    @staticmethod
+    def test_stable_version() -> None:
+        """Stable version passes through unchanged."""
+        assert pep440_to_semver('1.0.0') == '1.0.0'
+
+    @staticmethod
+    def test_stable_version_two_part() -> None:
+        """Two-part stable normalises to three-part."""
+        assert pep440_to_semver('1.0') == '1.0.0'
+
+    @staticmethod
+    def test_dev_zero() -> None:
+        """Dev release number zero is preserved."""
+        assert pep440_to_semver('0.1.0.dev0') == '0.1.0-dev.0'
+
+    @staticmethod
+    def test_local_segment_stripped() -> None:
+        """Local segment (+gXXXXXXX) is stripped."""
+        assert pep440_to_semver('1.2.3.dev10+gabcdef1') == '1.2.3-dev.10'
+
+    @staticmethod
+    def test_semver_input_passthrough() -> None:
+        """SemVer-style pre-release input is normalised via PEP 440."""
+        # packaging.version.Version normalises '0.1.0-dev.5' to '0.1.0.dev5'
+        assert pep440_to_semver('0.1.0-dev.5') == '0.1.0-dev.5'

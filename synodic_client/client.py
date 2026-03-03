@@ -25,11 +25,21 @@ class Client:
 
     @property
     def version(self) -> Version:
-        """Extracts the version from the installed client.
+        """Return the best-known application version.
+
+        When a Velopack-installed updater is available the authoritative
+        version comes from the native binary manifest.  Otherwise, the
+        Python package metadata version (``importlib.metadata``) is used.
 
         Returns:
-            The version data
+            The resolved version.
         """
+        if self._updater is not None:
+            try:
+                if self._updater.is_installed:
+                    return self._updater.current_version
+            except Exception:
+                logger.debug('Failed to query Velopack version, falling back', exc_info=True)
         try:
             return Version(importlib.metadata.version(self.distribution))
         except importlib.metadata.PackageNotFoundError:

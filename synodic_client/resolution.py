@@ -18,8 +18,6 @@ import logging
 import sys
 from dataclasses import dataclass
 
-from packaging.version import Version
-
 from synodic_client.config import (
     UserConfig,
     load_build_config,
@@ -208,36 +206,6 @@ def resolve_update_config(config: ResolvedConfig) -> UpdateConfig:
         auto_update_interval_minutes=config.auto_update_interval_minutes,
         tool_update_interval_minutes=config.tool_update_interval_minutes,
     )
-
-
-def resolve_version(client: object) -> Version:
-    """Return the best-known application version.
-
-    When a Velopack-installed ``Updater`` is available the authoritative
-    version comes from the native binary manifest.  Otherwise, the
-    Python package metadata version (``importlib.metadata``) is used.
-
-    Accepts ``Client`` (or any object with ``.updater`` and ``.version``
-    attributes) so that :mod:`resolution` does not need a hard import
-    of :class:`~synodic_client.client.Client` — avoiding a tighter
-    coupling than necessary.
-
-    Args:
-        client: The application service facade (typically a
-            :class:`~synodic_client.client.Client` instance).
-
-    Returns:
-        The resolved :class:`~packaging.version.Version`.
-    """
-    updater = getattr(client, 'updater', None)
-    if updater is not None:
-        try:
-            if updater.is_installed:
-                return updater.current_version
-        except Exception:
-            logger.debug('Failed to query Velopack version, falling back', exc_info=True)
-
-    return getattr(client, 'version', Version('0.0.0'))
 
 
 def resolve_enabled_plugins(

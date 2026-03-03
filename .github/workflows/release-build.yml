@@ -44,22 +44,30 @@ jobs:
           fetch-depth: 0
           filter: blob:none
 
-      - name: Semantic Version
+      - name: Install PDM
         if: github.event_name == 'workflow_run'
-        id: semver
-        uses: PaulHatch/semantic-version@v6.0.1
+        uses: pdm-project/setup-pdm@v4
         with:
-          tag_prefix: "v"
-          version_format: "${major}.${minor}.${patch}"
+          python-version: "3.14"
 
       - name: Get version
         id: version
         run: |
           if [ "${{ github.event_name }}" == "workflow_run" ]; then
-            base_version="${{ steps.semver.outputs.version }}"
-            increment="${{ steps.semver.outputs.increment }}"
-            echo "version=${base_version}.dev${increment}" >> $GITHUB_OUTPUT
-            echo "installer-version=${base_version}-dev.${increment}" >> $GITHUB_OUTPUT
+            # PDM SCM is the single source of truth for version numbers.
+            # It reads git tags and produces a PEP 440 version string.
+            pep440_version=$(pdm show --version)
+
+            # Convert PEP 440 → SemVer for Velopack (e.g. 0.1.0.dev47 → 0.1.0-dev.47)
+            installer_version=$(python3 -c "
+          from packaging.version import Version
+          v = Version('${pep440_version}')
+          base = f'{v.major}.{v.minor}.{v.micro}'
+          print(f'{base}-dev.{v.dev}' if v.dev is not None else base)
+          ")
+
+            echo "version=${pep440_version}" >> $GITHUB_OUTPUT
+            echo "installer-version=${installer_version}" >> $GITHUB_OUTPUT
             echo "channel=dev" >> $GITHUB_OUTPUT
             echo "tag=dev" >> $GITHUB_OUTPUT
             echo "is-dev=true" >> $GITHUB_OUTPUT

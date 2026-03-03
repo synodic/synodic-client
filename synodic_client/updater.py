@@ -32,6 +32,40 @@ GITHUB_REPO_URL = 'https://github.com/synodic/synodic-client'
 _DEV_RELEASE_TAG = 'dev'
 
 
+def pep440_to_semver(version_string: str) -> str:
+    """Convert a PEP 440 version string to a SemVer string for Velopack.
+
+    Velopack requires strict SemVer (``MAJOR.MINOR.PATCH[-pre.N]``) while
+    Python tooling produces PEP 440 (e.g. ``0.1.dev47+g799543c``).  This
+    function bridges the two:
+
+    * Normalises the base to three components (``0.1`` → ``0.1.0``).
+    * Converts ``.devN`` to ``-dev.N``.
+    * Strips local segments (``+g…``).
+    * Stable versions pass through unchanged (``1.0.0`` → ``1.0.0``).
+
+    Examples::
+
+        >>> pep440_to_semver('0.1.dev47+g799543c')
+        '0.1.0-dev.47'
+        >>> pep440_to_semver('0.1.1.dev3')
+        '0.1.1-dev.3'
+        >>> pep440_to_semver('1.0.0')
+        '1.0.0'
+
+    Args:
+        version_string: A PEP 440 version string.
+
+    Returns:
+        A SemVer-compatible version string.
+    """
+    v = Version(version_string)
+    base = f'{v.major}.{v.minor}.{v.micro}'
+    if v.dev is not None:
+        return f'{base}-dev.{v.dev}'
+    return base
+
+
 def github_release_asset_url(repo_url: str, channel: UpdateChannel) -> str:
     """Convert a GitHub repository URL into a release-asset download URL.
 

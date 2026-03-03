@@ -32,10 +32,10 @@ def _make_config(**overrides: Any) -> ResolvedConfig:
     return ResolvedConfig(**defaults)
 
 
-def _make_window(config: ResolvedConfig | None = None) -> SettingsWindow:
+def _make_window(config: ResolvedConfig | None = None, version: str = '0.0.0.test') -> SettingsWindow:
     """Create a ``SettingsWindow`` without showing it."""
     cfg = config or _make_config()
-    window = SettingsWindow(cfg)
+    window = SettingsWindow(cfg, version=version)
     return window
 
 
@@ -59,6 +59,12 @@ class TestSettingsWindowConstruction:
         window = _make_window()
         assert window.minimumWidth() == SETTINGS_WINDOW_MIN_SIZE[0]
         assert window.minimumHeight() == SETTINGS_WINDOW_MIN_SIZE[1]
+
+    @staticmethod
+    def test_version_label_displays_passed_version() -> None:
+        """Version label shows the version string passed to the constructor."""
+        window = _make_window(version='1.2.3.dev42')
+        assert window._version == '1.2.3.dev42'
 
 
 # ---------------------------------------------------------------------------

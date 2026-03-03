@@ -69,7 +69,10 @@ class TrayScreen:
         self._build_menu(app, window)
 
         # Settings window (created once, shown/hidden on demand)
-        self._settings_window = SettingsWindow(self._resolve_config())
+        self._settings_window = SettingsWindow(
+            self._resolve_config(),
+            version=str(self._client.version),
+        )
         self._settings_window.settings_changed.connect(self._on_settings_changed)
 
         # MainWindow gear button → open settings
