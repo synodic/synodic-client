@@ -879,16 +879,28 @@ class ToolsView(QWidget):
         Same package from multiple directories becomes one row with a
         combined project label.  Global packages are always deduplicated;
         manifest packages merge their project names.
+
+        A package is considered "global" (and therefore removable from
+        the global environment) only when it is **not** declared in any
+        manifest **and** was found by the global (non-project-scoped)
+        query.  Transitive dependencies discovered exclusively inside a
+        project venv are *not* globally removable — the uninstall API
+        targets the global Python, where those packages do not exist.
         """
         merged: OrderedDict[str, MergedPackage] = OrderedDict()
         for entry in raw_packages:
-            is_global = entry.name not in plugin_manifest
+            in_manifest = entry.name in plugin_manifest
+            from_project = bool(entry.project_path)
+            is_global = not in_manifest and not from_project
             if entry.name in merged:
                 existing = merged[entry.name]
                 if not is_global and entry.project_label and entry.project_label not in existing.projects:
                     existing.projects.append(entry.project_label)
                 if not is_global and entry.project_path and entry.project_path not in existing.project_paths:
                     existing.project_paths.append(entry.project_path)
+                # Promote to global if any entry was discovered globally
+                if is_global and not existing.is_global:
+                    existing.is_global = True
             else:
                 merged[entry.name] = MergedPackage(
                     projects=([] if is_global else ([entry.project_label] if entry.project_label else [])),
@@ -1530,6 +1542,9 @@ class ProjectsView(QWidget):
                     widget.reset()
                     widget.deleteLater()
 
+            # Grab pre-discovered plugins so each widget can skip redundant discovery
+            discovered = snapshot.discovered if self._coordinator is not None else None
+
             # Create new widgets for new directories
             for path, _name, valid in directories:
                 if path not in self._widgets and valid:
@@ -1539,6 +1554,7 @@ class ProjectsView(QWidget):
                         show_close=False,
                         config=self._config,
                     )
+                    widget._discovered_plugins = discovered
                     widget.install_finished.connect(self._on_install_finished)
                     widget.phase_changed.connect(
                         lambda phase, p=path: self._on_widget_phase_changed(p, phase),
@@ -1549,6 +1565,11 @@ class ProjectsView(QWidget):
             # Rebuild sidebar
             self._sidebar.set_directories(directories)
             self._sidebar.select(previous)
+
+            # Push latest discovered plugins to all existing widgets
+            if discovered is not None:
+                for w in self._widgets.values():
+                    w._discovered_plugins = discovered
 
             # Load all stacked widgets in parallel
             for path, _name, valid in directories:

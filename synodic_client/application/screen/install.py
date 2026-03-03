@@ -345,6 +345,7 @@ class SetupPreviewWidget(QWidget):
         self._porringer = porringer
         self._show_close = show_close
         self._config = config
+        self._discovered_plugins: DiscoveredPlugins | None = None
 
         self._model = PreviewModel()
         self._task: asyncio.Task[None] | None = None
@@ -710,6 +711,7 @@ class SetupPreviewWidget(QWidget):
                     on_preview_ready=self._on_preview_resolved,
                     on_action_checked=self._on_action_checked,
                 ),
+                plugins=self._discovered_plugins,
             )
             self._on_preview_finished()
         except asyncio.CancelledError:
@@ -734,6 +736,7 @@ class SetupPreviewWidget(QWidget):
                     on_sub_progress=self._on_sub_progress,
                     on_progress=self._on_action_progress,
                 ),
+                plugins=self._discovered_plugins,
             )
             self._on_install_finished(results)
         except asyncio.CancelledError:
