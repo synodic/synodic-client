@@ -17,10 +17,9 @@ from PySide6.QtWidgets import (
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.screen import MainWindow, ToolsView
 from synodic_client.application.screen.settings import SettingsWindow
+from synodic_client.application.update_controller import UpdateController
 from synodic_client.application.workers import (
     ToolUpdateResult,
-    check_for_update,
-    download_update,
     run_package_remove,
     run_tool_updates,
 )
@@ -31,7 +30,6 @@ from synodic_client.resolution import (
     resolve_config,
     resolve_update_config,
 )
-from synodic_client.updater import UpdateInfo
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +57,6 @@ class TrayScreen:
         self._client = client
         self._window = window
         self._config = config
-        self._update_task: asyncio.Task[None] | None = None
         self._tool_task: asyncio.Task[None] | None = None
 
         self.tray_icon = app_icon()
@@ -74,14 +71,19 @@ class TrayScreen:
         # Settings window (created once, shown/hidden on demand)
         self._settings_window = SettingsWindow(self._resolve_config())
         self._settings_window.settings_changed.connect(self._on_settings_changed)
-        self._settings_window.check_updates_requested.connect(self._on_check_updates)
 
         # MainWindow gear button → open settings
         window.settings_requested.connect(self._show_settings)
 
-        # Periodic auto-update checking
-        self._auto_update_timer: QTimer | None = None
-        self._restart_auto_update_timer()
+        # Update controller — owns the self-update lifecycle & timer
+        self._banner = window.update_banner
+        self._update_controller = UpdateController(
+            app,
+            client,
+            self._banner,
+            self._settings_window,
+            config,
+        )
 
         # Periodic tool update checking
         self._tool_update_timer: QTimer | None = None
@@ -90,11 +92,6 @@ class TrayScreen:
         # Connect ToolsView signals — deferred because ToolsView is created lazily
         window.tools_view_created.connect(self._connect_tools_view)
 
-        # Connect update banner signals
-        self._banner = window.update_banner
-        self._banner.restart_requested.connect(self._apply_update)
-        self._banner.retry_requested.connect(lambda: self._do_check_updates(silent=True))
-
     def _build_menu(self, app: QApplication, window: MainWindow) -> None:
         """Build the tray context menu."""
         self.menu = QMenu()
@@ -102,12 +99,6 @@ class TrayScreen:
         self.open_action = QAction('Open', self.menu)
         self.menu.addAction(self.open_action)
         self.open_action.triggered.connect(window.show)
-
-        self.menu.addSeparator()
-
-        self.update_action = QAction('Check for Updates...', self.menu)
-        self.update_action.triggered.connect(self._on_check_updates)
-        self.menu.addAction(self.update_action)
 
         self.menu.addSeparator()
 
@@ -172,16 +163,6 @@ class TrayScreen:
         logger.info('%s enabled (every %d minute(s))', label, interval_minutes)
         return timer
 
-    def _restart_auto_update_timer(self) -> None:
-        """Start (or restart) the periodic auto-update timer from config."""
-        config = resolve_update_config(self._resolve_config())
-        self._auto_update_timer = self._restart_timer(
-            self._auto_update_timer,
-            config.auto_update_interval_minutes,
-            self._on_auto_check_updates,
-            'Automatic update checking',
-        )
-
     def _restart_tool_update_timer(self) -> None:
         """Start (or restart) the periodic tool update timer from config."""
         config = resolve_update_config(self._resolve_config())
@@ -206,116 +187,10 @@ class TrayScreen:
     def _on_settings_changed(self, config: ResolvedConfig) -> None:
         """React to a change made in the settings window."""
         self._config = config
-        self._reinitialize_updater(config)
-
-    def _reinitialize_updater(self, config: ResolvedConfig) -> None:
-        """Re-derive update settings and restart the updater and timers.
-
-        The new ``Updater`` starts with the ``importlib.metadata``
-        version which may be stale after a Velopack update.  The
-        authoritative Velopack version is recovered automatically on
-        the first ``_get_velopack_manager()`` call (i.e. the next
-        update check), so no special handling is required here.
-        """
-        update_cfg = resolve_update_config(config)
-        self._client.initialize_updater(update_cfg)
-        self._restart_auto_update_timer()
+        # Delegate updater reinit + immediate check to the controller
+        self._update_controller.on_settings_changed(config)
+        # Restart tool-update timer with new config
         self._restart_tool_update_timer()
-        logger.info('Updater re-initialized (channel: %s, source: %s)', update_cfg.channel.name, update_cfg.repo_url)
-
-    def _reset_update_action(self) -> None:
-        """Restore the 'Check for Updates' action to its idle state."""
-        self.update_action.setEnabled(True)
-        self.update_action.setText('Check for Updates...')
-
-    def _on_check_updates(self) -> None:
-        """Handle manual check for updates action."""
-        self._do_check_updates(silent=False)
-
-    def _on_auto_check_updates(self) -> None:
-        """Handle automatic (periodic) check for updates.
-
-        Failures and no-update results are logged silently without
-        showing the in-app error banner.
-        """
-        self._do_check_updates(silent=True)
-
-    def _do_check_updates(self, *, silent: bool) -> None:
-        """Run an update check.
-
-        Args:
-            silent: When ``True``, suppress the in-app error banner
-                for failures and no-update results.  The banner is
-                always shown when an update *is* available.
-        """
-        if self._client.updater is None:
-            if not silent:
-                self._banner.show_error('Updater is not initialized.')
-            return
-
-        # Disable both the tray action and the settings button while checking
-        self.update_action.setEnabled(False)
-        self.update_action.setText('Checking for Updates...')
-        self._settings_window.set_checking()
-
-        self._update_task = asyncio.create_task(self._async_check_updates(silent=silent))
-
-    async def _async_check_updates(self, *, silent: bool) -> None:
-        """Run the update check coroutine and route results."""
-        try:
-            result = await check_for_update(self._client)
-            self._on_update_check_finished(result, silent=silent)
-        except Exception as exc:
-            logger.exception('Update check failed')
-            self._on_update_check_error(str(exc), silent=silent)
-
-    def _on_update_check_finished(self, result: UpdateInfo | None, *, silent: bool = False) -> None:
-        """Handle update check completion."""
-        self._reset_update_action()
-        self._settings_window.reset_check_updates_button()
-
-        if result is None:
-            self._settings_window.set_update_status('Check failed')
-            if not silent:
-                self._banner.show_error('Failed to check for updates.')
-            else:
-                logger.warning('Automatic update check failed (no result)')
-            return
-
-        if result.error:
-            self._settings_window.set_update_status(result.error)
-            if not silent:
-                self._banner.show_error(result.error)
-            else:
-                logger.warning('Automatic update check failed: %s', result.error)
-            return
-
-        if not result.available:
-            self._settings_window.set_update_status(
-                f'Up to date ({result.current_version})',
-            )
-            if not silent:
-                logger.info('No updates available (current: %s)', result.current_version)
-            else:
-                logger.debug('Automatic update check: no update available')
-            return
-
-        # Update available — show banner and start download automatically
-        version = str(result.latest_version)
-        self._settings_window.set_update_status(f'Update available: {version}')
-        self._banner.show_downloading(version)
-        self._start_download(version)
-
-    def _on_update_check_error(self, error: str, *, silent: bool = False) -> None:
-        """Handle update check error."""
-        self._reset_update_action()
-        self._settings_window.reset_check_updates_button()
-        self._settings_window.set_update_status(f'Error: {error}')
-
-        if not silent:
-            self._banner.show_error(f'Update check error: {error}')
-        else:
-            logger.warning('Automatic update check error: %s', error)
 
     # -- Tool update helpers --
 
@@ -571,51 +446,3 @@ class TrayScreen:
             tools_view.refresh()
 
         self._window.show()
-
-    # -- Self-update download & apply --
-
-    def _start_download(self, version: str) -> None:
-        """Start downloading the update in the background.
-
-        Args:
-            version: The version string being downloaded (for banner display).
-        """
-        self._update_task = asyncio.create_task(self._async_download(version))
-
-    async def _async_download(self, version: str) -> None:
-        """Run the download coroutine and route results."""
-        try:
-            success = await download_update(
-                self._client,
-                on_progress=self._banner.show_downloading_progress,
-            )
-            self._on_download_finished(success, version)
-        except Exception as exc:
-            logger.exception('Update download failed')
-            self._on_download_error(str(exc))
-
-    def _on_download_finished(self, success: bool, version: str) -> None:
-        """Handle download completion — transition banner to ready state."""
-        if not success:
-            self._banner.show_error('Download failed. Please try again later.')
-            return
-
-        self._banner.show_ready(version)
-        self._settings_window.set_update_status(f'Ready to install: {version}')
-
-    def _on_download_error(self, error: str) -> None:
-        """Handle download error — show error banner."""
-        self._banner.show_error(f'Download error: {error}')
-
-    def _apply_update(self) -> None:
-        """Apply the downloaded update and restart."""
-        if self._client.updater is None:
-            return
-
-        try:
-            self._client.apply_update_on_exit(restart=True)
-            logger.info('Update scheduled — restarting application')
-            self._app.quit()
-        except Exception as e:
-            logger.error('Failed to apply update: %s', e)
-            self._banner.show_error(f'Failed to apply update: {e}')

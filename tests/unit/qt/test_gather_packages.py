@@ -41,6 +41,7 @@ def _make_config() -> ResolvedConfig:
         plugin_auto_update=None,
         detect_updates=False,
         prerelease_packages=None,
+        auto_apply=True,
         auto_start=False,
     )
 

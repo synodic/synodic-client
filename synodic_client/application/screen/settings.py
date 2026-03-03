@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.card import CardFrame
-from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE
+from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE, UPDATE_STATUS_CHECKING_STYLE
 from synodic_client.logging import log_path
 from synodic_client.resolution import ResolvedConfig, update_user_config
 from synodic_client.startup import is_startup_registered, register_startup, remove_startup
@@ -163,6 +163,11 @@ class SettingsWindow(QMainWindow):
         self._detect_updates_check.toggled.connect(self._on_detect_updates_changed)
         content.addWidget(self._detect_updates_check)
 
+        # Automatically apply updates
+        self._auto_apply_check = QCheckBox('Automatically apply updates')
+        self._auto_apply_check.toggled.connect(self._on_auto_apply_changed)
+        content.addWidget(self._auto_apply_check)
+
         # Check for Updates
         row = QHBoxLayout()
         self._check_updates_btn = QPushButton('Check for Updates\u2026')
@@ -218,16 +223,24 @@ class SettingsWindow(QMainWindow):
 
             # Checkboxes
             self._detect_updates_check.setChecked(config.detect_updates)
+            self._auto_apply_check.setChecked(config.auto_apply)
             self._auto_start_check.setChecked(is_startup_registered())
 
-    def set_update_status(self, text: str) -> None:
-        """Set the inline status text next to the *Check for Updates* button."""
+    def set_update_status(self, text: str, style: str = '') -> None:
+        """Set the inline status text next to the *Check for Updates* button.
+
+        Args:
+            text: The status message.
+            style: Optional stylesheet for the label (e.g. color).
+        """
         self._update_status_label.setText(text)
+        self._update_status_label.setStyleSheet(style)
 
     def set_checking(self) -> None:
         """Enter the *checking* state — disable button and show status."""
         self._check_updates_btn.setEnabled(False)
         self._update_status_label.setText('Checking\u2026')
+        self._update_status_label.setStyleSheet(UPDATE_STATUS_CHECKING_STYLE)
 
     def reset_check_updates_button(self) -> None:
         """Re-enable the *Check for Updates* button after a check completes."""
@@ -262,6 +275,7 @@ class SettingsWindow(QMainWindow):
             self._auto_update_spin,
             self._tool_update_spin,
             self._detect_updates_check,
+            self._auto_apply_check,
             self._auto_start_check,
             self._check_updates_btn,
         )
@@ -300,6 +314,9 @@ class SettingsWindow(QMainWindow):
 
     def _on_detect_updates_changed(self, checked: bool) -> None:
         self._persist(detect_updates=checked)
+
+    def _on_auto_apply_changed(self, checked: bool) -> None:
+        self._persist(auto_apply=checked)
 
     def _on_auto_start_changed(self, checked: bool) -> None:
         self._config = update_user_config(auto_start=checked)

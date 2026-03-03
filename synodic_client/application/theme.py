@@ -437,6 +437,21 @@ SETTINGS_GEAR_STYLE = (
 """Gear button style for the MainWindow tab corner widget."""
 
 # ---------------------------------------------------------------------------
+# Settings inline update-status colours
+# ---------------------------------------------------------------------------
+UPDATE_STATUS_UP_TO_DATE_STYLE = 'color: #89d185; font-size: 12px;'
+"""Green text for 'Up to date' / 'Ready' status."""
+
+UPDATE_STATUS_AVAILABLE_STYLE = 'color: #cca700; font-size: 12px;'
+"""Orange text for 'Update available' status."""
+
+UPDATE_STATUS_ERROR_STYLE = 'color: #f48771; font-size: 12px;'
+"""Red text for error / check-failed status."""
+
+UPDATE_STATUS_CHECKING_STYLE = 'color: #808080; font-size: 12px; font-style: italic;'
+"""Grey italic text for 'Checking…' status."""
+
+# ---------------------------------------------------------------------------
 # Update banner (in-app self-update notification)
 # ---------------------------------------------------------------------------
 UPDATE_BANNER_ANIMATION_MS = 250

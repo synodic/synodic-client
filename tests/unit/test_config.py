@@ -47,6 +47,7 @@ class TestUserConfig:
         assert config.plugin_auto_update is None
         assert config.detect_updates is True
         assert config.prerelease_packages is None
+        assert config.auto_apply is None
         assert config.auto_start is None
 
     @staticmethod

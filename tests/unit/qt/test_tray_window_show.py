@@ -16,6 +16,7 @@ def tray_screen():
     with (
         patch('synodic_client.application.screen.tray.resolve_config'),
         patch('synodic_client.application.screen.tray.resolve_update_config') as mock_ucfg,
+        patch('synodic_client.application.screen.tray.UpdateController'),
     ):
         # Disable timers by setting intervals to 0
         mock_ucfg.return_value = MagicMock(

@@ -39,6 +39,7 @@ def _make_resolved(**overrides: Any) -> ResolvedConfig:
         'plugin_auto_update': None,
         'detect_updates': True,
         'prerelease_packages': None,
+        'auto_apply': True,
         'auto_start': True,
     }
     defaults.update(overrides)

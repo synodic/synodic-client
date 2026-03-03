@@ -25,6 +25,7 @@ def _make_config(**overrides: Any) -> ResolvedConfig:
         'plugin_auto_update': None,
         'detect_updates': True,
         'prerelease_packages': None,
+        'auto_apply': True,
         'auto_start': True,
     }
     defaults.update(overrides)
@@ -350,10 +351,11 @@ class TestCheckForUpdatesButton:
 
     @staticmethod
     def test_set_update_status() -> None:
-        """set_update_status sets the label text."""
+        """set_update_status sets the label text and style."""
         window = _make_window()
-        window.set_update_status('Up to date (v1.0.0)')
-        assert window._update_status_label.text() == 'Up to date (v1.0.0)'
+        window.set_update_status('Up to date', 'color: green;')
+        assert window._update_status_label.text() == 'Up to date'
+        assert 'green' in window._update_status_label.styleSheet()
 
     @staticmethod
     def test_reset_check_updates_button() -> None:

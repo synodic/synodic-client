@@ -130,6 +130,10 @@ class UserConfig(BaseModel):
     # no overrides anywhere.
     prerelease_packages: dict[str, list[str]] | None = None
 
+    # Whether downloaded updates should be applied and restarted
+    # automatically without user interaction.  None resolves to True.
+    auto_apply: bool | None = None
+
     # Whether the application should start automatically with the OS.
     # None means use the default (enabled).  Explicitly False disables
     # auto-startup.

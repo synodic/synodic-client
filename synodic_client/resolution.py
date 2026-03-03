@@ -61,6 +61,7 @@ class ResolvedConfig:
     plugin_auto_update: dict[str, bool | dict[str, bool]] | None
     detect_updates: bool
     prerelease_packages: dict[str, list[str]] | None
+    auto_apply: bool
     auto_start: bool
 
 
@@ -140,6 +141,7 @@ def _resolve_from_user(user: UserConfig) -> ResolvedConfig:
     if tool_interval is None:
         tool_interval = DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
 
+    auto_apply = user.auto_apply if user.auto_apply is not None else True
     auto_start = user.auto_start if user.auto_start is not None else True
 
     return ResolvedConfig(
@@ -150,6 +152,7 @@ def _resolve_from_user(user: UserConfig) -> ResolvedConfig:
         plugin_auto_update=user.plugin_auto_update,
         detect_updates=user.detect_updates,
         prerelease_packages=user.prerelease_packages,
+        auto_apply=auto_apply,
         auto_start=auto_start,
     )
 
