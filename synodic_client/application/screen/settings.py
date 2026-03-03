@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from synodic_client._version import __version__
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.card import CardFrame
 from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE, UPDATE_STATUS_CHECKING_STYLE
@@ -91,6 +92,11 @@ class SettingsWindow(QMainWindow):
         layout.addWidget(self._build_startup_section())
         layout.addWidget(self._build_advanced_section())
         layout.addStretch()
+
+        version_label = QLabel(f'Version {__version__}')
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version_label.setStyleSheet('color: rgba(255, 255, 255, 0.4); font-size: 11px;')
+        layout.addWidget(version_label)
 
         scroll.setWidget(container)
         self.setCentralWidget(scroll)

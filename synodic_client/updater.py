@@ -113,10 +113,10 @@ class UpdateInfo:
 
 
 # Default interval for automatic update checks (minutes)
-DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES = 30
+DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES = 5
 
 # Default interval for tool update checks (minutes)
-DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES = 20
+DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES = 5
 
 
 @dataclass
