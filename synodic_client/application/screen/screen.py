@@ -8,6 +8,7 @@ from pathlib import Path
 
 from porringer.api import API
 from porringer.backend.builder import Builder
+from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.schema import (
@@ -1158,26 +1159,29 @@ class ToolsView(QWidget):
             return None
         return {name for name, chip in self._filter_chips.items() if chip.isChecked()}
 
+    @staticmethod
+    def _is_plugin_active(plugin_name: str, active: set[str] | None) -> bool:
+        """Return whether *plugin_name* passes the chip filter."""
+        return active is None or plugin_name in active
+
+    @staticmethod
+    def _finalise_provider(
+        provider: PluginProviderHeader | None,
+        has_visible: bool,
+    ) -> bool:
+        """Set provider visibility and return whether it had visible children."""
+        if provider is not None:
+            provider.setVisible(has_visible)
+        return has_visible
+
     def _apply_filter(self, _text: str | None = None) -> None:
         """Show/hide section widgets based on search text and active chips.
 
-        A single pass walks ``_section_widgets`` tracking the current
-        plugin and kind.  Visibility rules:
-
-        * **PluginProviderHeader** — visible when its plugin is in the
-          active chip set **and** at least one child row matches the
-          search text.
-        * **PluginRow** — visible when its plugin is active **and** its
-          package name or plugin name contains the search text.
-        * **ProjectChildRow** — follows its parent :class:`PluginRow`.
-        * **PluginKindHeader** — visible when at least one child
-          provider in its kind group is visible.
-
-        After the pass, kind headers with no visible children are hidden.
+        Delegates to :meth:`_is_plugin_active` for chip matching and
+        :meth:`_finalise_provider` for provider visibility bookkeeping.
         """
         query = self._search_input.text().strip().lower()
         active = self._active_chip_plugins()
-        all_active = active is None  # None → no chips yet, show all
 
         current_kind_header: PluginKindHeader | None = None
         kind_has_visible = False
@@ -1187,13 +1191,8 @@ class ToolsView(QWidget):
 
         for widget in self._section_widgets:
             if isinstance(widget, PluginKindHeader):
-                # Finalise previous kind
+                kind_has_visible |= self._finalise_provider(current_provider, provider_has_visible_child)
                 if current_kind_header is not None:
-                    # Finalise last provider of previous kind
-                    if current_provider is not None:
-                        current_provider.setVisible(provider_has_visible_child)
-                        if provider_has_visible_child:
-                            kind_has_visible = True
                     current_kind_header.setVisible(kind_has_visible)
 
                 current_kind_header = widget
@@ -1202,31 +1201,20 @@ class ToolsView(QWidget):
                 provider_has_visible_child = False
 
             elif isinstance(widget, PluginProviderHeader):
-                # Finalise previous provider
-                if current_provider is not None:
-                    current_provider.setVisible(provider_has_visible_child)
-                    if provider_has_visible_child:
-                        kind_has_visible = True
+                kind_has_visible |= self._finalise_provider(current_provider, provider_has_visible_child)
 
                 current_provider = widget
                 provider_has_visible_child = False
-                plugin_name = widget._plugin_name
-                plugin_active = all_active or (active is not None and plugin_name in active)
-
-                if not plugin_active:
-                    # Entire provider hidden
+                if not self._is_plugin_active(widget._plugin_name, active):
                     widget.setVisible(False)
-                    provider_has_visible_child = False
 
             elif isinstance(widget, PluginRow):
-                plugin_name = widget._plugin_name
-                plugin_active = all_active or (active is not None and plugin_name in active)
-                if not plugin_active:
+                if not self._is_plugin_active(widget._plugin_name, active):
                     widget.setVisible(False)
                     parent_row_visible = False
                     continue
 
-                name_match = not query or query in widget._package_name.lower() or query in plugin_name.lower()
+                name_match = not query or query in widget._package_name.lower() or query in widget._plugin_name.lower()
                 widget.setVisible(name_match)
                 parent_row_visible = name_match
                 if name_match:
@@ -1236,10 +1224,7 @@ class ToolsView(QWidget):
                 widget.setVisible(parent_row_visible)
 
         # Finalise last provider and kind
-        if current_provider is not None:
-            current_provider.setVisible(provider_has_visible_child)
-            if provider_has_visible_child:
-                kind_has_visible = True
+        kind_has_visible |= self._finalise_provider(current_provider, provider_has_visible_child)
         if current_kind_header is not None:
             current_kind_header.setVisible(kind_has_visible)
 
@@ -1834,6 +1819,7 @@ class ProjectsView(QWidget):
             if self._coordinator is not None:
                 snapshot = await self._coordinator.refresh()
                 results = snapshot.validated_directories
+                discovered = snapshot.discovered
             else:
                 loop = asyncio.get_running_loop()
                 results = await loop.run_in_executor(
@@ -1843,6 +1829,7 @@ class ProjectsView(QWidget):
                         check_manifest=True,
                     ),
                 )
+                discovered = None
 
             directories: list[tuple[Path, str, bool]] = []
             current_paths: set[Path] = set()
@@ -1854,32 +1841,12 @@ class ProjectsView(QWidget):
                 current_paths.add(path)
 
             # Remove widgets for directories no longer in cache
-            for path in list(self._widgets):
-                if path not in current_paths:
-                    widget = self._widgets.pop(path)
-                    self._stack.removeWidget(widget)
-                    widget.reset()
-                    widget.deleteLater()
+            self._remove_stale_widgets(current_paths)
 
             # Grab pre-discovered plugins so each widget can skip redundant discovery
-            discovered = snapshot.discovered if self._coordinator is not None else None
 
             # Create new widgets for new directories
-            for path, _name, valid in directories:
-                if path not in self._widgets and valid:
-                    widget = SetupPreviewWidget(
-                        self._porringer,
-                        self,
-                        show_close=False,
-                        config=self._config,
-                    )
-                    widget._discovered_plugins = discovered
-                    widget.install_finished.connect(self._on_install_finished)
-                    widget.phase_changed.connect(
-                        lambda phase, p=path: self._on_widget_phase_changed(p, phase),
-                    )
-                    self._widgets[path] = widget
-                    self._stack.addWidget(widget)
+            self._create_directory_widgets(directories, discovered)
 
             # Rebuild sidebar
             self._sidebar.set_directories(directories)
@@ -1908,6 +1875,37 @@ class ProjectsView(QWidget):
             self._refresh_in_progress = False
 
     # --- Event handlers ---
+
+    def _remove_stale_widgets(self, current_paths: set[Path]) -> None:
+        """Remove stacked widgets for directories no longer in the cache."""
+        for path in list(self._widgets):
+            if path not in current_paths:
+                widget = self._widgets.pop(path)
+                self._stack.removeWidget(widget)
+                widget.reset()
+                widget.deleteLater()
+
+    def _create_directory_widgets(
+        self,
+        directories: list[tuple[Path, str, bool]],
+        discovered: DiscoveredPlugins | None,
+    ) -> None:
+        """Create :class:`SetupPreviewWidget` instances for new valid directories."""
+        for path, _name, valid in directories:
+            if path not in self._widgets and valid:
+                widget = SetupPreviewWidget(
+                    self._porringer,
+                    self,
+                    show_close=False,
+                    config=self._config,
+                )
+                widget._discovered_plugins = discovered
+                widget.install_finished.connect(self._on_install_finished)
+                widget.phase_changed.connect(
+                    lambda phase, p=path: self._on_widget_phase_changed(p, phase),
+                )
+                self._widgets[path] = widget
+                self._stack.addWidget(widget)
 
     def _on_selection_changed(self, path: Path) -> None:
         """Handle sidebar selection — switch the stacked widget."""

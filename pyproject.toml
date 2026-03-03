@@ -25,18 +25,9 @@ homepage = "https://github.com/synodic/synodic-client"
 repository = "https://github.com/synodic/synodic-client"
 
 [dependency-groups]
-build = [
-    "pyinstaller>=6.19.0",
-]
-lint = [
-    "ruff>=0.15.4",
-    "pyrefly>=0.55.0",
-]
-test = [
-    "pytest>=9.0.2",
-    "pytest-cov>=7.0.0",
-    "pytest-mock>=3.15.1",
-]
+build = ["pyinstaller>=6.19.0"]
+lint = ["ruff>=0.15.4", "pyrefly>=0.55.0"]
+test = ["pytest>=9.0.2", "pytest-cov>=7.0.0", "pytest-mock>=3.15.1"]
 
 [project.scripts]
 synodic-c = "synodic_client.cli:app"

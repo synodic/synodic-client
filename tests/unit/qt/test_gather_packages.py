@@ -6,11 +6,29 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+from packaging.version import Version
 from porringer.core.schema import Package, PackageRelation, PackageRelationKind
 from porringer.schema import ManifestDirectory
+from porringer.schema.plugin import PluginInfo, PluginKind
+from PySide6.QtWidgets import QLabel, QPushButton
 
-from synodic_client.application.screen.screen import PackageEntry, ProjectChildRow, ToolsView
+from synodic_client.application.screen.screen import (
+    FilterChip,
+    PackageEntry,
+    PluginKindHeader,
+    PluginProviderHeader,
+    PluginRow,
+    PluginRowData,
+    ProjectChildRow,
+    ProjectInstance,
+    ToolsView,
+)
 from synodic_client.resolution import ResolvedConfig
+
+# Named constants for expected counts (avoids PLR2004)
+_EXPECTED_PROJECT_INSTANCES = 2
+_EXPECTED_VISIBLE_ROWS_ALL = 3
+_EXPECTED_VISIBLE_ROWS_PIPX = 2
 
 
 def _make_config() -> ResolvedConfig:
@@ -429,7 +447,7 @@ class TestBuildDisplayPackages:
 
         assert len(result) == 1
         pkg = result[0]
-        assert len(pkg.project_instances) == 2
+        assert len(pkg.project_instances) == _EXPECTED_PROJECT_INSTANCES
         labels = {pi.project_label for pi in pkg.project_instances}
         assert labels == {'project-a', 'project-b'}
 
@@ -479,8 +497,6 @@ class TestProjectChildRow:
 
     @staticmethod
     def _make_instance(*, transitive: bool = False) -> ProjectChildRow:
-        from synodic_client.application.screen.screen import ProjectInstance
-
         return ProjectChildRow(
             ProjectInstance(
                 project_label='periapsis',
@@ -498,8 +514,6 @@ class TestProjectChildRow:
         row.navigate_to_project.connect(spy)
 
         # Find the navigate button (→)
-        from PySide6.QtWidgets import QPushButton
-
         nav_btns = [w for w in row.findChildren(QPushButton) if w.text() == '\u2192']
         assert len(nav_btns) == 1
         nav_btns[0].click()
@@ -518,8 +532,6 @@ class TestProjectChildRow:
         assert len(labels) == 0
 
 
-from PySide6.QtWidgets import QLabel
-
 # ---------------------------------------------------------------------------
 # FilterChip
 # ---------------------------------------------------------------------------
@@ -531,8 +543,6 @@ class TestFilterChip:
     @staticmethod
     def test_chip_starts_checked() -> None:
         """Filter chips start in the checked (active) state."""
-        from synodic_client.application.screen.screen import FilterChip
-
         chip = FilterChip('pipx')
         assert chip.isChecked()
         assert chip.text() == 'pipx'
@@ -540,8 +550,6 @@ class TestFilterChip:
     @staticmethod
     def test_toggling_emits_signal() -> None:
         """Toggling a chip emits the plugin name and new state."""
-        from synodic_client.application.screen.screen import FilterChip
-
         chip = FilterChip('uv')
         spy = MagicMock()
         chip.toggled_with_name.connect(spy)
@@ -552,8 +560,6 @@ class TestFilterChip:
     @staticmethod
     def test_recheck_emits_true() -> None:
         """Re-checking a chip emits True."""
-        from synodic_client.application.screen.screen import FilterChip
-
         chip = FilterChip('pip')
         spy = MagicMock()
         chip.setChecked(False)
@@ -589,16 +595,6 @@ class TestSearchFilter:
             ProviderHeader(uv)
               PluginRow(mypy, plugin=uv)
         """
-        from packaging.version import Version
-        from porringer.schema.plugin import PluginInfo, PluginKind
-
-        from synodic_client.application.screen.screen import (
-            PluginKindHeader,
-            PluginProviderHeader,
-            PluginRow,
-            PluginRowData,
-        )
-
         kind_hdr = PluginKindHeader(PluginKind.TOOL)
         view._section_widgets.append(kind_hdr)
         view._container_layout.insertWidget(0, kind_hdr)
@@ -639,8 +635,6 @@ class TestSearchFilter:
 
         view._search_input.setText('ruff')
 
-        from synodic_client.application.screen.screen import PluginRow
-
         visible_rows = [w for w in view._section_widgets if isinstance(w, PluginRow) and not w.isHidden()]
         assert len(visible_rows) == 1
         assert visible_rows[0]._package_name == 'ruff'
@@ -653,10 +647,8 @@ class TestSearchFilter:
         view._search_input.setText('ruff')
         view._search_input.setText('')
 
-        from synodic_client.application.screen.screen import PluginRow
-
         visible_rows = [w for w in view._section_widgets if isinstance(w, PluginRow) and not w.isHidden()]
-        assert len(visible_rows) == 3
+        assert len(visible_rows) == _EXPECTED_VISIBLE_ROWS_ALL
 
     def test_chip_deselection_hides_plugin(self) -> None:
         """Deselecting a chip hides all rows from that plugin."""
@@ -664,8 +656,6 @@ class TestSearchFilter:
         self._populate_section_widgets(view)
 
         view._filter_chips['pipx'].setChecked(False)
-
-        from synodic_client.application.screen.screen import PluginRow
 
         visible_rows = [w for w in view._section_widgets if isinstance(w, PluginRow) and not w.isHidden()]
         assert len(visible_rows) == 1
@@ -679,10 +669,8 @@ class TestSearchFilter:
         view._filter_chips['pipx'].setChecked(False)
         view._filter_chips['pipx'].setChecked(True)
 
-        from synodic_client.application.screen.screen import PluginRow
-
         visible_rows = [w for w in view._section_widgets if isinstance(w, PluginRow) and not w.isHidden()]
-        assert len(visible_rows) == 3
+        assert len(visible_rows) == _EXPECTED_VISIBLE_ROWS_ALL
 
     def test_search_plus_chip_filter(self) -> None:
         """Search and chip filtering compose — only matching rows in active plugins survive."""
@@ -691,8 +679,6 @@ class TestSearchFilter:
 
         view._filter_chips['uv'].setChecked(False)
         view._search_input.setText('pdm')
-
-        from synodic_client.application.screen.screen import PluginRow
 
         visible_rows = [w for w in view._section_widgets if isinstance(w, PluginRow) and not w.isHidden()]
         assert len(visible_rows) == 1
@@ -707,8 +693,6 @@ class TestSearchFilter:
         view._filter_chips['pipx'].setChecked(False)
         view._filter_chips['uv'].setChecked(False)
 
-        from synodic_client.application.screen.screen import PluginKindHeader
-
         hidden_kinds = [w for w in view._section_widgets if isinstance(w, PluginKindHeader) and w.isHidden()]
         assert len(hidden_kinds) == 1
 
@@ -718,8 +702,6 @@ class TestSearchFilter:
         self._populate_section_widgets(view)
 
         view._search_input.setText('mypy')
-
-        from synodic_client.application.screen.screen import PluginProviderHeader
 
         visible_providers = [
             w for w in view._section_widgets if isinstance(w, PluginProviderHeader) and not w.isHidden()
@@ -734,10 +716,8 @@ class TestSearchFilter:
 
         view._search_input.setText('pipx')
 
-        from synodic_client.application.screen.screen import PluginRow
-
         visible_rows = [w for w in view._section_widgets if isinstance(w, PluginRow) and not w.isHidden()]
-        assert len(visible_rows) == 2
+        assert len(visible_rows) == _EXPECTED_VISIBLE_ROWS_PIPX
         names = {w._package_name for w in visible_rows}
         assert names == {'ruff', 'pdm'}
 
