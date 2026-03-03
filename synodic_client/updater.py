@@ -433,6 +433,9 @@ def _on_before_uninstall(version: str) -> None:
         logger.warning('Auto-startup removal failed during uninstall hook', exc_info=True)
 
 
+_velopack_initialized = False
+
+
 def initialize_velopack() -> None:
     """Initialize Velopack at application startup.
 
@@ -440,13 +443,18 @@ def initialize_velopack() -> None:
     before any UI is shown. Velopack may need to perform cleanup or apply
     pending updates.
 
-    Protocol registration happens on every app launch (see ``qt.application``).
+    Safe to call more than once — subsequent calls are no-ops.
 
     .. note::
 
         The SDK's callback hooks only accept ``PyCFunction`` — add an
         uninstall hook here when that is fixed upstream.
     """
+    global _velopack_initialized  # noqa: PLW0603
+    if _velopack_initialized:
+        return
+    _velopack_initialized = True
+
     logger.info('Initializing Velopack (exe=%s)', sys.executable)
     try:
         app = velopack.App()

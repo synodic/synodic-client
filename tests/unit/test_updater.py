@@ -417,6 +417,14 @@ class TestInitializeVelopack:
     """Tests for initialize_velopack function."""
 
     @staticmethod
+    @pytest.fixture(autouse=True)
+    def _reset_velopack_guard() -> None:
+        """Reset the idempotency guard before each test."""
+        import synodic_client.updater as updater_mod
+
+        updater_mod._velopack_initialized = False
+
+    @staticmethod
     def test_initialize_success() -> None:
         """Verify initialize_velopack calls App().run()."""
         mock_app = MagicMock(spec=velopack.App)
@@ -433,6 +441,15 @@ class TestInitializeVelopack:
         with patch('synodic_client.updater.velopack.App', return_value=mock_app):
             # Should not raise
             initialize_velopack()
+
+    @staticmethod
+    def test_idempotent_on_second_call() -> None:
+        """A second call is a no-op; Velopack is initialised only once."""
+        mock_app = MagicMock(spec=velopack.App)
+        with patch('synodic_client.updater.velopack.App', return_value=mock_app) as mock_app_class:
+            initialize_velopack()
+            initialize_velopack()
+            mock_app_class.assert_called_once()
 
 
 class TestGetVelopackManager:

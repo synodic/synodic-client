@@ -23,15 +23,12 @@ from synodic_client.application.uri import parse_uri
 from synodic_client.client import Client
 from synodic_client.config import set_dev_mode
 from synodic_client.logging import configure_logging
-from synodic_client.protocol import register_protocol
 from synodic_client.resolution import (
     ResolvedConfig,
     resolve_config,
     resolve_update_config,
     resolve_version,
-    seed_user_config_from_build,
 )
-from synodic_client.startup import register_startup, remove_startup
 from synodic_client.updater import initialize_velopack
 
 
@@ -139,20 +136,13 @@ def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
     _install_exception_hook(logger)
 
     if not dev_mode:
-        # Initialize Velopack early, before any UI.
-        # Console window suppression for subprocesses is handled by the
-        # PyInstaller runtime hook (rthook_no_console.py).
+        # All three functions are idempotent — safe to call even when
+        # bootstrap.py has already executed them before heavy imports.
         initialize_velopack()
-        register_protocol(sys.executable)
 
-        # Seed user config from build config (one-time propagation).
-        seed_user_config_from_build()
+        from synodic_client.application.init import run_startup_preamble
 
-        startup_config = resolve_config()
-        if startup_config.auto_start:
-            register_startup(sys.executable)
-        else:
-            remove_startup()
+        run_startup_preamble(sys.executable)
 
     if uri:
         logger.info('Received URI: %s', uri)

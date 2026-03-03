@@ -1,11 +1,13 @@
 """Tests for Windows auto-startup registration."""
 
 import winreg
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from synodic_client.startup import (
     RUN_KEY_PATH,
+    STARTUP_APPROVED_KEY_PATH,
     STARTUP_VALUE_NAME,
+    _APPROVED_ENABLED,
     is_startup_registered,
     register_startup,
     remove_startup,
@@ -25,6 +27,7 @@ class TestRegisterStartup:
         with (
             patch.object(winreg, 'OpenKey', return_value=mock_key) as mock_open,
             patch.object(winreg, 'SetValueEx') as mock_set,
+            patch.object(winreg, 'CreateKey', return_value=mock_key),
         ):
             register_startup(r'C:\Program Files\Synodic\synodic.exe')
 
@@ -34,12 +37,42 @@ class TestRegisterStartup:
             0,
             winreg.KEY_SET_VALUE,
         )
-        mock_set.assert_called_once_with(
+        mock_set.assert_any_call(
             mock_key,
             STARTUP_VALUE_NAME,
             0,
             winreg.REG_SZ,
             r'"C:\Program Files\Synodic\synodic.exe"',
+        )
+
+    @staticmethod
+    def test_writes_startup_approved_enabled() -> None:
+        """Verify the StartupApproved enabled flag is written."""
+        mock_run_key = MagicMock()
+        mock_run_key.__enter__ = MagicMock(return_value=mock_run_key)
+        mock_run_key.__exit__ = MagicMock(return_value=False)
+
+        mock_approved_key = MagicMock()
+        mock_approved_key.__enter__ = MagicMock(return_value=mock_approved_key)
+        mock_approved_key.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch.object(winreg, 'OpenKey', return_value=mock_run_key),
+            patch.object(winreg, 'SetValueEx') as mock_set,
+            patch.object(winreg, 'CreateKey', return_value=mock_approved_key) as mock_create,
+        ):
+            register_startup(r'C:\synodic.exe')
+
+        mock_create.assert_called_once_with(
+            winreg.HKEY_CURRENT_USER,
+            STARTUP_APPROVED_KEY_PATH,
+        )
+        mock_set.assert_any_call(
+            mock_approved_key,
+            STARTUP_VALUE_NAME,
+            0,
+            winreg.REG_BINARY,
+            _APPROVED_ENABLED,
         )
 
     @staticmethod
@@ -66,7 +99,34 @@ class TestRemoveStartup:
         ):
             remove_startup()
 
-        mock_delete.assert_called_once_with(mock_key, STARTUP_VALUE_NAME)
+        mock_delete.assert_any_call(mock_key, STARTUP_VALUE_NAME)
+
+    @staticmethod
+    def test_clears_startup_approved() -> None:
+        """Verify the StartupApproved flag is also deleted."""
+        mock_run_key = MagicMock()
+        mock_run_key.__enter__ = MagicMock(return_value=mock_run_key)
+        mock_run_key.__exit__ = MagicMock(return_value=False)
+
+        mock_approved_key = MagicMock()
+        mock_approved_key.__enter__ = MagicMock(return_value=mock_approved_key)
+        mock_approved_key.__exit__ = MagicMock(return_value=False)
+
+        def _open_key_side_effect(_root: int, path: str, _reserved: int, _access: int) -> MagicMock:
+            if 'Explorer' in path:
+                return mock_approved_key
+            return mock_run_key
+
+        with (
+            patch.object(winreg, 'OpenKey', side_effect=_open_key_side_effect),
+            patch.object(winreg, 'DeleteValue') as mock_delete,
+        ):
+            remove_startup()
+
+        # Both the Run and StartupApproved values should be deleted
+        assert mock_delete.call_count == 2
+        mock_delete.assert_any_call(mock_run_key, STARTUP_VALUE_NAME)
+        mock_delete.assert_any_call(mock_approved_key, STARTUP_VALUE_NAME)
 
     @staticmethod
     def test_handles_missing_value_gracefully() -> None:
@@ -95,16 +155,75 @@ class TestIsStartupRegistered:
 
     @staticmethod
     def test_returns_true_when_present() -> None:
-        """Verify True when the value exists."""
+        """Verify True when the value exists and no approval override."""
         mock_key = MagicMock()
         mock_key.__enter__ = MagicMock(return_value=mock_key)
         mock_key.__exit__ = MagicMock(return_value=False)
 
+        def _open_key_side_effect(_root: int, path: str, _reserved: int, _access: int) -> MagicMock:
+            return mock_key
+
+        def _query_side_effect(key: MagicMock, name: str) -> tuple[object, int]:
+            # Run key exists; StartupApproved key raises FileNotFoundError
+            # (no override → treated as enabled)
+            raise FileNotFoundError
+
         with (
-            patch.object(winreg, 'OpenKey', return_value=mock_key),
-            patch.object(winreg, 'QueryValueEx', return_value=(r'"C:\synodic.exe"', winreg.REG_SZ)),
+            patch.object(winreg, 'OpenKey', side_effect=_open_key_side_effect),
+            patch.object(
+                winreg,
+                'QueryValueEx',
+                side_effect=[
+                    (r'"C:\synodic.exe"', winreg.REG_SZ),  # Run key query
+                    FileNotFoundError,  # StartupApproved query
+                ],
+            ),
         ):
             assert is_startup_registered() is True
+
+    @staticmethod
+    def test_returns_true_when_startup_approved_enabled() -> None:
+        """Verify True when the StartupApproved byte is 0x02 (enabled)."""
+        mock_key = MagicMock()
+        mock_key.__enter__ = MagicMock(return_value=mock_key)
+        mock_key.__exit__ = MagicMock(return_value=False)
+
+        enabled_data = b'\x02' + b'\x00' * 11
+
+        with (
+            patch.object(winreg, 'OpenKey', return_value=mock_key),
+            patch.object(
+                winreg,
+                'QueryValueEx',
+                side_effect=[
+                    (r'"C:\synodic.exe"', winreg.REG_SZ),  # Run key query
+                    (enabled_data, winreg.REG_BINARY),  # StartupApproved query
+                ],
+            ),
+        ):
+            assert is_startup_registered() is True
+
+    @staticmethod
+    def test_returns_false_when_startup_approved_disabled() -> None:
+        """Verify False when the StartupApproved byte is 0x03 (disabled)."""
+        mock_key = MagicMock()
+        mock_key.__enter__ = MagicMock(return_value=mock_key)
+        mock_key.__exit__ = MagicMock(return_value=False)
+
+        disabled_data = b'\x03' + b'\x00' * 11
+
+        with (
+            patch.object(winreg, 'OpenKey', return_value=mock_key),
+            patch.object(
+                winreg,
+                'QueryValueEx',
+                side_effect=[
+                    (r'"C:\synodic.exe"', winreg.REG_SZ),  # Run key query
+                    (disabled_data, winreg.REG_BINARY),  # StartupApproved query
+                ],
+            ),
+        ):
+            assert is_startup_registered() is False
 
     @staticmethod
     def test_returns_false_when_missing() -> None:
@@ -117,5 +236,4 @@ class TestIsStartupRegistered:
             patch.object(winreg, 'OpenKey', return_value=mock_key),
             patch.object(winreg, 'QueryValueEx', side_effect=FileNotFoundError),
         ):
-            assert is_startup_registered() is False
             assert is_startup_registered() is False
