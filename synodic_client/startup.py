@@ -33,7 +33,9 @@ STARTUP_APPROVED_KEY_PATH = r'Software\Microsoft\Windows\CurrentVersion\Explorer
 """Registry key where Windows stores per-entry enabled/disabled flags."""
 
 # 12-byte REG_BINARY payloads for the StartupApproved value.
-_APPROVED_ENABLED: bytes = b'\x02' + b'\x00' * 11
+APPROVED_ENABLED: bytes = b'\x02' + b'\x00' * 11
+"""Enabled payload for the ``StartupApproved\\Run`` registry value."""
+
 _APPROVED_DISABLED_BYTE: int = 0x03
 
 
@@ -65,7 +67,7 @@ if sys.platform == 'win32':
         # previously disabled it via Task Manager.
         try:
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_KEY_PATH) as key:
-                winreg.SetValueEx(key, STARTUP_VALUE_NAME, 0, winreg.REG_BINARY, _APPROVED_ENABLED)
+                winreg.SetValueEx(key, STARTUP_VALUE_NAME, 0, winreg.REG_BINARY, APPROVED_ENABLED)
             logger.debug('Wrote StartupApproved enabled flag')
         except OSError:
             logger.exception('Failed to write StartupApproved enabled flag')
@@ -86,9 +88,7 @@ if sys.platform == 'win32':
             logger.exception('Failed to remove auto-startup registration')
 
         try:
-            with winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_KEY_PATH, 0, winreg.KEY_SET_VALUE
-            ) as key:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_KEY_PATH, 0, winreg.KEY_SET_VALUE) as key:
                 winreg.DeleteValue(key, STARTUP_VALUE_NAME)
             logger.debug('Removed StartupApproved flag')
         except FileNotFoundError:
@@ -97,7 +97,7 @@ if sys.platform == 'win32':
             logger.exception('Failed to remove StartupApproved flag')
 
     def is_startup_registered() -> bool:
-        """Check whether auto-startup is both present **and** enabled.
+        r"""Check whether auto-startup is both present **and** enabled.
 
         Returns ``True`` only when the ``Run`` value exists and Windows
         has not disabled it via ``StartupApproved\Run``.
@@ -120,9 +120,7 @@ if sys.platform == 'win32':
         #    this key when the user explicitly disables/enables via Task
         #    Manager or Settings).
         try:
-            with winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_KEY_PATH, 0, winreg.KEY_QUERY_VALUE
-            ) as key:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_KEY_PATH, 0, winreg.KEY_QUERY_VALUE) as key:
                 data, _ = winreg.QueryValueEx(key, STARTUP_VALUE_NAME)
                 if isinstance(data, bytes) and len(data) >= 1 and data[0] == _APPROVED_DISABLED_BYTE:
                     logger.debug('Auto-startup is disabled via StartupApproved')

@@ -7,7 +7,6 @@ import pytest
 import synodic_client.application.init as init_mod
 from synodic_client.application.init import run_startup_preamble
 
-
 _MODULE = 'synodic_client.application.init'
 
 

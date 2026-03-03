@@ -6,6 +6,7 @@ import pytest
 import velopack
 from packaging.version import Version
 
+import synodic_client.updater as updater_mod
 from synodic_client.updater import (
     GITHUB_REPO_URL,
     UpdateChannel,
@@ -420,8 +421,6 @@ class TestInitializeVelopack:
     @pytest.fixture(autouse=True)
     def _reset_velopack_guard() -> None:
         """Reset the idempotency guard before each test."""
-        import synodic_client.updater as updater_mod
-
         updater_mod._velopack_initialized = False
 
     @staticmethod

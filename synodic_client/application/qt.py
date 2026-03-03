@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication
 
 from synodic_client.application.icon import app_icon
+from synodic_client.application.init import run_startup_preamble
 from synodic_client.application.instance import SingleInstance
 from synodic_client.application.screen.install import InstallPreviewWindow
 from synodic_client.application.screen.screen import Screen
@@ -139,9 +140,6 @@ def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
         # All three functions are idempotent — safe to call even when
         # bootstrap.py has already executed them before heavy imports.
         initialize_velopack()
-
-        from synodic_client.application.init import run_startup_preamble
-
         run_startup_preamble(sys.executable)
 
     if uri:

@@ -1,13 +1,13 @@
 """Tests for Windows auto-startup registration."""
 
 import winreg
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from synodic_client.startup import (
+    APPROVED_ENABLED,
     RUN_KEY_PATH,
     STARTUP_APPROVED_KEY_PATH,
     STARTUP_VALUE_NAME,
-    _APPROVED_ENABLED,
     is_startup_registered,
     register_startup,
     remove_startup,
@@ -72,7 +72,7 @@ class TestRegisterStartup:
             STARTUP_VALUE_NAME,
             0,
             winreg.REG_BINARY,
-            _APPROVED_ENABLED,
+            APPROVED_ENABLED,
         )
 
     @staticmethod
@@ -124,7 +124,8 @@ class TestRemoveStartup:
             remove_startup()
 
         # Both the Run and StartupApproved values should be deleted
-        assert mock_delete.call_count == 2
+        expected_delete_count = 2
+        assert mock_delete.call_count == expected_delete_count
         mock_delete.assert_any_call(mock_run_key, STARTUP_VALUE_NAME)
         mock_delete.assert_any_call(mock_approved_key, STARTUP_VALUE_NAME)
 
