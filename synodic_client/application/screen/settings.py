@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from synodic_client._version import __version__
+from synodic_client import __version__
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.card import CardFrame
 from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE, UPDATE_STATUS_CHECKING_STYLE
