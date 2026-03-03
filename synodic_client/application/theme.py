@@ -201,6 +201,76 @@ PLUGIN_ROW_ERROR_STYLE = 'font-size: 11px; color: #f48771;'
 PLUGIN_ROW_SPACING = 1
 """Pixels between individual tool/package rows."""
 
+# Project child row — indented sub-row for project-scoped package instances
+PROJECT_CHILD_ROW_STYLE = (
+    'QFrame#projectChildRow {'
+    '  background: transparent;'
+    '  border-radius: 4px;'
+    '  padding: 2px 8px 2px 40px;'
+    '}'
+    'QFrame#projectChildRow:hover {'
+    '  background: #252628;'
+    '}'
+)
+"""Indented row showing a project-scoped instance of a package."""
+
+PROJECT_CHILD_NAME_STYLE = 'font-size: 11px; color: #999999;'
+"""Dimmed package name for project child rows."""
+
+PROJECT_CHILD_PROJECT_STYLE = 'font-size: 11px; color: #808080;'
+"""Project label for project child rows."""
+
+PROJECT_CHILD_VERSION_STYLE = 'font-size: 10px; color: #707070;'
+"""Version text for project child rows."""
+
+PROJECT_CHILD_TRANSITIVE_STYLE = 'font-size: 10px; color: #666666; font-style: italic;'
+"""Dimmed italic label for transitive (non-manifest) dependencies."""
+
+PROJECT_CHILD_NAV_STYLE = (
+    'QPushButton { border: none; font-size: 11px; color: #808080;'
+    '  padding: 0px 2px; min-width: 18px; max-width: 18px; }'
+    'QPushButton:hover { color: #3794ff; }'
+    'QPushButton:pressed { color: #d4d4d4; }'
+)
+"""Navigate arrow button that switches to the Projects tab."""
+
+# Search & filter — toolbar search input and plugin filter chips
+SEARCH_INPUT_STYLE = (
+    'QLineEdit {'
+    '  background: #1e1e1e;'
+    '  border: 1px solid palette(mid);'
+    '  border-radius: 3px;'
+    '  color: #cccccc;'
+    '  font-size: 12px;'
+    '  padding: 2px 6px;'
+    '  min-width: 200px;'
+    '  max-width: 300px;'
+    '}'
+    'QLineEdit:focus { border-color: #3794ff; }'
+)
+"""Dark search input for the ToolsView toolbar."""
+
+FILTER_CHIP_STYLE = (
+    'QPushButton {'
+    '  border: 1px solid palette(mid);'
+    '  border-radius: 10px;'
+    '  padding: 1px 8px;'
+    '  font-size: 10px;'
+    '  color: #808080;'
+    '  background: transparent;'
+    '}'
+    'QPushButton:checked {'
+    '  background: #094771;'
+    '  border-color: #3794ff;'
+    '  color: #cccccc;'
+    '}'
+    'QPushButton:hover { color: #cccccc; }'
+)
+"""Toggleable pill chip for plugin filter in the ToolsView toolbar."""
+
+FILTER_CHIP_SPACING = 4
+"""Pixels between filter chips."""
+
 # Retained from previous design — auto-update & per-plugin update buttons
 PLUGIN_TOGGLE_STYLE = (
     'QPushButton { padding: 2px 8px; border: 1px solid palette(mid); border-radius: 3px;'

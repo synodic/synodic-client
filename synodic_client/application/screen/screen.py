@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QPushButton,
     QScrollArea,
@@ -45,6 +46,8 @@ from synodic_client.application.screen.spinner import SpinnerWidget
 from synodic_client.application.screen.update_banner import UpdateBanner
 from synodic_client.application.theme import (
     COMPACT_MARGINS,
+    FILTER_CHIP_SPACING,
+    FILTER_CHIP_STYLE,
     MAIN_WINDOW_MIN_SIZE,
     PLUGIN_KIND_HEADER_STYLE,
     PLUGIN_PROVIDER_NAME_STYLE,
@@ -65,6 +68,13 @@ from synodic_client.application.theme import (
     PLUGIN_SECTION_SPACING,
     PLUGIN_TOGGLE_STYLE,
     PLUGIN_UPDATE_STYLE,
+    PROJECT_CHILD_NAME_STYLE,
+    PROJECT_CHILD_NAV_STYLE,
+    PROJECT_CHILD_PROJECT_STYLE,
+    PROJECT_CHILD_ROW_STYLE,
+    PROJECT_CHILD_TRANSITIVE_STYLE,
+    PROJECT_CHILD_VERSION_STYLE,
+    SEARCH_INPUT_STYLE,
     SETTINGS_GEAR_STYLE,
 )
 from synodic_client.resolution import ResolvedConfig, update_user_config
@@ -121,28 +131,51 @@ class PackageEntry:
 
 
 @dataclass(slots=True)
-class MergedPackage:
-    """Accumulated view of a package after deduplication across directories.
+class ProjectInstance:
+    """A single project-scoped occurrence of a package.
 
-    Used during ``_async_refresh`` to merge multiple
-    :class:`PackageEntry` instances referencing the same package name
-    into a single row description.
+    Represents the package as found in one project venv.  Multiple
+    instances may exist when the same package appears in several
+    cached projects.
     """
 
-    projects: list[str] = field(default_factory=list)
-    """Display names of the projects referencing this package."""
+    project_label: str
+    """Human-readable project directory label."""
 
-    project_paths: list[str] = field(default_factory=list)
-    """Filesystem paths of the project directories."""
+    project_path: str
+    """Filesystem path of the project directory."""
 
     version: str = ''
-    """Installed version string."""
+    """Installed version string in this project."""
+
+    is_transitive: bool = False
+    """``True`` when the package is not declared in the project manifest."""
+
+
+@dataclass(slots=True)
+class DisplayPackage:
+    """Two-tier view of a package for the ToolsView widget tree.
+
+    Replaces :class:`MergedPackage` with an explicit global/project
+    split.  The ``global_version`` indicates whether the package is
+    installed in the global environment; ``project_instances`` lists
+    each project venv where it was found.
+    """
+
+    name: str
+    """Package name (e.g. ``"ruff"``)."""
+
+    global_version: str | None = None
+    """Version in the global environment, or ``None`` when not global."""
 
     is_global: bool = False
-    """``True`` when the package is not referenced by any project manifest."""
+    """``True`` when the package is installed globally."""
 
     host_tool: str = ''
     """Host-tool annotation for injected packages."""
+
+    project_instances: list[ProjectInstance] = field(default_factory=list)
+    """Project-scoped occurrences of this package."""
 
 
 @dataclass(slots=True)
@@ -598,6 +631,109 @@ class PluginRow(QFrame):
         self._status_label.hide()
 
 
+# ---------------------------------------------------------------------------
+# Project child row — indented sub-row for project-scoped packages
+# ---------------------------------------------------------------------------
+
+
+class ProjectChildRow(QFrame):
+    """Indented sub-row showing a project-scoped instance of a package.
+
+    Displays the project label, version, and an optional ``(transitive)``
+    annotation for packages not declared in the project manifest.
+    A small navigate button switches to the Projects tab.
+
+    These rows appear directly below the parent :class:`PluginRow` and
+    are read-only — no update, remove, or auto-update controls.
+    """
+
+    navigate_to_project = Signal(str)
+    """Emitted with a project path when the navigate button is clicked."""
+
+    def __init__(
+        self,
+        project: ProjectInstance,
+        *,
+        package_name: str = '',
+        parent: QWidget | None = None,
+    ) -> None:
+        """Initialize the project child row.
+
+        Args:
+            project: The project instance data to display.
+            package_name: Package name (displayed dimmed).
+            parent: Optional parent widget.
+        """
+        super().__init__(parent)
+        self.setObjectName('projectChildRow')
+        self.setStyleSheet(PROJECT_CHILD_ROW_STYLE)
+        self._project_path = project.project_path
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        # Package name (dimmed)
+        if package_name:
+            name_label = QLabel(package_name)
+            name_label.setStyleSheet(PROJECT_CHILD_NAME_STYLE)
+            layout.addWidget(name_label)
+
+        # Project label
+        project_label = QLabel(project.project_label)
+        project_label.setStyleSheet(PROJECT_CHILD_PROJECT_STYLE)
+        layout.addWidget(project_label)
+
+        # Transitive annotation
+        if project.is_transitive:
+            transitive_label = QLabel('(transitive)')
+            transitive_label.setStyleSheet(PROJECT_CHILD_TRANSITIVE_STYLE)
+            layout.addWidget(transitive_label)
+
+        layout.addStretch()
+
+        # Version
+        if project.version:
+            version_label = QLabel(project.version)
+            version_label.setStyleSheet(PROJECT_CHILD_VERSION_STYLE)
+            layout.addWidget(version_label)
+
+        # Navigate button
+        nav_btn = QPushButton('\u2192')
+        nav_btn.setFixedSize(18, 18)
+        nav_btn.setStyleSheet(PROJECT_CHILD_NAV_STYLE)
+        nav_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        nav_btn.setToolTip(f'Open project: {project.project_label}')
+        nav_btn.clicked.connect(lambda: self.navigate_to_project.emit(self._project_path))
+        layout.addWidget(nav_btn)
+
+
+# ---------------------------------------------------------------------------
+# Filter chip — toggleable pill for plugin filtering
+# ---------------------------------------------------------------------------
+
+
+class FilterChip(QPushButton):
+    """Small toggleable pill button representing a single plugin filter.
+
+    All chips start *checked* (active).  The user deselects chips to
+    hide packages from that plugin — subtractive filtering.
+    """
+
+    toggled_with_name = Signal(str, bool)
+    """Emitted with ``(plugin_name, checked)`` when the chip is toggled."""
+
+    def __init__(self, plugin_name: str, parent: QWidget | None = None) -> None:
+        """Initialize a filter chip for the given plugin name."""
+        super().__init__(plugin_name, parent)
+        self._plugin_name = plugin_name
+        self.setCheckable(True)
+        self.setChecked(True)
+        self.setStyleSheet(FILTER_CHIP_STYLE)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toggled.connect(lambda checked: self.toggled_with_name.emit(self._plugin_name, checked))
+
+
 class ToolsView(QWidget):
     """Central update hub showing installed tools and packages.
 
@@ -644,6 +780,8 @@ class ToolsView(QWidget):
         self._config = config
         self._coordinator = coordinator
         self._section_widgets: list[QWidget] = []
+        self._filter_chips: dict[str, FilterChip] = {}
+        self._deselected_plugins: set[str] = set()
         self._refresh_in_progress = False
         self._check_in_progress = False
         self._updates_checked = False
@@ -656,8 +794,16 @@ class ToolsView(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(*COMPACT_MARGINS)
 
-        # Toolbar
+        # Toolbar — search input left, action buttons right
         toolbar = QHBoxLayout()
+
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText('Search packages\u2026')
+        self._search_input.setClearButtonEnabled(True)
+        self._search_input.setStyleSheet(SEARCH_INPUT_STYLE)
+        self._search_input.textChanged.connect(self._apply_filter)
+        toolbar.addWidget(self._search_input)
+
         toolbar.addStretch()
 
         check_btn = QPushButton('Check for Updates')
@@ -671,6 +817,14 @@ class ToolsView(QWidget):
         update_all_btn.clicked.connect(self.update_all_requested.emit)
         toolbar.addWidget(update_all_btn)
         outer.addLayout(toolbar)
+
+        # Filter chips row — auto-populated from discovered plugins
+        chip_container = QWidget()
+        self._chip_layout = QHBoxLayout(chip_container)
+        self._chip_layout.setContentsMargins(0, 0, 0, 0)
+        self._chip_layout.setSpacing(FILTER_CHIP_SPACING)
+        self._chip_layout.addStretch()
+        outer.addWidget(chip_container)
 
         # Scroll area
         self._scroll = QScrollArea()
@@ -799,6 +953,9 @@ class ToolsView(QWidget):
             for plugin in kind_buckets[kind]:
                 self._build_plugin_section(plugin, data, auto_update_map)
 
+        self._rebuild_chips()
+        self._apply_filter()
+
     def _clear_section_widgets(self) -> None:
         """Remove and delete all current section widgets."""
         for widget in self._section_widgets:
@@ -827,7 +984,14 @@ class ToolsView(QWidget):
         data: _RefreshData,
         auto_update_map: dict[str, bool | dict[str, bool]],
     ) -> None:
-        """Build the provider header and package rows for a single plugin."""
+        """Build the provider header and package rows for a single plugin.
+
+        For each package a top-level :class:`PluginRow` is created for
+        the global instance (with update/remove/toggle controls).
+        Directly below it, indented :class:`ProjectChildRow` widgets
+        show each project-scoped occurrence — read-only with a navigate
+        button to switch to the Projects tab.
+        """
         auto_val = auto_update_map.get(plugin.name, True)
         plugin_updates = self._updates_available.get(plugin.name, set())
 
@@ -844,72 +1008,88 @@ class ToolsView(QWidget):
 
         plugin_manifest = data.manifest_packages.get(plugin.name, set())
         raw_packages = data.packages_map.get(plugin.name, [])
-        merged = self._merge_raw_packages(raw_packages, plugin_manifest)
+        display_packages = self._build_display_packages(raw_packages, plugin_manifest)
 
-        if merged:
-            for pkg_name, pkg in merged.items():
-                pkg_auto = self._resolve_package_auto_update(auto_val, pkg_name, pkg.is_global)
+        if display_packages:
+            for pkg in display_packages:
+                pkg_auto = self._resolve_package_auto_update(auto_val, pkg.name, pkg.is_global)
                 row = self._create_connected_row(
                     PluginRowData(
-                        name=pkg_name,
-                        project=', '.join(pkg.projects),
-                        version=pkg.version,
+                        name=pkg.name,
+                        version=pkg.global_version or '',
                         plugin_name=plugin.name,
                         auto_update=pkg_auto,
                         show_toggle=True,
-                        has_update=pkg_name in plugin_updates,
+                        has_update=pkg.name in plugin_updates,
                         is_global=pkg.is_global,
                         host_tool=pkg.host_tool,
-                        project_paths=list(pkg.project_paths),
                     ),
                 )
                 self._insert_section_widget(row)
+
+                # Project child rows — always expanded inline
+                for proj in pkg.project_instances:
+                    child = ProjectChildRow(
+                        proj,
+                        package_name='' if pkg.is_global else pkg.name,
+                        parent=self._container,
+                    )
+                    child.navigate_to_project.connect(self.navigate_to_project_requested.emit)
+                    self._insert_section_widget(child)
         else:
             version_text = str(plugin.tool_version) if plugin.tool_version is not None else ''
             row = PluginRow(PluginRowData(name=plugin.name, version=version_text), parent=self._container)
             self._insert_section_widget(row)
 
     @staticmethod
-    def _merge_raw_packages(
+    def _build_display_packages(
         raw_packages: list[PackageEntry],
         plugin_manifest: set[str],
-    ) -> OrderedDict[str, MergedPackage]:
-        """Deduplicate packages across directories into a merged view.
+    ) -> list[DisplayPackage]:
+        """Build a two-tier display model from raw package entries.
 
-        Same package from multiple directories becomes one row with a
-        combined project label.  Global packages are always deduplicated;
-        manifest packages merge their project names.
+        Each unique package name produces one :class:`DisplayPackage`.
+        Global entries (no ``project_path``) set the global version;
+        project-scoped entries become :class:`ProjectInstance` children.
+        A project-scoped package is marked *transitive* when it is not
+        declared in any manifest for this plugin.
 
-        A package is considered "global" (and therefore removable from
-        the global environment) only when it is **not** declared in any
-        manifest **and** was found by the global (non-project-scoped)
-        query.  Transitive dependencies discovered exclusively inside a
-        project venv are *not* globally removable — the uninstall API
-        targets the global Python, where those packages do not exist.
+        Returns:
+            An ordered list of :class:`DisplayPackage` instances, with
+            globals first, then project-only packages.
         """
-        merged: OrderedDict[str, MergedPackage] = OrderedDict()
+        by_name: OrderedDict[str, DisplayPackage] = OrderedDict()
         for entry in raw_packages:
-            in_manifest = entry.name in plugin_manifest
             from_project = bool(entry.project_path)
-            is_global = not in_manifest and not from_project
-            if entry.name in merged:
-                existing = merged[entry.name]
-                if not is_global and entry.project_label and entry.project_label not in existing.projects:
-                    existing.projects.append(entry.project_label)
-                if not is_global and entry.project_path and entry.project_path not in existing.project_paths:
-                    existing.project_paths.append(entry.project_path)
-                # Promote to global if any entry was discovered globally
-                if is_global and not existing.is_global:
-                    existing.is_global = True
-            else:
-                merged[entry.name] = MergedPackage(
-                    projects=([] if is_global else ([entry.project_label] if entry.project_label else [])),
-                    project_paths=([] if is_global else ([entry.project_path] if entry.project_path else [])),
-                    version=entry.version,
-                    is_global=is_global,
+
+            if entry.name not in by_name:
+                by_name[entry.name] = DisplayPackage(
+                    name=entry.name,
                     host_tool=entry.host_tool,
                 )
-        return merged
+
+            dp = by_name[entry.name]
+
+            if not from_project:
+                # Global entry
+                dp.is_global = True
+                dp.global_version = entry.version
+            else:
+                # Project-scoped entry
+                is_transitive = entry.name not in plugin_manifest
+                # Deduplicate by project_path
+                existing_paths = {pi.project_path for pi in dp.project_instances}
+                if entry.project_path not in existing_paths:
+                    dp.project_instances.append(
+                        ProjectInstance(
+                            project_label=entry.project_label,
+                            project_path=entry.project_path,
+                            version=entry.version,
+                            is_transitive=is_transitive,
+                        ),
+                    )
+
+        return list(by_name.values())
 
     @staticmethod
     def _resolve_package_auto_update(
@@ -923,6 +1103,145 @@ class ToolsView(QWidget):
         if auto_val is False:
             return False
         return not is_global
+
+    # ------------------------------------------------------------------
+    # Search & filter
+    # ------------------------------------------------------------------
+
+    def _rebuild_chips(self) -> None:
+        """Rebuild the filter chip row from currently visible plugin providers.
+
+        Preserves previous deselection state: if a chip was unchecked
+        before a refresh, it stays unchecked (subtractive model).
+        """
+        # Remove old chips
+        for chip in self._filter_chips.values():
+            self._chip_layout.removeWidget(chip)
+            chip.deleteLater()
+        self._filter_chips.clear()
+
+        # Collect unique plugin names in order
+        seen: set[str] = set()
+        plugin_names: list[str] = []
+        for widget in self._section_widgets:
+            if isinstance(widget, PluginProviderHeader):
+                name = widget._plugin_name
+                if name not in seen:
+                    seen.add(name)
+                    plugin_names.append(name)
+
+        # Create chips — insert before the trailing stretch
+        stretch_idx = self._chip_layout.count() - 1
+        for name in plugin_names:
+            chip = FilterChip(name, parent=self._chip_layout.parentWidget())
+            chip.setChecked(name not in self._deselected_plugins)
+            chip.toggled_with_name.connect(self._on_chip_toggled)
+            self._chip_layout.insertWidget(stretch_idx, chip)
+            self._filter_chips[name] = chip
+            stretch_idx += 1
+
+    def _on_chip_toggled(self, plugin_name: str, checked: bool) -> None:
+        """Track deselected plugins and reapply the filter."""
+        if checked:
+            self._deselected_plugins.discard(plugin_name)
+        else:
+            self._deselected_plugins.add(plugin_name)
+        self._apply_filter()
+
+    def _active_chip_plugins(self) -> set[str] | None:
+        """Return the set of plugin names whose chips are checked.
+
+        Returns ``None`` when no chips exist yet (initial state before
+        any refresh), meaning all plugins should be shown.
+        """
+        if not self._filter_chips:
+            return None
+        return {name for name, chip in self._filter_chips.items() if chip.isChecked()}
+
+    def _apply_filter(self, _text: str | None = None) -> None:
+        """Show/hide section widgets based on search text and active chips.
+
+        A single pass walks ``_section_widgets`` tracking the current
+        plugin and kind.  Visibility rules:
+
+        * **PluginProviderHeader** — visible when its plugin is in the
+          active chip set **and** at least one child row matches the
+          search text.
+        * **PluginRow** — visible when its plugin is active **and** its
+          package name or plugin name contains the search text.
+        * **ProjectChildRow** — follows its parent :class:`PluginRow`.
+        * **PluginKindHeader** — visible when at least one child
+          provider in its kind group is visible.
+
+        After the pass, kind headers with no visible children are hidden.
+        """
+        query = self._search_input.text().strip().lower()
+        active = self._active_chip_plugins()
+        all_active = active is None  # None → no chips yet, show all
+
+        current_kind_header: PluginKindHeader | None = None
+        kind_has_visible = False
+        current_provider: PluginProviderHeader | None = None
+        provider_has_visible_child = False
+        parent_row_visible = False
+
+        for widget in self._section_widgets:
+            if isinstance(widget, PluginKindHeader):
+                # Finalise previous kind
+                if current_kind_header is not None:
+                    # Finalise last provider of previous kind
+                    if current_provider is not None:
+                        current_provider.setVisible(provider_has_visible_child)
+                        if provider_has_visible_child:
+                            kind_has_visible = True
+                    current_kind_header.setVisible(kind_has_visible)
+
+                current_kind_header = widget
+                kind_has_visible = False
+                current_provider = None
+                provider_has_visible_child = False
+
+            elif isinstance(widget, PluginProviderHeader):
+                # Finalise previous provider
+                if current_provider is not None:
+                    current_provider.setVisible(provider_has_visible_child)
+                    if provider_has_visible_child:
+                        kind_has_visible = True
+
+                current_provider = widget
+                provider_has_visible_child = False
+                plugin_name = widget._plugin_name
+                plugin_active = all_active or (active is not None and plugin_name in active)
+
+                if not plugin_active:
+                    # Entire provider hidden
+                    widget.setVisible(False)
+                    provider_has_visible_child = False
+
+            elif isinstance(widget, PluginRow):
+                plugin_name = widget._plugin_name
+                plugin_active = all_active or (active is not None and plugin_name in active)
+                if not plugin_active:
+                    widget.setVisible(False)
+                    parent_row_visible = False
+                    continue
+
+                name_match = not query or query in widget._package_name.lower() or query in plugin_name.lower()
+                widget.setVisible(name_match)
+                parent_row_visible = name_match
+                if name_match:
+                    provider_has_visible_child = True
+
+            elif isinstance(widget, ProjectChildRow):
+                widget.setVisible(parent_row_visible)
+
+        # Finalise last provider and kind
+        if current_provider is not None:
+            current_provider.setVisible(provider_has_visible_child)
+            if provider_has_visible_child:
+                kind_has_visible = True
+        if current_kind_header is not None:
+            current_kind_header.setVisible(kind_has_visible)
 
     def _create_connected_row(self, data: PluginRowData) -> PluginRow:
         """Create a :class:`PluginRow` and wire all its signals."""
