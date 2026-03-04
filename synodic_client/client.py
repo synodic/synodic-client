@@ -116,14 +116,15 @@ class Client:
 
         return self._updater.download_update(progress_callback)
 
-    def apply_update_on_exit(self, restart: bool = True) -> None:
+    def apply_update_on_exit(self, restart: bool = True, *, silent: bool = False) -> None:
         """Schedule the update to apply when the application exits.
 
         Args:
-            restart: Whether to restart after applying
+            restart: Whether to restart after applying.
+            silent: When ``True``, suppress the Velopack splash window.
         """
         if self._updater is None:
             logger.warning('Updater not initialized')
             return
 
-        self._updater.apply_update_on_exit(restart=restart)
+        self._updater.apply_update_on_exit(restart=restart, silent=silent)

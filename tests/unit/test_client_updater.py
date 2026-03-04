@@ -105,4 +105,12 @@ class TestClientUpdater:
         with patch.object(client_with_updater._updater, 'apply_update_on_exit') as mock_apply:
             client_with_updater.apply_update_on_exit(restart=False)
 
-        mock_apply.assert_called_once_with(restart=False)
+        mock_apply.assert_called_once_with(restart=False, silent=False)
+
+    @staticmethod
+    def test_apply_update_on_exit_silent(client_with_updater: Client) -> None:
+        """Verify apply_update_on_exit forwards silent flag to updater."""
+        with patch.object(client_with_updater._updater, 'apply_update_on_exit') as mock_apply:
+            client_with_updater.apply_update_on_exit(restart=True, silent=True)
+
+        mock_apply.assert_called_once_with(restart=True, silent=True)

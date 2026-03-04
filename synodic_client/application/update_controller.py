@@ -284,7 +284,7 @@ class UpdateController:
                 f'v{version} installing\u2026',
                 UPDATE_STATUS_AVAILABLE_STYLE,
             )
-            self._apply_update()
+            self._apply_update(silent=True)
             return
 
         # Manual mode — show ready banner and let user choose when to restart
@@ -303,13 +303,18 @@ class UpdateController:
     # Apply
     # ------------------------------------------------------------------
 
-    def _apply_update(self) -> None:
-        """Apply the downloaded update and restart."""
+    def _apply_update(self, *, silent: bool = False) -> None:
+        """Apply the downloaded update and restart.
+
+        Args:
+            silent: When ``True``, suppress the Velopack splash window
+                by using ``wait_exit_then_apply_updates``.
+        """
         if self._client.updater is None:
             return
 
         try:
-            self._client.apply_update_on_exit(restart=True)
+            self._client.apply_update_on_exit(restart=True, silent=silent)
             logger.info('Update scheduled — restarting application')
             self._app.quit()
         except Exception as e:

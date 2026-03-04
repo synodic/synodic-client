@@ -151,13 +151,13 @@ class TestDownloadFinished:
 
     @staticmethod
     def test_auto_apply_calls_apply_update() -> None:
-        """When auto_apply=True, a successful download should call _apply_update."""
+        """When auto_apply=True, a successful download should call _apply_update(silent=True)."""
         ctrl, app, client, banner, settings = _make_controller(auto_apply=True)
 
         with patch.object(ctrl, '_apply_update') as mock_apply:
             ctrl._on_download_finished(True, '2.0.0')
 
-        mock_apply.assert_called_once()
+        mock_apply.assert_called_once_with(silent=True)
 
     @staticmethod
     def test_auto_apply_does_not_show_ready_banner() -> None:
@@ -213,7 +213,7 @@ class TestApplyUpdate:
         ctrl, app, client, banner, settings = _make_controller()
         ctrl._apply_update()
 
-        client.apply_update_on_exit.assert_called_once_with(restart=True)
+        client.apply_update_on_exit.assert_called_once_with(restart=True, silent=False)
         app.quit.assert_called_once()
 
     @staticmethod
