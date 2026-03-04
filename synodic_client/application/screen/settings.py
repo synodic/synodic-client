@@ -28,14 +28,13 @@ from PySide6.QtWidgets import (
 )
 
 from synodic_client.application.icon import app_icon
+from synodic_client.application.screen import _format_relative_time
 from synodic_client.application.screen.card import CardFrame
 from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE, UPDATE_STATUS_CHECKING_STYLE
 from synodic_client.logging import log_path
 from synodic_client.resolution import ResolvedConfig, update_user_config
+from synodic_client.schema import GITHUB_REPO_URL
 from synodic_client.startup import is_startup_registered, register_startup, remove_startup
-from synodic_client.updater import (
-    GITHUB_REPO_URL,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -241,8 +240,6 @@ class SettingsWindow(QMainWindow):
 
             # Last client update timestamp
             if config.last_client_update:
-                from synodic_client.application.screen.screen import _format_relative_time
-
                 relative = _format_relative_time(config.last_client_update)
                 self._last_client_update_label.setText(f'Last updated: {relative}')
                 self._last_client_update_label.setToolTip(f'Last updated: {config.last_client_update}')

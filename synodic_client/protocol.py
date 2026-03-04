@@ -73,3 +73,16 @@ else:
     def remove_protocol() -> None:
         """Remove the ``synodic://`` URI protocol handler registration (no-op on non-Windows)."""
         logger.warning('Protocol removal is only supported on Windows (current: %s)', sys.platform)
+
+
+def extract_uri_from_args(args: list[str] | None = None) -> str | None:
+    """Return the first ``synodic://`` URI from *args*, or ``None``.
+
+    Args:
+        args: Command-line arguments to scan.  Defaults to
+            ``sys.argv[1:]`` when not supplied.
+    """
+    for a in args if args is not None else sys.argv[1:]:
+        if a.lower().startswith(f'{PROTOCOL_NAME}://'):
+            return a
+    return None

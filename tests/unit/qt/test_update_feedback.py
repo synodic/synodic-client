@@ -8,7 +8,8 @@ from packaging.version import Version
 from porringer.schema import PluginInfo
 from porringer.schema.plugin import PluginKind
 
-from synodic_client.application.screen.screen import PluginProviderHeader, PluginRow, PluginRowData
+from synodic_client.application.screen.plugin_row import PluginProviderHeader, PluginRow
+from synodic_client.application.screen.schema import PluginRowData
 
 
 def _make_plugin(

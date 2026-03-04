@@ -1,12 +1,13 @@
-"""Animated loading spinner widget.
+"""Animated loading spinner widgets.
 
-Provides :class:`SpinnerWidget` — a palette-aware spinning arc with an
-optional text label.  Call ``start()`` to show and ``stop()`` to hide.
+Provides :class:`SpinnerCanvas` — a lightweight, palette-aware spinning
+arc that can be sized and styled for any context — and
+:class:`SpinnerWidget` — a self-positioning overlay variant with an
+optional text label.
 
-When constructed with a *parent*, the spinner automatically installs
-itself as a floating overlay that tracks the parent's geometry.
-Consumers never need to override ``resizeEvent``, manage z-order, or
-set a size policy — just call ``start()`` / ``stop()``.
+:class:`SpinnerCanvas` is used directly in plugin rows and action cards
+where only a small inline indicator is needed.  :class:`SpinnerWidget`
+wraps a canvas and centres itself over its parent for modal-style use.
 """
 
 from __future__ import annotations
@@ -15,31 +16,58 @@ from PySide6.QtCore import QEvent, QRect, Qt, QTimer
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
-_SIZE = 24
-_PEN = 3
+_DEFAULT_SIZE = 24
+_DEFAULT_PEN = 3
 _INTERVAL = 50
 _ARC = 90
 _FULL_CIRCLE = 360
 
 
-class _Canvas(QWidget):
-    """Fixed-size widget that paints the spinning arc."""
+class SpinnerCanvas(QWidget):
+    """Fixed-size widget that paints a spinning arc.
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    Fully parameterised so that different call-sites can share the
+    identical paint logic with varying dimensions.
+
+    Args:
+        size: Diameter of the spinner in pixels.
+        pen_width: Stroke width for the arc.
+        interval: Timer tick interval in milliseconds.
+        parent: Optional parent widget.
+    """
+
+    def __init__(
+        self,
+        size: int = _DEFAULT_SIZE,
+        pen_width: int = _DEFAULT_PEN,
+        interval: int = _INTERVAL,
+        parent: QWidget | None = None,
+    ) -> None:
+        """Create a spinner canvas.
+
+        Args:
+            size: Diameter of the spinner in pixels.
+            pen_width: Stroke width for the arc.
+            interval: Timer tick interval in milliseconds.
+            parent: Optional parent widget.
+        """
         super().__init__(parent)
         self._angle = 0
-        self.setFixedSize(_SIZE, _SIZE)
+        self._size = size
+        self._pen_width = pen_width
+        self._interval = interval
+        self.setFixedSize(size, size)
 
     def paintEvent(self, _event: object) -> None:
         """Draw a muted track circle and the animated highlight arc."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        m = _PEN // 2 + 1
-        rect = QRect(m, m, _SIZE - 2 * m, _SIZE - 2 * m)
+        m = self._pen_width // 2 + 1
+        rect = QRect(m, m, self._size - 2 * m, self._size - 2 * m)
 
         for colour, span in ((self.palette().mid(), _FULL_CIRCLE), (self.palette().highlight(), _ARC)):
-            pen = QPen(colour, _PEN)
+            pen = QPen(colour, self._pen_width)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
             if span == _FULL_CIRCLE:
@@ -76,7 +104,7 @@ class SpinnerWidget(QWidget):
         super().__init__(parent)
         self.hide()
 
-        self._canvas = _Canvas(self)
+        self._canvas = SpinnerCanvas(parent=self)
         self._timer = QTimer(self)
         self._timer.setInterval(_INTERVAL)
         self._timer.timeout.connect(self._canvas.tick)

@@ -16,8 +16,8 @@ import logging
 from porringer.backend.command.core.action_builder import PHASE_ORDER
 from porringer.schema import SetupAction, SetupActionResult, SkipReason
 from porringer.schema.plugin import PluginKind
-from PySide6.QtCore import QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from synodic_client.application.screen import ACTION_KIND_LABELS, format_cli_command, skip_reason_label
+from synodic_client.application.screen.spinner import SpinnerCanvas
 from synodic_client.application.theme import (
     ACTION_CARD_COMMAND_STYLE,
     ACTION_CARD_DESC_STYLE,
@@ -66,9 +67,6 @@ _UPDATE_AVAILABLE_COLOR = QColor('#d7ba7d')
 #: Timer interval for per-card inline spinner (ms).
 _SPINNER_INTERVAL = 50
 
-#: Arc span for per-card spinner (degrees × 16 for Qt drawArc).
-_SPINNER_ARC = 90
-
 
 #: Sort priority derived from porringer's execution phase order so the
 #: display order always matches the order actions actually execute.
@@ -99,62 +97,6 @@ def action_sort_key(action: SetupAction) -> int:
     its plugins).
     """
     return _KIND_ORDER.get(action.kind, len(PHASE_ORDER))
-
-
-def _format_command(action: SetupAction) -> str:
-    """Return a short CLI command string for display.
-
-    Wraps :func:`~synodic_client.application.screen.format_cli_command`
-    but returns an empty string instead of the description fallback so
-    cards only show an explicit command line.
-    """
-    text = format_cli_command(action)
-    return '' if text == action.description else text
-
-
-# ---------------------------------------------------------------------------
-# _CardSpinner — tiny per-card inline spinner
-# ---------------------------------------------------------------------------
-
-
-class _CardSpinner(QWidget):
-    """Tiny spinning arc used inside an :class:`ActionCard` while checking.
-
-    The spinner replaces the status text label during the dry-run check
-    phase and is hidden once the result arrives.
-    """
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._angle = 0
-        self.setFixedSize(ACTION_CARD_SPINNER_SIZE, ACTION_CARD_SPINNER_SIZE)
-
-    def paintEvent(self, _event: object) -> None:
-        """Draw the muted track and animated highlight arc."""
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        m = ACTION_CARD_SPINNER_PEN // 2 + 1
-        rect = QRect(m, m, self.width() - 2 * m, self.height() - 2 * m)
-
-        # Track circle
-        track_pen = QPen(self.palette().mid(), ACTION_CARD_SPINNER_PEN)
-        track_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(track_pen)
-        painter.drawEllipse(rect)
-
-        # Highlight arc
-        hl_pen = QPen(self.palette().highlight(), ACTION_CARD_SPINNER_PEN)
-        hl_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(hl_pen)
-        painter.drawArc(rect, self._angle * 16, _SPINNER_ARC * 16)
-
-        painter.end()
-
-    def tick(self) -> None:
-        """Advance the arc and repaint."""
-        self._angle = (self._angle - 10) % 360
-        self.update()
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +239,11 @@ class ActionCard(QFrame):
         top.addWidget(self._version_label)
 
         # Inline spinner (replaces status text while checking)
-        self._spinner_canvas = _CardSpinner(self)
+        self._spinner_canvas = SpinnerCanvas(
+            size=ACTION_CARD_SPINNER_SIZE,
+            pen_width=ACTION_CARD_SPINNER_PEN,
+            parent=self,
+        )
         self._spinner_canvas.hide()
         self._spinner_timer = QTimer(self)
         self._spinner_timer.setInterval(_SPINNER_INTERVAL)
@@ -418,7 +364,7 @@ class ActionCard(QFrame):
             self._desc_label.hide()
 
         # CLI command (always visible when present)
-        cmd_text = _format_command(action)
+        cmd_text = format_cli_command(action, suppress_description=True)
         if cmd_text:
             self._command_label.setText(cmd_text)
             self._command_row.show()
@@ -461,7 +407,7 @@ class ActionCard(QFrame):
         """
         if self._is_skeleton:
             return
-        cmd_text = _format_command(action)
+        cmd_text = format_cli_command(action, suppress_description=True)
         if cmd_text:
             self._command_label.setText(cmd_text)
             self._command_row.show()

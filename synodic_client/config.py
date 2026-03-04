@@ -20,7 +20,7 @@ import os
 import sys
 from pathlib import Path
 
-from pydantic import BaseModel
+from synodic_client.schema import BuildConfig, UserConfig
 
 logger = logging.getLogger(__name__)
 
@@ -53,100 +53,6 @@ def set_dev_mode(enabled: bool) -> None:
 def is_dev_mode() -> bool:
     """Return whether dev-mode namespacing is active."""
     return _DevMode.enabled
-
-
-# ---------------------------------------------------------------------------
-# BuildConfig — read-only, lives next to the executable
-# ---------------------------------------------------------------------------
-
-
-class BuildConfig(BaseModel):
-    """Read-only configuration embedded next to the executable.
-
-    Written by the packaging script (e.g. ``pdm run package -- --local-source``).
-    Only contains the two fields the build system needs to seed.
-    """
-
-    # URL or local file path for Velopack releases.
-    update_source: str | None = None
-
-    # Update channel: "stable" or "dev".
-    update_channel: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# UserConfig — read-write, lives in the OS data directory
-# ---------------------------------------------------------------------------
-
-
-class UserConfig(BaseModel):
-    """User-scoped configuration persisted in the OS application data directory.
-
-    On Windows: ``%LOCALAPPDATA%/Synodic/config.json``.
-
-    Every field is always saved.  There are no sparse/unset semantics —
-    the on-disk file is a complete snapshot of the user's preferences.
-    """
-
-    # URL or local file path for Velopack releases.
-    # None means use the default GitHub release source.
-    update_source: str | None = None
-
-    # Update channel: "stable" or "dev".
-    # None means auto-detect from sys.frozen.
-    update_channel: str | None = None
-
-    # Interval in minutes between automatic update checks.
-    # 0 disables automatic checking.  None uses the default (30 minutes).
-    auto_update_interval_minutes: int | None = None
-
-    # Interval in minutes between tool update checks.
-    # 0 disables automatic checking.  None uses the default (20 minutes).
-    tool_update_interval_minutes: int | None = None
-
-    # Per-plugin and per-package auto-update toggle.
-    #
-    # Maps plugin name to:
-    #   - ``True``  — all packages under this plugin auto-update (default).
-    #   - ``False`` — the entire plugin is disabled from auto-update.
-    #   - ``dict[str, bool]`` — per-package overrides within this plugin.
-    #     Packages with ``True`` auto-update; ``False`` are skipped.
-    #     Packages not listed inherit the manifest-aware default (ON for
-    #     manifest-referenced packages, OFF for global packages).
-    #
-    # ``None`` or absent means all plugins auto-update with manifest-aware defaults.
-    plugin_auto_update: dict[str, bool | dict[str, bool]] | None = None
-
-    # Check for updates during dry-run previews.  When True the preview
-    # will query package indices for newer versions.
-    detect_updates: bool = True
-
-    # Per-manifest pre-release overrides.  Outer key is a normalised
-    # manifest path (or URL for remote manifests) produced by
-    # ``normalize_manifest_key()``.  Inner value is a sorted list of
-    # package names (case-insensitive) that should be checked for
-    # pre-release updates even when the manifest does not set
-    # ``include_prereleases: true`` on the package.  ``None`` means
-    # no overrides anywhere.
-    prerelease_packages: dict[str, list[str]] | None = None
-
-    # Whether downloaded updates should be applied and restarted
-    # automatically without user interaction.  None resolves to True.
-    auto_apply: bool | None = None
-
-    # Whether the application should start automatically with the OS.
-    # None means use the default (enabled).  Explicitly False disables
-    # auto-startup.
-    auto_start: bool | None = None
-
-    # ISO 8601 timestamp of the last successful client self-update.
-    # None means no update has been recorded.
-    last_client_update: str | None = None
-
-    # Per-package timestamps of the last successful tool update.
-    # Maps "plugin/package" → ISO 8601 timestamp.  None means no
-    # tool updates have been recorded.
-    last_tool_updates: dict[str, str] | None = None
 
 
 # ---------------------------------------------------------------------------

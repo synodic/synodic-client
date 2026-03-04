@@ -24,17 +24,11 @@ from synodic_client.application.screen import (
     format_cli_command,
     skip_reason_label,
 )
-from synodic_client.application.screen.install import (
-    InstallConfig,
-    PreviewCallbacks,
-    PreviewConfig,
-    normalize_manifest_key,
-    resolve_local_path,
-    run_install,
-    run_preview,
-)
+from synodic_client.application.screen.install_workers import run_install, run_preview
+from synodic_client.application.screen.schema import InstallConfig, PreviewCallbacks, PreviewConfig
+from synodic_client.application.uri import normalize_manifest_key, resolve_local_path
 
-_DOWNLOAD_PATCH = 'synodic_client.application.screen.install.API.download'
+_DOWNLOAD_PATCH = 'synodic_client.application.screen.install_workers.API.download'
 _EXPECTED_CHECKED_COUNT = 2
 
 

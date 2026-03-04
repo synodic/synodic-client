@@ -10,23 +10,21 @@ For non-installed (development) environments, updates are not supported.
 import logging
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from enum import Enum, StrEnum, auto
 from typing import Any
 
 import velopack
 from packaging.version import Version
 
 from synodic_client.protocol import remove_protocol
+from synodic_client.schema import (
+    UpdateChannel,
+    UpdateConfig,
+    UpdateInfo,
+    UpdateState,
+)
 from synodic_client.startup import remove_startup
 
 logger = logging.getLogger(__name__)
-
-# GitHub repository base URL.  Transformed into a release-asset URL
-# by :func:`github_release_asset_url` at resolution time so that
-# Velopack's ``HttpSource`` can fetch ``releases.{channel}.json``
-# from the correct GitHub Releases download path.
-GITHUB_REPO_URL = 'https://github.com/synodic/synodic-client'
 
 # Fixed tag used for rolling development releases on GitHub.
 _DEV_RELEASE_TAG = 'dev'
@@ -99,88 +97,6 @@ def github_release_asset_url(repo_url: str, channel: UpdateChannel) -> str:
 
 
 # Map sys.platform values to Velopack channel suffixes
-_PLATFORM_SUFFIXES: dict[str, str] = {
-    'win32': 'win',
-    'linux': 'linux',
-    'darwin': 'osx',
-}
-
-
-def platform_suffix() -> str:
-    """Return the Velopack channel suffix for the current platform."""
-    try:
-        return _PLATFORM_SUFFIXES[sys.platform]
-    except KeyError:
-        raise RuntimeError(f'Unsupported platform for updates: {sys.platform}') from None
-
-
-class UpdateChannel(StrEnum):
-    """Update channel selection."""
-
-    STABLE = 'stable'
-    DEVELOPMENT = 'development'
-
-
-class UpdateState(Enum):
-    """State of an update operation."""
-
-    NO_UPDATE = auto()
-    UPDATE_AVAILABLE = auto()
-    DOWNLOADING = auto()
-    DOWNLOADED = auto()
-    APPLYING = auto()
-    APPLIED = auto()
-    FAILED = auto()
-
-
-@dataclass
-class UpdateInfo:
-    """Information about an available update."""
-
-    available: bool
-    current_version: Version
-    latest_version: Version | None = None
-    error: str | None = None
-
-    # Internal: Velopack update info for download/apply
-    _velopack_info: Any = field(default=None, repr=False)
-
-
-# Default interval for automatic update checks (minutes)
-DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES = 5
-
-# Default interval for tool update checks (minutes)
-DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES = 5
-
-
-@dataclass
-class UpdateConfig:
-    """Configuration for the updater."""
-
-    # GitHub repository URL for Velopack to discover releases
-    repo_url: str = GITHUB_REPO_URL
-
-    # Channel determines whether to use dev or stable releases
-    channel: UpdateChannel = UpdateChannel.STABLE
-
-    # Interval in minutes between automatic update checks (0 = disabled)
-    auto_update_interval_minutes: int = DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES
-
-    # Interval in minutes between tool update checks (0 = disabled)
-    tool_update_interval_minutes: int = DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
-
-    @property
-    def channel_name(self) -> str:
-        """Get the channel name for Velopack.
-
-        Combines the update track (dev/stable) with a platform suffix
-        so each OS has its own release manifest and nupkg files.
-        """
-        base = 'dev' if self.channel == UpdateChannel.DEVELOPMENT else 'stable'
-        suffix = platform_suffix()
-        return f'{base}-{suffix}'
-
-
 class Updater:
     """Handles self-update operations using Velopack."""
 
@@ -467,7 +383,10 @@ def _on_before_uninstall(version: str) -> None:
         logger.warning('Auto-startup removal failed during uninstall hook', exc_info=True)
 
 
-_velopack_initialized = False
+class _VelopackState:
+    """Module-level mutable state (avoids ``global`` statements)."""
+
+    initialized: bool = False
 
 
 def initialize_velopack() -> None:
@@ -484,10 +403,9 @@ def initialize_velopack() -> None:
         The SDK's callback hooks only accept ``PyCFunction`` — add an
         uninstall hook here when that is fixed upstream.
     """
-    global _velopack_initialized  # noqa: PLW0603
-    if _velopack_initialized:
+    if _VelopackState.initialized:
         return
-    _velopack_initialized = True
+    _VelopackState.initialized = True
 
     logger.info('Initializing Velopack (exe=%s)', sys.executable)
     try:

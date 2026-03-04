@@ -12,17 +12,15 @@ from porringer.schema import ManifestDirectory
 from porringer.schema.plugin import PluginInfo, PluginKind
 from PySide6.QtWidgets import QLabel, QPushButton
 
-from synodic_client.application.screen.screen import (
+from synodic_client.application.screen.plugin_row import (
     FilterChip,
-    PackageEntry,
     PluginKindHeader,
     PluginProviderHeader,
     PluginRow,
-    PluginRowData,
     ProjectChildRow,
-    ProjectInstance,
-    ToolsView,
 )
+from synodic_client.application.screen.schema import PackageEntry, PluginRowData, ProjectInstance
+from synodic_client.application.screen.screen import ToolsView
 from synodic_client.resolution import ResolvedConfig
 
 # Named constants for expected counts (avoids PLR2004)

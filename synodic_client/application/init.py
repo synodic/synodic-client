@@ -23,7 +23,11 @@ from synodic_client.startup import register_startup, remove_startup
 
 logger = logging.getLogger(__name__)
 
-_preamble_done = False
+
+class _PreambleState:
+    """Module-level mutable state (avoids ``global`` statements)."""
+
+    done: bool = False
 
 
 def run_startup_preamble(exe_path: str | None = None) -> None:
@@ -39,10 +43,9 @@ def run_startup_preamble(exe_path: str | None = None) -> None:
         exe_path: Absolute path to the application executable.  Defaults
             to ``sys.executable`` when not supplied.
     """
-    global _preamble_done  # noqa: PLW0603
-    if _preamble_done:
+    if _PreambleState.done:
         return
-    _preamble_done = True
+    _PreambleState.done = True
 
     if exe_path is None:
         exe_path = sys.executable

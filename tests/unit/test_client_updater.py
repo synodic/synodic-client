@@ -6,7 +6,7 @@ import pytest
 from packaging.version import Version
 
 from synodic_client.client import Client
-from synodic_client.updater import UpdateConfig, UpdateInfo
+from synodic_client.schema import UpdateConfig, UpdateInfo
 
 
 @pytest.fixture

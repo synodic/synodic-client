@@ -24,6 +24,7 @@ from synodic_client.application.uri import parse_uri
 from synodic_client.client import Client
 from synodic_client.config import set_dev_mode
 from synodic_client.logging import configure_logging
+from synodic_client.protocol import extract_uri_from_args
 from synodic_client.resolution import (
     ResolvedConfig,
     resolve_config,
@@ -187,8 +188,5 @@ def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
         loop.run_forever()
 
 
-_PROTOCOL_SCHEME = 'synodic'
-
 if __name__ == '__main__':
-    _uri = next((a for a in sys.argv[1:] if a.lower().startswith(f'{_PROTOCOL_SCHEME}://')), None)
-    application(uri=_uri)
+    application(uri=extract_uri_from_args())

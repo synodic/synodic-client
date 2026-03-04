@@ -10,7 +10,8 @@ from typing import LiteralString
 
 from packaging.version import Version
 
-from synodic_client.updater import UpdateConfig, UpdateInfo, Updater
+from synodic_client.schema import UpdateConfig, UpdateInfo
+from synodic_client.updater import Updater
 
 logger = logging.getLogger(__name__)
 

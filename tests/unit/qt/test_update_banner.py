@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from synodic_client.application.screen.update_banner import UpdateBanner, UpdateBannerState
+from synodic_client.application.screen.schema import UpdateBannerState
+from synodic_client.application.screen.update_banner import UpdateBanner
 
 _PROGRESS_MAX = 100
 _TEST_PROGRESS = 42

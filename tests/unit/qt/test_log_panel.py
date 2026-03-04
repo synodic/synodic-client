@@ -17,13 +17,14 @@ from porringer.schema import (
 )
 from porringer.schema.plugin import PluginKind
 
-from synodic_client.application.screen.install import InstallCallbacks, run_install
+from synodic_client.application.screen.install_workers import run_install
 from synodic_client.application.screen.log_panel import (
     CHEVRON_DOWN,
     CHEVRON_RIGHT,
     ActionLogSection,
     ExecutionLogPanel,
 )
+from synodic_client.application.screen.schema import InstallCallbacks
 from synodic_client.application.theme import (
     LOG_COLOR_ERROR,
     LOG_COLOR_PHASE,

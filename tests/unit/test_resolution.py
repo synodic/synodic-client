@@ -4,21 +4,21 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from synodic_client.config import BuildConfig, UserConfig
 from synodic_client.resolution import (
     ResolvedConfig,
     resolve_auto_update_scope,
     resolve_config,
-    resolve_enabled_plugins,
     resolve_update_config,
     seed_user_config_from_build,
     update_user_config,
 )
-from synodic_client.updater import (
+from synodic_client.schema import (
     DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
     DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
     GITHUB_REPO_URL,
+    BuildConfig,
     UpdateChannel,
+    UserConfig,
 )
 
 # ---------------------------------------------------------------------------
@@ -217,54 +217,6 @@ class TestUpdateUserConfig:
 
         saved = mock_save.call_args.args[0]
         assert saved.update_channel == 'dev'
-
-
-# ---------------------------------------------------------------------------
-# resolve_enabled_plugins
-# ---------------------------------------------------------------------------
-
-
-class TestResolveEnabledPlugins:
-    """Tests for resolve_enabled_plugins."""
-
-    @staticmethod
-    def test_none_when_no_mapping() -> None:
-        """Verify None is returned when plugin_auto_update is unset."""
-        config = _make_resolved()
-        result = resolve_enabled_plugins(config, ['pip', 'pipx', 'git'])
-        assert result is None
-
-    @staticmethod
-    def test_none_when_all_enabled() -> None:
-        """Verify None when all entries are True."""
-        config = _make_resolved(plugin_auto_update={'pip': True, 'pipx': True})
-        result = resolve_enabled_plugins(config, ['pip', 'pipx', 'git'])
-        assert result is None
-
-    @staticmethod
-    def test_filters_disabled_plugins() -> None:
-        """Verify disabled plugins are excluded from the list."""
-        config = _make_resolved(plugin_auto_update={'pipx': False})
-        result = resolve_enabled_plugins(config, ['pip', 'pipx', 'git'])
-        assert result is not None
-        assert 'pipx' not in result
-        assert 'pip' in result
-        assert 'git' in result
-
-    @staticmethod
-    def test_empty_mapping_returns_none() -> None:
-        """Verify an empty dict behaves like None."""
-        config = _make_resolved(plugin_auto_update={})
-        result = resolve_enabled_plugins(config, ['pip'])
-        assert result is None
-
-    @staticmethod
-    def test_nested_dict_is_not_false() -> None:
-        """Verify a nested dict entry is not treated as disabled."""
-        config = _make_resolved(plugin_auto_update={'uv': {'ruff': True}})
-        result = resolve_enabled_plugins(config, ['uv', 'pip'])
-        # 'uv' has a dict value (not False) so it should still be enabled
-        assert result is None
 
 
 # ---------------------------------------------------------------------------

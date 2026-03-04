@@ -9,7 +9,6 @@ to avoid stalling the GUI.
 import asyncio
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from porringer.api import API
@@ -18,8 +17,9 @@ from porringer.core.schema import PackageRef
 from porringer.schema import ProgressEventKind, SetupParameters, SkipReason, SyncStrategy
 from porringer.schema.execution import SetupActionResult
 
+from synodic_client.application.schema import ToolUpdateResult
 from synodic_client.client import Client
-from synodic_client.updater import UpdateInfo
+from synodic_client.schema import UpdateInfo
 
 logger = logging.getLogger(__name__)
 
@@ -62,18 +62,6 @@ async def download_update(
         return client.download_update(progress_callback)
 
     return await loop.run_in_executor(None, _run)
-
-
-@dataclass(slots=True)
-class ToolUpdateResult:
-    """Summary of a tool-update run across cached manifests."""
-
-    manifests_processed: int = 0
-    updated: int = 0
-    already_latest: int = 0
-    failed: int = 0
-    updated_packages: set[str] = field(default_factory=set)
-    """Package names that were successfully upgraded."""
 
 
 async def run_tool_updates(

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 from synodic_client.application.screen.settings import SettingsWindow
 from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE
 from synodic_client.resolution import ResolvedConfig
-from synodic_client.updater import DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES, DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
+from synodic_client.schema import DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES, DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
 
 # ---------------------------------------------------------------------------
 # Helpers

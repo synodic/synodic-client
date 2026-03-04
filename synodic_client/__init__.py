@@ -3,13 +3,13 @@
 import importlib.metadata
 
 from synodic_client.client import Client
-from synodic_client.updater import (
+from synodic_client.schema import (
     UpdateChannel,
     UpdateConfig,
     UpdateInfo,
-    Updater,
     UpdateState,
 )
+from synodic_client.updater import Updater
 
 try:
     __version__ = importlib.metadata.version('synodic_client')

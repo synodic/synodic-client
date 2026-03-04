@@ -16,53 +16,24 @@ from __future__ import annotations
 
 import logging
 import sys
-from dataclasses import dataclass
 
 from synodic_client.config import (
-    UserConfig,
     load_build_config,
     load_user_config,
     save_user_config,
 )
-from synodic_client.updater import (
+from synodic_client.schema import (
     DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
     DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
     GITHUB_REPO_URL,
+    ResolvedConfig,
     UpdateChannel,
     UpdateConfig,
-    github_release_asset_url,
+    UserConfig,
 )
+from synodic_client.updater import github_release_asset_url
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# ResolvedConfig — immutable runtime snapshot
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ResolvedConfig:
-    """Immutable runtime configuration snapshot.
-
-    Constructed by :func:`resolve_config` from the merged
-    ``BuildConfig`` + ``UserConfig`` layers.  Every field has a
-    concrete, non-``None`` value (except ``update_source`` and
-    ``prerelease_packages`` where ``None`` is a valid semantic value
-    meaning "use default" / "no overrides").
-    """
-
-    update_source: str | None
-    update_channel: str
-    auto_update_interval_minutes: int
-    tool_update_interval_minutes: int
-    plugin_auto_update: dict[str, bool | dict[str, bool]] | None
-    detect_updates: bool
-    prerelease_packages: dict[str, list[str]] | None
-    auto_apply: bool
-    auto_start: bool
-    last_client_update: str | None
-    last_tool_updates: dict[str, str] | None
 
 
 # ---------------------------------------------------------------------------
@@ -210,34 +181,6 @@ def resolve_update_config(config: ResolvedConfig) -> UpdateConfig:
         auto_update_interval_minutes=config.auto_update_interval_minutes,
         tool_update_interval_minutes=config.tool_update_interval_minutes,
     )
-
-
-def resolve_enabled_plugins(
-    config: ResolvedConfig,
-    all_plugin_names: list[str],
-) -> list[str] | None:
-    """Derive the include-list of plugins that should auto-update.
-
-    Returns the list of plugin names whose auto-update is **not** disabled.
-    If all plugins are enabled (the common case), returns ``None`` to
-    indicate "no filtering".
-
-    Args:
-        config: A resolved configuration snapshot.
-        all_plugin_names: Every known plugin name.
-
-    Returns:
-        A list of enabled plugin names, or ``None`` when all are enabled.
-    """
-    mapping = config.plugin_auto_update
-    if not mapping:
-        return None
-
-    disabled = {name for name, enabled in mapping.items() if enabled is False}
-    if not disabled:
-        return None
-
-    return [n for n in all_plugin_names if n not in disabled]
 
 
 def resolve_auto_update_scope(

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from synodic_client.application.screen.install import PreviewPhase
+from synodic_client.application.screen.schema import PreviewPhase
 from synodic_client.application.theme import (
     SIDEBAR_ADD_STYLE,
     SIDEBAR_CLOSE_STYLE,

@@ -13,7 +13,7 @@ _MODULE = 'synodic_client.application.init'
 @pytest.fixture(autouse=True)
 def _reset_preamble_guard() -> None:
     """Reset the idempotency guard before each test."""
-    init_mod._preamble_done = False
+    init_mod._PreambleState.done = False
 
 
 class TestRunStartupPreamble:

@@ -15,7 +15,7 @@ from synodic_client.application.theme import (
 )
 from synodic_client.application.update_controller import UpdateController
 from synodic_client.resolution import ResolvedConfig
-from synodic_client.updater import (
+from synodic_client.schema import (
     DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
     DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
     UpdateInfo,

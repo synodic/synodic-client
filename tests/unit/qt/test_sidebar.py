@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from synodic_client.application.screen.install import PreviewPhase
+from synodic_client.application.screen.schema import PreviewPhase
 from synodic_client.application.screen.sidebar import ManifestItem, ManifestSidebar
 from synodic_client.application.theme import SIDEBAR_WIDTH
 

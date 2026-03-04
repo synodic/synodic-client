@@ -9,12 +9,8 @@ from porringer.schema import SetupAction
 from porringer.schema.plugin import PluginKind
 
 from synodic_client.application.screen.action_card import action_key
-from synodic_client.application.screen.install import (
-    ActionState,
-    PreviewModel,
-    PreviewPhase,
-    normalize_manifest_key,
-)
+from synodic_client.application.screen.schema import ActionState, PreviewModel, PreviewPhase
+from synodic_client.application.uri import normalize_manifest_key
 
 # ---------------------------------------------------------------------------
 # Helpers

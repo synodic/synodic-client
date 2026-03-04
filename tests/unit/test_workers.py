@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from synodic_client.application.workers import ToolUpdateResult
+from synodic_client.application.schema import ToolUpdateResult
 
 
 class TestToolUpdateResult:

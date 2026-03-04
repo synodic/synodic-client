@@ -12,26 +12,15 @@ output to the :class:`~synodic_client.application.screen.log_panel.ExecutionLogP
 from __future__ import annotations
 
 import asyncio
-import enum
 import logging
-import shutil
-import tempfile
-from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
-from urllib.request import url2pathname
 
 from porringer.api import API
 from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.schema import (
-    DownloadParameters,
-    ProgressEvent,
-    ProgressEventKind,
     SetupAction,
     SetupActionResult,
-    SetupParameters,
     SetupResults,
     SkipReason,
     SubActionProgress,
@@ -55,7 +44,17 @@ from PySide6.QtWidgets import (
 from synodic_client.application.screen import skip_reason_label
 from synodic_client.application.screen.action_card import ActionCardList, action_key
 from synodic_client.application.screen.card import CardFrame
+from synodic_client.application.screen.install_workers import run_install, run_preview
 from synodic_client.application.screen.log_panel import ExecutionLogPanel
+from synodic_client.application.screen.schema import (
+    ActionState,
+    InstallCallbacks,
+    InstallConfig,
+    PreviewCallbacks,
+    PreviewConfig,
+    PreviewModel,
+    PreviewPhase,
+)
 from synodic_client.application.theme import (
     ACTION_CARD_SKELETON_BAR_STYLE,
     CARD_SPACING,
@@ -68,229 +67,10 @@ from synodic_client.application.theme import (
     MUTED_STYLE,
     NO_MARGINS,
 )
+from synodic_client.application.uri import normalize_manifest_key, resolve_local_path, safe_rmtree
 from synodic_client.resolution import ResolvedConfig, update_user_config
 
 logger = logging.getLogger(__name__)
-
-
-def normalize_manifest_key(path_or_url: str) -> str:
-    """Return a canonical key for a manifest path or URL.
-
-    Local paths are resolved to absolute form so that the same manifest on
-    disk always maps to the same config entry regardless of how it was
-    referenced (relative, symlinked, etc.).  Remote URLs are returned
-    unchanged.
-    """
-    parsed = urlparse(path_or_url)
-    if parsed.scheme in {'http', 'https'}:
-        return path_or_url
-    try:
-        return str(Path(path_or_url).resolve())
-    except Exception:
-        return path_or_url
-
-
-# ---------------------------------------------------------------------------
-# PreviewPhase / ActionState / PreviewModel — data layer
-# ---------------------------------------------------------------------------
-
-
-class PreviewPhase(enum.Enum):
-    """Lifecycle phase of a :class:`SetupPreviewWidget`.
-
-    The widget transitions through these phases and uses them to decide
-    whether certain operations (like reloading the preview or toggling
-    buttons) are allowed.  Having an explicit enum replaces the previous
-    ``_installing`` boolean flag and status-label-text-based implicit state.
-    """
-
-    IDLE = 'idle'
-    """No preview loaded."""
-
-    LOADING = 'loading'
-    """Skeleton placeholders displayed; preview worker running."""
-
-    PREVIEWING = 'previewing'
-    """Cards populated; dry-run status checks in progress."""
-
-    READY = 'ready'
-    """Dry-run complete; install button may be enabled."""
-
-    INSTALLING = 'installing'
-    """Install worker running."""
-
-    DONE = 'done'
-    """Install finished; execution logs visible."""
-
-    ERROR = 'error'
-    """Preview or install failed."""
-
-
-@dataclass
-class ActionState:
-    """Per-action data that survives widget rebuilds.
-
-    Each entry stores the authoritative execution log so that
-    :class:`ActionCard` widgets can be destroyed and recreated
-    without losing output.
-    """
-
-    action: SetupAction
-    """The porringer setup action."""
-
-    status: str = 'Checking\u2026'
-    """Human-readable dry-run status label."""
-
-    log_lines: list[tuple[str, str | None]] = field(default_factory=list)
-    """Accumulated execution log: ``(text, stream)`` pairs."""
-
-
-class PreviewModel:
-    """Data model for a single preview / install session.
-
-    Holds all state that the :class:`SetupPreviewWidget` needs to
-    display and that must survive :class:`ActionCard` widget destruction.
-    The model is replaced wholesale when a new preview is loaded; during
-    an install it is updated in-place and outlives any UI refresh.
-    """
-
-    def __init__(self) -> None:
-        """Initialise a blank preview model."""
-        self.phase: PreviewPhase = PreviewPhase.IDLE
-        self.preview: SetupResults | None = None
-        self.manifest_path: Path | None = None
-        self.manifest_key: str | None = None
-        self.project_directory: Path | None = None
-        self.plugin_installed: dict[str, bool] = {}
-        self.prerelease_overrides: set[str] = set()
-        self.action_states: list[ActionState] = []
-        self._action_state_map: dict[tuple[object, ...], ActionState] = {}
-        self._action_state_map_len: int = 0
-        self.upgradable_keys: set[tuple[object, ...]] = set()
-        self.checked_count: int = 0
-        self.completed_count: int = 0
-        self.temp_dir: str | None = None
-
-    # -- Computed helpers --------------------------------------------------
-
-    def _ensure_action_state_map(self) -> dict[tuple[object, ...], ActionState]:
-        """Return the action-key → state lookup, rebuilding if stale."""
-        if len(self.action_states) != self._action_state_map_len:
-            self._action_state_map = {action_key(s.action): s for s in self.action_states}
-            self._action_state_map_len = len(self.action_states)
-        return self._action_state_map
-
-    @property
-    def actionable_count(self) -> int:
-        """Number of needed + upgradable actions."""
-        needed = sum(1 for s in self.action_states if s.status == 'Needed')
-        upgradable = len(self.upgradable_keys)
-        return needed + upgradable
-
-    @property
-    def install_enabled(self) -> bool:
-        """Whether the install button should be enabled."""
-        if self.phase not in {PreviewPhase.READY}:
-            return False
-        return self.actionable_count > 0 or any(s.action.kind is None for s in self.action_states)
-
-    def action_state_for(self, act: SetupAction) -> ActionState | None:
-        """Look up :class:`ActionState` by content key (O(1) amortized)."""
-        return self._ensure_action_state_map().get(action_key(act))
-
-    def has_same_manifest(self, key: str) -> bool:
-        """Return ``True`` if *key* matches the current manifest key."""
-        return self.manifest_key is not None and self.manifest_key == normalize_manifest_key(key)
-
-
-@dataclass(frozen=True, slots=True)
-class InstallConfig:
-    """Optional execution parameters for :class:`InstallWorker`."""
-
-    project_directory: Path | None = None
-    strategy: SyncStrategy = SyncStrategy.MINIMAL
-    prerelease_packages: set[str] | None = field(default=None)
-
-
-@dataclass(frozen=True, slots=True)
-class InstallCallbacks:
-    """Callbacks for :func:`run_install` progress reporting."""
-
-    on_action_started: Callable[[SetupAction], None] | None = None
-    """Called when an action begins execution."""
-
-    on_sub_progress: Callable[[SetupAction, SubActionProgress], None] | None = None
-    """Called for sub-action progress events."""
-
-    on_progress: Callable[[SetupAction, SetupActionResult], None] | None = None
-    """Called when a single action completes."""
-
-
-async def run_install(
-    porringer: API,
-    manifest_path: Path,
-    config: InstallConfig | None = None,
-    callbacks: InstallCallbacks | None = None,
-    *,
-    plugins: DiscoveredPlugins | None = None,
-) -> SetupResults:
-    """Execute setup actions via porringer and stream progress.
-
-    Runs on the caller's event loop (typically the qasync main-thread
-    loop).  Callbacks are invoked between ``await`` points so the GUI
-    stays responsive without cross-thread signalling.
-
-    Args:
-        porringer: The porringer API instance.
-        manifest_path: Path to the manifest file to execute.
-        config: Optional execution parameters (directory, strategy,
-            prerelease overrides).
-        callbacks: Optional progress callbacks.
-        plugins: Pre-discovered plugins to pass through to porringer,
-            avoiding redundant discovery.
-
-    Returns:
-        Aggregated :class:`SetupResults`.
-    """
-    cfg = config or InstallConfig()
-    cb = callbacks or InstallCallbacks()
-    params = SetupParameters(
-        paths=[manifest_path],
-        project_directory=cfg.project_directory,
-        strategy=cfg.strategy,
-        prerelease_packages=cfg.prerelease_packages,
-    )
-    actions: list[SetupAction] = []
-    collected: list[SetupActionResult] = []
-    manifest_result: SetupResults | None = None
-
-    async for event in porringer.sync.execute_stream(params, plugins=plugins):
-        if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
-            manifest_result = event.manifest
-            actions = list(event.manifest.actions)
-
-        if event.kind == ProgressEventKind.ACTION_STARTED and event.action and cb.on_action_started is not None:
-            cb.on_action_started(event.action)
-
-        if (
-            event.kind == ProgressEventKind.SUB_ACTION_PROGRESS
-            and event.action
-            and event.sub_action
-            and cb.on_sub_progress is not None
-        ):
-            cb.on_sub_progress(event.action, event.sub_action)
-
-        if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result and event.action:
-            collected.append(event.result)
-            if cb.on_progress is not None:
-                cb.on_progress(event.action, event.result)
-
-    return SetupResults(
-        actions=actions,
-        results=collected,
-        manifest_path=manifest_result.manifest_path if manifest_result else None,
-        metadata=manifest_result.metadata if manifest_result else None,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -1182,7 +962,7 @@ class InstallPreviewWindow(QMainWindow):
         logger.info('Install preview window closing')
         temp = self._preview_widget.model.temp_dir
         if temp:
-            _safe_rmtree(temp)
+            safe_rmtree(temp)
         super().closeEvent(event)
 
     # --- Public API ---
@@ -1208,206 +988,3 @@ class InstallPreviewWindow(QMainWindow):
         """Update the window title when metadata arrives."""
         if hasattr(preview, 'metadata') and preview.metadata and preview.metadata.name:
             self.setWindowTitle(f'Install Preview \u2014 {preview.metadata.name}')
-
-
-@dataclass(frozen=True, slots=True)
-class PreviewCallbacks:
-    """Callbacks for :func:`run_preview` progress reporting."""
-
-    on_manifest_parsed: Callable[[SetupResults, str, str], None] | None = None
-    """``(SetupResults, manifest_path, temp_dir)`` — after JSON load."""
-
-    on_plugins_queried: Callable[[dict[str, bool]], None] | None = None
-    """``(dict[str, bool])`` — plugin → installed mapping."""
-
-    on_preview_ready: Callable[[SetupResults, str, str], None] | None = None
-    """``(SetupResults, manifest_path, temp_dir)`` — CLI commands resolved."""
-
-    on_action_checked: Callable[[int, SetupActionResult], None] | None = None
-    """``(row_index, SetupActionResult)`` — per-action dry-run result."""
-
-
-@dataclass(frozen=True, slots=True)
-class PreviewConfig:
-    """Optional execution parameters for :func:`run_preview`."""
-
-    project_directory: Path | None = None
-    detect_updates: bool = True
-    prerelease_packages: set[str] | None = None
-
-
-@dataclass(slots=True)
-class _DispatchState:
-    """Mutable accumulator for :func:`_dispatch_preview_event`."""
-
-    action_index: dict[int, int] = field(default_factory=dict)
-    got_parsed: bool = False
-
-
-async def _resolve_manifest_path(url: str) -> tuple[Path, str | None]:
-    """Resolve *url* to a local manifest path, downloading if remote.
-
-    Returns:
-        ``(manifest_path, temp_dir)`` — *temp_dir* is ``None`` for local
-        manifests and a temporary directory string for downloads.
-
-    Raises:
-        FileNotFoundError: If a local path does not exist.
-        RuntimeError: If the download fails.
-    """
-    local_path = resolve_local_path(url)
-
-    if local_path is not None:
-        if not local_path.exists():
-            msg = f'Manifest not found:\n{local_path}'
-            raise FileNotFoundError(msg)
-        return local_path, None
-
-    temp_dir = tempfile.mkdtemp(prefix='synodic_install_')
-    dest = Path(temp_dir) / 'porringer.json'
-
-    params = DownloadParameters(url=url, destination=dest, timeout=3)
-    result = await API.download(params)
-
-    if not result.success:
-        _safe_rmtree(temp_dir)
-        msg = f'Failed to download manifest:\n{result.message}'
-        raise RuntimeError(msg)
-
-    return dest, temp_dir
-
-
-def _dispatch_preview_event(
-    event: ProgressEvent,
-    manifest_path: str,
-    temp_dir_str: str,
-    state: _DispatchState,
-    cb: PreviewCallbacks,
-) -> None:
-    """Route a single preview stream event to the appropriate callback.
-
-    Mutates *state* in-place with updated ``action_index`` / ``got_parsed``.
-    """
-    if event.kind == ProgressEventKind.MANIFEST_PARSED and event.manifest:
-        state.action_index = {id(a): i for i, a in enumerate(event.manifest.actions)}
-        if cb.on_manifest_parsed is not None:
-            cb.on_manifest_parsed(event.manifest, manifest_path, temp_dir_str)
-        state.got_parsed = True
-        return
-
-    if event.kind == ProgressEventKind.PLUGINS_DISCOVERED and cb.on_plugins_queried is not None:
-        if event.plugin_availability is not None:
-            cb.on_plugins_queried(event.plugin_availability)
-        elif event.plugin_names is not None:
-            cb.on_plugins_queried({name: True for name in event.plugin_names})
-        return
-
-    if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
-        if not state.got_parsed:
-            state.action_index = {id(a): i for i, a in enumerate(event.manifest.actions)}
-        if cb.on_preview_ready is not None:
-            cb.on_preview_ready(event.manifest, manifest_path, temp_dir_str)
-        return
-
-    if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result and event.action:
-        row = state.action_index.get(id(event.action))
-        if row is not None and cb.on_action_checked is not None:
-            cb.on_action_checked(row, event.result)
-
-
-async def run_preview(
-    porringer: API,
-    url: str,
-    *,
-    config: PreviewConfig | None = None,
-    callbacks: PreviewCallbacks | None = None,
-    plugins: DiscoveredPlugins | None = None,
-) -> None:
-    """Download a manifest and perform a dry-run preview.
-
-    Runs on the caller's event loop (typically the qasync main-thread
-    loop).  Callbacks fire between ``await`` points so the GUI remains
-    responsive without cross-thread signalling.
-
-    Combines two stages:
-
-    1. Download the manifest (if remote) — runs in a thread-pool executor.
-    2. Run ``execute_stream`` with ``dry_run=True`` to stream events.
-
-    Args:
-        porringer: The porringer API instance.
-        url: Manifest URL or local path.
-        config: Optional preview configuration.
-        callbacks: Optional preview callbacks.
-        plugins: Pre-discovered plugins to pass through to porringer,
-            avoiding redundant discovery.
-    """
-    logger.info('run_preview starting for: %s', url)
-    temp_dir: str | None = None
-    cb = callbacks or PreviewCallbacks()
-    cfg = config or PreviewConfig()
-    try:
-        manifest_path, temp_dir = await _resolve_manifest_path(url)
-
-        # Dry-run: parses manifest, resolves actions, and checks status
-        setup_params = SetupParameters(
-            paths=[manifest_path],
-            dry_run=True,
-            project_directory=cfg.project_directory,
-            detect_updates=cfg.detect_updates,
-            prerelease_packages=cfg.prerelease_packages,
-        )
-        state = _DispatchState()
-        temp_dir_str = temp_dir or ''
-        manifest_path_str = str(manifest_path)
-
-        async for event in porringer.sync.execute_stream(setup_params, plugins=plugins):
-            _dispatch_preview_event(
-                event,
-                manifest_path_str,
-                temp_dir_str,
-                state,
-                cb,
-            )
-
-    except asyncio.CancelledError:
-        if temp_dir:
-            _safe_rmtree(temp_dir)
-        raise
-    except Exception:
-        if temp_dir:
-            _safe_rmtree(temp_dir)
-        raise
-
-
-def resolve_local_path(manifest_ref: str) -> Path | None:
-    r"""Return a ``Path`` if *manifest_ref* points to a local file, else ``None``.
-
-    Recognised forms:
-    * ``file:///C:/path/to/porringer.json``
-    * An absolute OS path (``C:\...`` or ``/...``)
-    * A relative path that exists on disk
-    """
-    parsed = urlparse(manifest_ref)
-
-    if parsed.scheme == 'file':
-        # file:///C:/Users/... → C:/Users/...
-        return Path(url2pathname(parsed.path))
-
-    if parsed.scheme in {'http', 'https'}:
-        return None
-
-    # No scheme — treat as a filesystem path
-    candidate = Path(manifest_ref)
-    if candidate.is_absolute() or candidate.exists():
-        return candidate
-
-    return None
-
-
-def _safe_rmtree(path: str) -> None:
-    """Remove a directory tree, ignoring errors."""
-    try:
-        shutil.rmtree(path)
-    except OSError:
-        logger.debug('Failed to clean up temp dir: %s', path)

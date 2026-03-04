@@ -6,8 +6,14 @@ execution log panel live here to avoid circular imports.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from porringer.schema import SetupAction, SkipReason
 from porringer.schema.plugin import PluginKind
+
+_SECONDS_PER_MINUTE = 60
+_MINUTES_PER_HOUR = 60
+_HOURS_PER_DAY = 24
 
 ACTION_KIND_LABELS: dict[PluginKind | None, str] = {
     PluginKind.PACKAGE: 'Package',
@@ -57,15 +63,45 @@ def skip_reason_label(reason: SkipReason | None) -> str:
     return SKIP_REASON_LABELS.get(reason, reason.name.replace('_', ' ').capitalize())
 
 
-def format_cli_command(action: SetupAction) -> str:
+def format_cli_command(action: SetupAction, *, suppress_description: bool = False) -> str:
     """Return a human-readable CLI command string for *action*.
 
     Prefers ``cli_command``, falls back to ``command``, then synthesises
     an ``installer install <package>`` string for package actions, and
     finally returns the action description as a last resort.
+
+    When *suppress_description* is ``True`` the final description
+    fallback returns an empty string instead.
     """
     if parts := (action.cli_command or action.command):
         return ' '.join(parts)
     if action.kind == PluginKind.PACKAGE and action.package:
         return f'{action.installer or "pip"} install {action.package}'
-    return action.description
+    return '' if suppress_description else action.description
+
+
+def _format_relative_time(iso_timestamp: str) -> str:
+    """Format an ISO 8601 timestamp as a human-readable relative time.
+
+    Returns strings like ``'just now'``, ``'5m ago'``, ``'2h ago'``,
+    ``'3d ago'``.  Returns an empty string if the timestamp cannot be
+    parsed.
+    """
+    try:
+        dt = datetime.fromisoformat(iso_timestamp)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        delta = datetime.now(UTC) - dt
+        seconds = max(int(delta.total_seconds()), 0)
+        if seconds < _SECONDS_PER_MINUTE:
+            return 'just now'
+        minutes = seconds // _SECONDS_PER_MINUTE
+        if minutes < _MINUTES_PER_HOUR:
+            return f'{minutes}m ago'
+        hours = minutes // _MINUTES_PER_HOUR
+        if hours < _HOURS_PER_DAY:
+            return f'{hours}h ago'
+        days = hours // _HOURS_PER_DAY
+        return f'{days}d ago'
+    except ValueError, TypeError:
+        return ''

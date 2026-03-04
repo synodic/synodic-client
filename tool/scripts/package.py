@@ -19,7 +19,8 @@ from typing import Annotated
 import typer
 
 from synodic_client import __version__
-from synodic_client.updater import pep440_to_semver, platform_suffix
+from synodic_client.schema import platform_suffix
+from synodic_client.updater import pep440_to_semver
 from tool.scripts.common import ICON_FILE, MAIN_EXE, OUTPUT_DIR, PACK_DIR, PACK_ID, build, kill_running_instances, run
 
 app = typer.Typer(help='Package Synodic Client with PyInstaller and Velopack.')

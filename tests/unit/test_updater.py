@@ -7,17 +7,12 @@ import velopack
 from packaging.version import Version
 
 import synodic_client.updater as updater_mod
+from synodic_client.schema import GITHUB_REPO_URL, UpdateChannel, UpdateConfig, UpdateInfo, UpdateState, platform_suffix
 from synodic_client.updater import (
-    GITHUB_REPO_URL,
-    UpdateChannel,
-    UpdateConfig,
-    UpdateInfo,
     Updater,
-    UpdateState,
     github_release_asset_url,
     initialize_velopack,
     pep440_to_semver,
-    platform_suffix,
 )
 
 
@@ -422,7 +417,7 @@ class TestInitializeVelopack:
     @pytest.fixture(autouse=True)
     def _reset_velopack_guard() -> None:
         """Reset the idempotency guard before each test."""
-        updater_mod._velopack_initialized = False
+        updater_mod._VelopackState.initialized = False
 
     @staticmethod
     def test_initialize_success() -> None:

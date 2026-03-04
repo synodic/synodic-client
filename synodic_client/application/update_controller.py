@@ -29,7 +29,7 @@ from synodic_client.resolution import (
     resolve_update_config,
     update_user_config,
 )
-from synodic_client.updater import UpdateInfo
+from synodic_client.schema import UpdateInfo
 
 if TYPE_CHECKING:
     from synodic_client.application.screen.settings import SettingsWindow

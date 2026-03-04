@@ -15,8 +15,6 @@ The banner slides in/out using a ``QPropertyAnimation`` on
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from enum import Enum, auto
 
 from PySide6.QtCore import (
     QEasingCurve,
@@ -36,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from synodic_client.application.screen.schema import UpdateBannerState, _BannerConfig
 from synodic_client.application.theme import (
     UPDATE_BANNER_ANIMATION_MS,
     UPDATE_BANNER_BTN_STYLE,
@@ -50,29 +49,6 @@ from synodic_client.application.theme import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class UpdateBannerState(Enum):
-    """Visual states for the update banner."""
-
-    HIDDEN = auto()
-    DOWNLOADING = auto()
-    READY = auto()
-    ERROR = auto()
-
-
-@dataclass(frozen=True, slots=True)
-class _BannerConfig:
-    """Bundled visual configuration for a banner state transition."""
-
-    state: UpdateBannerState
-    style: str
-    icon: str
-    text: str
-    text_style: str
-    version: str = ''
-    action_label: str = ''
-    show_progress: bool = False
 
 
 # Height of the banner content (progress variant is slightly taller).
