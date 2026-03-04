@@ -87,6 +87,7 @@ dev = { call = "tool.scripts.dev:main" }
 format = "ruff format"
 lint = { composite = ["analyze", "format", "type-check"] }
 package = { call = "tool.scripts.package:main" }
+version = { call = "tool.scripts.version:main" }
 post_install = { call = "tool.scripts.setup_dev:main" }
 test = "pytest --cov=synodic_client --verbose tests"
 type-check = "pyrefly check"
