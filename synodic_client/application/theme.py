@@ -181,7 +181,7 @@ PLUGIN_ROW_TOGGLE_STYLE = (
 
 PLUGIN_ROW_UPDATE_STYLE = (
     'QPushButton { padding: 1px 4px; border: 1px solid palette(mid); border-radius: 2px;'
-    '  font-size: 10px; min-width: 48px; max-width: 60px; }'
+    '  font-size: 10px; min-width: 52px; max-width: 52px; }'
     'QPushButton:disabled { color: palette(mid); border-color: palette(mid); background: transparent; }'
 )
 """Small inline update button for individual package rows."""
@@ -197,6 +197,39 @@ PLUGIN_ROW_REMOVE_STYLE = (
 
 PLUGIN_ROW_ERROR_STYLE = 'font-size: 11px; color: #f48771;'
 """Transient inline error label shown on a row after a failed action."""
+
+PLUGIN_ROW_STATUS_STYLE = 'font-size: 10px; color: #808080;'
+"""Muted inline status text shown after an auto-update check (e.g. 'Up to date')."""
+
+PLUGIN_ROW_STATUS_UP_TO_DATE_STYLE = 'font-size: 10px; color: #89d185;'
+"""Green status text for 'Up to date'."""
+
+PLUGIN_ROW_STATUS_AVAILABLE_STYLE = 'font-size: 10px; color: #cca700;'
+"""Amber status text for 'vX.Y available'."""
+
+PLUGIN_ROW_TIMESTAMP_STYLE = 'font-size: 10px; color: #666666;'
+"""Muted relative timestamp label (e.g. '5m ago')."""
+
+PLUGIN_ROW_PROJECT_TAG_STYLE = (
+    'QLabel { font-size: 10px; color: #aaaaaa; background: #333333;  border-radius: 8px; padding: 1px 6px; }'
+)
+"""Compact pill-shaped project name tag for inline dependency display."""
+
+PLUGIN_ROW_PROJECT_TAG_TRANSITIVE_STYLE = (
+    'QLabel { font-size: 10px; color: #808080; background: #2a2a2a;'
+    '  border-radius: 8px; padding: 1px 6px; font-style: italic; }'
+)
+"""Dimmed italic project tag for transitive (non-manifest) dependencies."""
+
+# Fixed column widths for visual alignment across rows
+PLUGIN_ROW_AUTO_WIDTH = 36
+"""Fixed width for the inline Auto toggle button."""
+
+PLUGIN_ROW_UPDATE_WIDTH = 52
+"""Fixed width for the inline Update button."""
+
+PLUGIN_ROW_VERSION_MIN_WIDTH = 60
+"""Minimum width for the version label column."""
 
 PLUGIN_ROW_SPACING = 1
 """Pixels between individual tool/package rows."""

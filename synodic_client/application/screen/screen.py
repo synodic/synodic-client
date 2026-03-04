@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 from porringer.api import API
@@ -61,10 +62,18 @@ from synodic_client.application.theme import (
     PLUGIN_ROW_HOST_STYLE,
     PLUGIN_ROW_NAME_STYLE,
     PLUGIN_ROW_PROJECT_STYLE,
+    PLUGIN_ROW_PROJECT_TAG_STYLE,
+    PLUGIN_ROW_PROJECT_TAG_TRANSITIVE_STYLE,
     PLUGIN_ROW_REMOVE_STYLE,
+    PLUGIN_ROW_STATUS_AVAILABLE_STYLE,
+    PLUGIN_ROW_STATUS_STYLE,
+    PLUGIN_ROW_STATUS_UP_TO_DATE_STYLE,
     PLUGIN_ROW_STYLE,
+    PLUGIN_ROW_TIMESTAMP_STYLE,
     PLUGIN_ROW_TOGGLE_STYLE,
     PLUGIN_ROW_UPDATE_STYLE,
+    PLUGIN_ROW_UPDATE_WIDTH,
+    PLUGIN_ROW_VERSION_MIN_WIDTH,
     PLUGIN_ROW_VERSION_STYLE,
     PLUGIN_SECTION_SPACING,
     PLUGIN_TOGGLE_STYLE,
@@ -216,6 +225,12 @@ class PluginRowData:
 
     project_paths: list[str] = field(default_factory=list)
     """Filesystem paths for project-scoped packages."""
+
+    project_instances: list[ProjectInstance] = field(default_factory=list)
+    """Project-scoped occurrences of this package, displayed as inline tags."""
+
+    last_updated: str = ''
+    """ISO 8601 timestamp of the last successful update, or empty."""
 
 
 @dataclass(slots=True)
@@ -439,6 +454,38 @@ class PluginProviderHeader(QFrame):
 
 
 # ---------------------------------------------------------------------------
+# Relative time formatting
+# ---------------------------------------------------------------------------
+
+
+def _format_relative_time(iso_timestamp: str) -> str:
+    """Format an ISO 8601 timestamp as a human-readable relative time.
+
+    Returns strings like ``'just now'``, ``'5m ago'``, ``'2h ago'``,
+    ``'3d ago'``.  Returns an empty string if the timestamp cannot be
+    parsed.
+    """
+    try:
+        dt = datetime.fromisoformat(iso_timestamp)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        delta = datetime.now(UTC) - dt
+        seconds = max(int(delta.total_seconds()), 0)
+        if seconds < 60:
+            return 'just now'
+        minutes = seconds // 60
+        if minutes < 60:
+            return f'{minutes}m ago'
+        hours = minutes // 60
+        if hours < 24:
+            return f'{hours}h ago'
+        days = hours // 24
+        return f'{days}d ago'
+    except ValueError, TypeError:
+        return ''
+
+
+# ---------------------------------------------------------------------------
 # Plugin row — compact package / tool entry
 # ---------------------------------------------------------------------------
 
@@ -489,6 +536,9 @@ class PluginRow(QFrame):
         self._checking_spinner: _RowSpinner | None = None
         self._host_label: QLabel | None = None
         self._project_paths: list[str] = list(data.project_paths)
+        self._project_labels: list[str] = [p.project_label for p in data.project_instances]
+        self._update_status_label: QLabel | None = None
+        self._timestamp_label: QLabel | None = None
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -501,7 +551,7 @@ class PluginRow(QFrame):
     # --- PluginRow construction helpers ---
 
     def _build_name_section(self, layout: QHBoxLayout, data: PluginRowData) -> None:
-        """Add the name, optional host-tool arrow, and project/global labels."""
+        """Add the name, host-tool arrow, project tags, and global label."""
         name_label = QLabel(data.name)
         name_label.setStyleSheet(PLUGIN_ROW_NAME_STYLE)
         layout.addWidget(name_label)
@@ -511,7 +561,15 @@ class PluginRow(QFrame):
             self._host_label.setStyleSheet(PLUGIN_ROW_HOST_STYLE)
             layout.addWidget(self._host_label)
 
-        if data.project:
+        # Inline project-name tags (replaces ProjectChildRow)
+        if data.project_instances:
+            for proj in data.project_instances:
+                tag = QLabel(proj.project_label)
+                style = PLUGIN_ROW_PROJECT_TAG_TRANSITIVE_STYLE if proj.is_transitive else PLUGIN_ROW_PROJECT_TAG_STYLE
+                tag.setStyleSheet(style)
+                tag.setToolTip(f'{proj.project_path}' + (' (transitive)' if proj.is_transitive else ''))
+                layout.addWidget(tag)
+        elif data.project:
             project_label = QLabel(data.project)
             project_label.setStyleSheet(PLUGIN_ROW_PROJECT_STYLE)
             layout.addWidget(project_label)
@@ -521,21 +579,44 @@ class PluginRow(QFrame):
             layout.addWidget(global_label)
 
     def _build_controls(self, layout: QHBoxLayout, data: PluginRowData) -> None:
-        """Add toggle, update, version, and remove controls."""
+        """Add toggle, update, status, version, timestamp, and remove controls.
+
+        Controls are always created in the same order with fixed widths
+        so that columns align vertically across all rows.  Hidden
+        controls still reserve space.
+        """
         if data.show_toggle:
             self._build_toggle(layout, data)
-        if data.has_update:
-            self._build_update_button(layout, data)
+
+        # Update button — always created for alignment, hidden when no update
+        self._build_update_button(layout, data)
+
+        # Inline auto-update status (e.g. "Up to date", "v1.2 available")
+        self._update_status_label = QLabel()
+        self._update_status_label.setStyleSheet(PLUGIN_ROW_STATUS_STYLE)
+        self._update_status_label.hide()
+        layout.addWidget(self._update_status_label)
+
+        # Version
         if data.version:
             version_label = QLabel(data.version)
             version_label.setStyleSheet(PLUGIN_ROW_VERSION_STYLE)
+            version_label.setMinimumWidth(PLUGIN_ROW_VERSION_MIN_WIDTH)
+            version_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             layout.addWidget(version_label)
 
+        # Timestamp
+        if data.last_updated:
+            self._timestamp_label = QLabel(_format_relative_time(data.last_updated))
+            self._timestamp_label.setStyleSheet(PLUGIN_ROW_TIMESTAMP_STYLE)
+            self._timestamp_label.setToolTip(f'Last updated: {data.last_updated}')
+            layout.addWidget(self._timestamp_label)
+
         # Transient inline error label (hidden by default)
-        self._status_label = QLabel()
-        self._status_label.setStyleSheet(PLUGIN_ROW_ERROR_STYLE)
-        self._status_label.hide()
-        layout.addWidget(self._status_label)
+        self._error_label = QLabel()
+        self._error_label.setStyleSheet(PLUGIN_ROW_ERROR_STYLE)
+        self._error_label.hide()
+        layout.addWidget(self._error_label)
 
         self._build_remove_button(layout, data)
 
@@ -559,13 +640,15 @@ class PluginRow(QFrame):
         layout.addWidget(self._checking_spinner)
 
     def _build_update_button(self, layout: QHBoxLayout, data: PluginRowData) -> None:
-        """Add the per-package update button."""
+        """Add the per-package update button (always created, visibility toggled)."""
         update_btn = QPushButton('Update')
         update_btn.setStyleSheet(PLUGIN_ROW_UPDATE_STYLE)
+        update_btn.setFixedWidth(PLUGIN_ROW_UPDATE_WIDTH)
         update_btn.setToolTip(f'Update {data.name}')
         update_btn.clicked.connect(
             lambda: self.update_requested.emit(self._plugin_name, self._package_name),
         )
+        update_btn.setVisible(data.has_update)
         self._update_btn = update_btn
         layout.addWidget(update_btn)
 
@@ -621,15 +704,34 @@ class PluginRow(QFrame):
             self._remove_btn.setText('\u00d7')
             self._remove_btn.setEnabled(True)
 
+    def set_update_status(self, text: str, style: str = '') -> None:
+        """Show inline auto-update check status (e.g. 'Up to date')."""
+        if self._update_status_label is None:
+            return
+        self._update_status_label.setText(text)
+        if style:
+            self._update_status_label.setStyleSheet(style)
+        self._update_status_label.setVisible(bool(text))
+
+    def update_timestamp(self) -> None:
+        """Refresh the relative time display on the timestamp label."""
+        if self._timestamp_label is not None:
+            tip = self._timestamp_label.toolTip()
+            # Extract ISO timestamp from tooltip
+            prefix = 'Last updated: '
+            if tip.startswith(prefix):
+                iso = tip[len(prefix) :]
+                self._timestamp_label.setText(_format_relative_time(iso))
+
     def set_error(self, message: str) -> None:
         """Show a transient inline error that auto-hides after ~5 seconds."""
-        self._status_label.setText(message)
-        self._status_label.show()
-        QTimer.singleShot(5000, self._status_label.hide)
+        self._error_label.setText(message)
+        self._error_label.show()
+        QTimer.singleShot(5000, self._error_label.hide)
 
     def clear_error(self) -> None:
         """Immediately hide the inline error label."""
-        self._status_label.hide()
+        self._error_label.hide()
 
 
 # ---------------------------------------------------------------------------
@@ -786,8 +888,9 @@ class ToolsView(QWidget):
         self._refresh_in_progress = False
         self._check_in_progress = False
         self._updates_checked = False
-        self._updates_available: dict[str, set[str]] = {}
+        self._updates_available: dict[str, dict[str, str]] = {}
         self._directories: list[ManifestDirectory] = []
+        self._timestamp_timer: QTimer | None = None
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -842,6 +945,12 @@ class ToolsView(QWidget):
         outer.addWidget(self._scroll)
 
         self._loading_spinner = SpinnerWidget('Loading tools\u2026', parent=self)
+
+        # Periodic timer to refresh relative timestamps (every 60s)
+        self._timestamp_timer = QTimer(self)
+        self._timestamp_timer.setInterval(60_000)
+        self._timestamp_timer.timeout.connect(self._refresh_timestamps)
+        self._timestamp_timer.start()
 
     # --- Public API ---
 
@@ -987,14 +1096,12 @@ class ToolsView(QWidget):
     ) -> None:
         """Build the provider header and package rows for a single plugin.
 
-        For each package a top-level :class:`PluginRow` is created for
-        the global instance (with update/remove/toggle controls).
-        Directly below it, indented :class:`ProjectChildRow` widgets
-        show each project-scoped occurrence — read-only with a navigate
-        button to switch to the Projects tab.
+        For each package a :class:`PluginRow` is created with inline
+        project-name tags for project-scoped occurrences.  Separate
+        ``ProjectChildRow`` widgets are no longer used.
         """
         auto_val = auto_update_map.get(plugin.name, True)
-        plugin_updates = self._updates_available.get(plugin.name, set())
+        plugin_updates = self._updates_available.get(plugin.name, {})
 
         provider = PluginProviderHeader(
             plugin,
@@ -1010,10 +1117,12 @@ class ToolsView(QWidget):
         plugin_manifest = data.manifest_packages.get(plugin.name, set())
         raw_packages = data.packages_map.get(plugin.name, [])
         display_packages = self._build_display_packages(raw_packages, plugin_manifest)
+        tool_timestamps = self._config.last_tool_updates or {}
 
         if display_packages:
             for pkg in display_packages:
                 pkg_auto = self._resolve_package_auto_update(auto_val, pkg.name, pkg.is_global)
+                ts_key = f'{plugin.name}/{pkg.name}'
                 row = self._create_connected_row(
                     PluginRowData(
                         name=pkg.name,
@@ -1024,19 +1133,11 @@ class ToolsView(QWidget):
                         has_update=pkg.name in plugin_updates,
                         is_global=pkg.is_global,
                         host_tool=pkg.host_tool,
+                        project_instances=list(pkg.project_instances),
+                        last_updated=tool_timestamps.get(ts_key, ''),
                     ),
                 )
                 self._insert_section_widget(row)
-
-                # Project child rows — always expanded inline
-                for proj in pkg.project_instances:
-                    child = ProjectChildRow(
-                        proj,
-                        package_name='' if pkg.is_global else pkg.name,
-                        parent=self._container,
-                    )
-                    child.navigate_to_project.connect(self.navigate_to_project_requested.emit)
-                    self._insert_section_widget(child)
         else:
             version_text = str(plugin.tool_version) if plugin.tool_version is not None else ''
             row = PluginRow(PluginRowData(name=plugin.name, version=version_text), parent=self._container)
@@ -1211,17 +1312,17 @@ class ToolsView(QWidget):
             elif isinstance(widget, PluginRow):
                 if not self._is_plugin_active(widget._plugin_name, active):
                     widget.setVisible(False)
-                    parent_row_visible = False
                     continue
 
-                name_match = not query or query in widget._package_name.lower() or query in widget._plugin_name.lower()
+                # Match search query against package name, plugin name, and project labels
+                name_match = not query or (
+                    query in widget._package_name.lower()
+                    or query in widget._plugin_name.lower()
+                    or any(query in lbl.lower() for lbl in widget._project_labels)
+                )
                 widget.setVisible(name_match)
-                parent_row_visible = name_match
                 if name_match:
                     provider_has_visible_child = True
-
-            elif isinstance(widget, ProjectChildRow):
-                widget.setVisible(parent_row_visible)
 
         # Finalise last provider and kind
         kind_has_visible |= self._finalise_provider(current_provider, provider_has_visible_child)
@@ -1302,7 +1403,7 @@ class ToolsView(QWidget):
                 packages.extend(
                     PackageEntry(
                         name=str(pkg.name),
-                        project_label=directory.name or str(directory.path),
+                        project_label=directory.name or Path(directory.path).stem,
                         version=str(pkg.version) if pkg.version else '',
                         host_tool=pkg.relation.host if pkg.relation else '',
                         project_path=str(directory.path),
@@ -1516,7 +1617,7 @@ class ToolsView(QWidget):
     async def _check_for_updates(
         self,
         directories: list[ManifestDirectory],
-    ) -> dict[str, set[str]]:
+    ) -> dict[str, dict[str, str]]:
         """Detect available updates across cached manifests.
 
         When a :class:`DataCoordinator` is available the efficient
@@ -1524,19 +1625,19 @@ class ToolsView(QWidget):
         Falls back to per-directory ``execute_stream`` dry-runs
         otherwise.
 
-        Returns a mapping of ``{plugin_name: {package_names…}}`` for
-        packages that have a newer version available.
+        Returns a mapping of ``{plugin_name: {package_name: latest_version}}``
+        for packages that have a newer version available.
         """
         if self._coordinator is not None:
             return await self._check_updates_via_coordinator()
 
         # Legacy per-directory fallback
-        available: dict[str, set[str]] = {}
+        available: dict[str, dict[str, str]] = {}
 
         async def _check_one(directory: ManifestDirectory) -> None:
             partial = await self._check_directory_updates(directory)
             for installer, packages in partial.items():
-                available.setdefault(installer, set()).update(packages)
+                available.setdefault(installer, {}).update(packages)
 
         async with asyncio.TaskGroup() as tg:
             for d in directories:
@@ -1544,27 +1645,28 @@ class ToolsView(QWidget):
 
         return available
 
-    async def _check_updates_via_coordinator(self) -> dict[str, set[str]]:
+    async def _check_updates_via_coordinator(self) -> dict[str, dict[str, str]]:
         """Use the coordinator's ``check_updates`` for efficient detection."""
         assert self._coordinator is not None
         results = await self._coordinator.check_updates()
-        available: dict[str, set[str]] = {}
+        available: dict[str, dict[str, str]] = {}
         for cr in results:
             if cr.success:
-                updated = {pi.name for pi in cr.packages if pi.update_available}
-                if updated:
-                    available[cr.plugin] = updated
+                for pi in cr.packages:
+                    if pi.update_available:
+                        latest = str(pi.latest_version) if hasattr(pi, 'latest_version') and pi.latest_version else ''
+                        available.setdefault(cr.plugin, {})[pi.name] = latest
         return available
 
     async def _check_directory_updates(
         self,
         directory: ManifestDirectory,
-    ) -> dict[str, set[str]]:
+    ) -> dict[str, dict[str, str]]:
         """Check a single directory for available updates (dry-run).
 
         Legacy fallback used when no coordinator is available.
         """
-        available: dict[str, set[str]] = {}
+        available: dict[str, dict[str, str]] = {}
         try:
             path = Path(directory.path)
             filenames = self._porringer.sync.manifest_filenames()
@@ -1592,9 +1694,9 @@ class ToolsView(QWidget):
                 ):
                     action = event.result.action
                     if action.installer and action.package:
-                        available.setdefault(action.installer, set()).add(
-                            str(action.package.name),
-                        )
+                        pkg_name = str(action.package.name)
+                        latest = str(action.package.version) if action.package.version else ''
+                        available.setdefault(action.installer, {})[pkg_name] = latest
         except Exception:
             logger.debug(
                 'Could not detect updates for %s',
@@ -1630,44 +1732,41 @@ class ToolsView(QWidget):
             self._check_in_progress = False
 
     def _apply_update_badges(self) -> None:
-        """Walk existing widgets and show/hide Update buttons based on detection results."""
+        """Walk existing widgets and show/hide Update buttons + set inline status."""
         current_plugin: str = ''
         for widget in self._section_widgets:
             if isinstance(widget, PluginProviderHeader):
                 current_plugin = widget._plugin_name
-                plugin_updates = self._updates_available.get(current_plugin, set())
+                plugin_updates = self._updates_available.get(current_plugin, {})
                 has = bool(plugin_updates)
                 if widget._update_btn is not None:
                     widget._update_btn.setVisible(has)
             elif isinstance(widget, PluginRow) and widget._plugin_name:
-                plugin_updates = self._updates_available.get(widget._plugin_name, set())
-                has = widget._package_name in plugin_updates
-                if widget._update_btn is not None:
-                    widget._update_btn.setVisible(has)
-                elif has:
-                    # Need to create the button that wasn't built at render time
-                    self._inject_update_button(widget)
+                plugin_updates = self._updates_available.get(widget._plugin_name, {})
+                latest_version = plugin_updates.get(widget._package_name)
+                has_update = latest_version is not None
 
-    @staticmethod
-    def _inject_update_button(row: PluginRow) -> None:
-        """Dynamically add an Update button to a row that was built without one."""
-        update_btn = QPushButton('Update')
-        update_btn.setStyleSheet(PLUGIN_ROW_UPDATE_STYLE)
-        update_btn.setToolTip(f'Update {row._package_name}')
-        update_btn.clicked.connect(
-            lambda: row.update_requested.emit(row._plugin_name, row._package_name),
-        )
-        row._update_btn = update_btn
-        # Insert before the version label (last widget) if present, else append
-        layout = row.layout()
-        if isinstance(layout, QHBoxLayout):
-            layout.insertWidget(max(layout.count() - 1, 0), update_btn)
+                if widget._update_btn is not None:
+                    widget._update_btn.setVisible(has_update)
+
+                # Set inline status text
+                if has_update:
+                    version_text = f'v{latest_version} available' if latest_version else 'Update available'
+                    widget.set_update_status(version_text, PLUGIN_ROW_STATUS_AVAILABLE_STYLE)
+                elif self._updates_checked:
+                    widget.set_update_status('Up to date', PLUGIN_ROW_STATUS_UP_TO_DATE_STYLE)
 
     def _set_all_checking(self, checking: bool) -> None:
         """Show or hide inline checking spinners on all plugin rows."""
         for widget in self._section_widgets:
             if isinstance(widget, (PluginProviderHeader, PluginRow)):
                 widget.set_checking(checking)
+
+    def _refresh_timestamps(self) -> None:
+        """Refresh relative time labels on all plugin rows (called by timer)."""
+        for widget in self._section_widgets:
+            if isinstance(widget, PluginRow):
+                widget.update_timestamp()
 
     def set_plugin_updating(self, plugin_name: str, updating: bool) -> None:
         """Toggle the *Updating…* state on the header for *plugin_name*."""

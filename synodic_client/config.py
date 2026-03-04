@@ -139,6 +139,15 @@ class UserConfig(BaseModel):
     # auto-startup.
     auto_start: bool | None = None
 
+    # ISO 8601 timestamp of the last successful client self-update.
+    # None means no update has been recorded.
+    last_client_update: str | None = None
+
+    # Per-package timestamps of the last successful tool update.
+    # Maps "plugin/package" → ISO 8601 timestamp.  None means no
+    # tool updates have been recorded.
+    last_tool_updates: dict[str, str] | None = None
+
 
 # ---------------------------------------------------------------------------
 # File I/O

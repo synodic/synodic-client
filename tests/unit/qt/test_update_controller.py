@@ -38,6 +38,8 @@ def _make_config(**overrides: Any) -> ResolvedConfig:
         'prerelease_packages': None,
         'auto_apply': True,
         'auto_start': True,
+        'last_client_update': None,
+        'last_tool_updates': None,
     }
     defaults.update(overrides)
     return ResolvedConfig(**defaults)

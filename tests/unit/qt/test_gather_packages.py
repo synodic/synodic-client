@@ -43,6 +43,8 @@ def _make_config() -> ResolvedConfig:
         prerelease_packages=None,
         auto_apply=True,
         auto_start=False,
+        last_client_update=None,
+        last_tool_updates=None,
     )
 
 

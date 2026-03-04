@@ -61,6 +61,8 @@ class ResolvedConfig:
     prerelease_packages: dict[str, list[str]] | None
     auto_apply: bool
     auto_start: bool
+    last_client_update: str | None
+    last_tool_updates: dict[str, str] | None
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +154,8 @@ def _resolve_from_user(user: UserConfig) -> ResolvedConfig:
         prerelease_packages=user.prerelease_packages,
         auto_apply=auto_apply,
         auto_start=auto_start,
+        last_client_update=user.last_client_update,
+        last_tool_updates=user.last_tool_updates,
     )
 
 

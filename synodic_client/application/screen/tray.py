@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from porringer.api import API
 from porringer.schema.execution import SetupActionResult
@@ -24,11 +25,13 @@ from synodic_client.application.workers import (
     run_tool_updates,
 )
 from synodic_client.client import Client
+from synodic_client.config import load_user_config
 from synodic_client.resolution import (
     ResolvedConfig,
     resolve_auto_update_scope,
     resolve_config,
     resolve_update_config,
+    update_user_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -348,6 +351,16 @@ class TrayScreen:
             result.already_latest,
             result.failed,
         )
+
+        # Persist timestamps for updated packages
+        if result.updated_packages:
+            now = datetime.now(UTC).isoformat()
+            existing = dict(load_user_config().last_tool_updates or {})
+            plugin_name = updating_plugin or (updating_package[0] if updating_package else '')
+            for pkg_name in result.updated_packages:
+                key = f'{plugin_name}/{pkg_name}' if plugin_name else pkg_name
+                existing[key] = now
+            update_user_config(last_tool_updates=existing)
 
         # Clear updating state on widgets
         tools_view = self._window.tools_view
