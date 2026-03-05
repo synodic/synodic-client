@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 from porringer.schema import (
     PluginInfo,
@@ -336,8 +337,25 @@ class _DispatchState:
 
 
 # ---------------------------------------------------------------------------
-# Update banner data models (from update_banner.py)
+# Update view protocol & banner data models
 # ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class UpdateView(Protocol):
+    """Minimal display contract for the self-update lifecycle.
+
+    :class:`UpdateBanner` satisfies this protocol implicitly via
+    structural typing.  The controller broadcasts state transitions
+    through a ``list[UpdateView]`` so that every window showing update
+    status stays in sync.
+    """
+
+    def show_downloading(self, version: str) -> None: ...
+    def show_downloading_progress(self, percentage: int) -> None: ...
+    def show_ready(self, version: str) -> None: ...
+    def show_error(self, message: str) -> None: ...
+    def hide_banner(self) -> None: ...
 
 
 class UpdateBannerState(Enum):

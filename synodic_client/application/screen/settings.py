@@ -31,7 +31,8 @@ from PySide6.QtWidgets import (
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen import _format_relative_time
 from synodic_client.application.screen.card import CardFrame
-from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE, UPDATE_STATUS_CHECKING_STYLE
+from synodic_client.application.screen.update_banner import UpdateBanner
+from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE
 from synodic_client.logging import log_path, set_debug_level
 from synodic_client.resolution import ResolvedConfig, update_user_config
 from synodic_client.schema import GITHUB_REPO_URL
@@ -53,9 +54,6 @@ class SettingsWindow(QMainWindow):
 
     check_updates_requested = Signal()
     """Emitted when the user clicks the *Check for Updates* button."""
-
-    restart_requested = Signal()
-    """Emitted when the user clicks the *Restart & Update* button."""
 
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
         """[DIAG] Log every show event with a stack trace."""
@@ -199,17 +197,12 @@ class SettingsWindow(QMainWindow):
         self._check_updates_btn = QPushButton('Check for Updates\u2026')
         self._check_updates_btn.clicked.connect(self._on_check_updates_clicked)
         row.addWidget(self._check_updates_btn)
-        self._update_status_label = QLabel('')
-        self._update_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        row.addWidget(self._update_status_label)
-
-        self._restart_btn = QPushButton('Restart \u0026 Update')
-        self._restart_btn.clicked.connect(self.restart_requested.emit)
-        self._restart_btn.hide()
-        row.addWidget(self._restart_btn)
-
         row.addStretch()
         content.addLayout(row)
+
+        # Embedded update banner (same widget used in the main window)
+        self._update_banner = UpdateBanner()
+        content.addWidget(self._update_banner)
 
         # Last client update timestamp
         self._last_client_update_label = QLabel('')
@@ -280,30 +273,24 @@ class SettingsWindow(QMainWindow):
             else:
                 self._last_client_update_label.setText('')
 
-    def set_update_status(self, text: str, style: str = '') -> None:
-        """Set the inline status text next to the *Check for Updates* button.
+    @property
+    def update_banner(self) -> UpdateBanner:
+        """The embedded :class:`UpdateBanner` for this window."""
+        return self._update_banner
 
-        Args:
-            text: The status message.
-            style: Optional stylesheet for the label (e.g. color).
-        """
-        self._update_status_label.setText(text)
-        self._update_status_label.setStyleSheet(style)
+    def set_last_updated(self, timestamp: str) -> None:
+        """Refresh the *Last updated* label from a raw ISO timestamp."""
+        relative = _format_relative_time(timestamp)
+        self._last_client_update_label.setText(f'Last updated: {relative}')
+        self._last_client_update_label.setToolTip(f'Last updated: {timestamp}')
 
     def set_checking(self) -> None:
-        """Enter the *checking* state — disable button and show status."""
+        """Enter the *checking* state — disable button."""
         self._check_updates_btn.setEnabled(False)
-        self._restart_btn.hide()
-        self._update_status_label.setText('Checking\u2026')
-        self._update_status_label.setStyleSheet(UPDATE_STATUS_CHECKING_STYLE)
 
     def reset_check_updates_button(self) -> None:
         """Re-enable the *Check for Updates* button after a check completes."""
         self._check_updates_btn.setEnabled(True)
-
-    def show_restart_button(self) -> None:
-        """Show the *Restart & Update* button."""
-        self._restart_btn.show()
 
     def show(self) -> None:
         """Sync controls from config, then show the window."""
@@ -350,7 +337,6 @@ class SettingsWindow(QMainWindow):
     def _on_check_updates_clicked(self) -> None:
         """Handle the *Check for Updates* button click."""
         self._check_updates_btn.setEnabled(False)
-        self._update_status_label.setText('Checking\u2026')
         self.check_updates_requested.emit()
 
     def _on_channel_changed(self, index: int) -> None:
