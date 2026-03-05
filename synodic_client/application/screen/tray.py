@@ -68,10 +68,11 @@ class TrayScreen:
         window.settings_requested.connect(self._show_settings)
 
         # Update controller - owns the self-update lifecycle & timer
+        self._banner = window.update_banner
         self._update_controller = UpdateController(
             app,
             client,
-            [window.update_banner, self._settings_window.update_banner],
+            [self._banner],
             settings_window=self._settings_window,
             config=config,
         )

@@ -19,6 +19,11 @@ from PySide6.QtWidgets import QApplication
 
 from synodic_client.application.screen.schema import UpdateView
 from synodic_client.application.screen.update_banner import UpdateBanner
+from synodic_client.application.theme import (
+    UPDATE_STATUS_AVAILABLE_STYLE,
+    UPDATE_STATUS_ERROR_STYLE,
+    UPDATE_STATUS_UP_TO_DATE_STYLE,
+)
 from synodic_client.application.workers import check_for_update, download_update
 from synodic_client.resolution import (
     ResolvedConfig,
@@ -94,8 +99,9 @@ class UpdateController:
                 view.restart_requested.connect(self._apply_update)
                 view.retry_requested.connect(lambda: self.check_now(silent=True))
 
-        # Wire settings check-updates button
+        # Wire settings check-updates and restart buttons
         self._settings_window.check_updates_requested.connect(self._on_manual_check)
+        self._settings_window.restart_requested.connect(self._apply_update)
 
     def set_user_active_predicate(self, predicate: Callable[[], bool]) -> None:
         """Set the predicate used to defer auto-apply when the user is active.
@@ -122,6 +128,25 @@ class UpdateController:
         the application is never force-restarted during active use.
         """
         return self._auto_apply and not self._is_user_active()
+
+    def _persist_check_timestamp(self) -> None:
+        """Persist the current time as *last_client_update* and refresh the label."""
+        ts = datetime.now(UTC).isoformat()
+        update_user_config(last_client_update=ts)
+        self._settings_window.set_last_checked(ts)
+
+    def _report_error(self, message: str, *, silent: bool) -> None:
+        """Show an error to the user or log it, depending on *silent*.
+
+        Always updates the settings status line.  When not *silent*,
+        also broadcasts the error to all update-banner views.
+        """
+        self._settings_window.set_update_status('Check failed', UPDATE_STATUS_ERROR_STYLE)
+        if silent:
+            logger.warning('%s', message)
+        else:
+            for view in self._views:
+                view.show_error(message)
 
     # ------------------------------------------------------------------
     # Timer management
@@ -233,22 +258,18 @@ class UpdateController:
         self._settings_window.reset_check_updates_button()
 
         if result is None:
-            if not silent:
-                for view in self._views:
-                    view.show_error('Failed to check for updates.')
-            else:
-                logger.warning('Automatic update check failed (no result)')
+            self._report_error('Failed to check for updates.', silent=silent)
             return
 
         if result.error:
-            if not silent:
-                for view in self._views:
-                    view.show_error(result.error)
-            else:
-                logger.warning('Automatic update check failed: %s', result.error)
+            self._report_error(result.error, silent=silent)
             return
 
+        # Successful check — refresh the "last updated" timestamp
+        self._persist_check_timestamp()
+
         if not result.available:
+            self._settings_window.set_update_status('Up to date', UPDATE_STATUS_UP_TO_DATE_STYLE)
             if not silent:
                 logger.info('No updates available (current: %s)', result.current_version)
             else:
@@ -263,6 +284,7 @@ class UpdateController:
             return
 
         # New update available — download it
+        self._settings_window.set_update_status(f'v{version} available', UPDATE_STATUS_AVAILABLE_STYLE)
         for view in self._views:
             view.show_downloading(version)
         self._start_download(version)
@@ -270,12 +292,7 @@ class UpdateController:
     def _on_check_error(self, error: str, *, silent: bool = False) -> None:
         """Handle unexpected exception during update check."""
         self._settings_window.reset_check_updates_button()
-
-        if not silent:
-            for view in self._views:
-                view.show_error(f'Update check error: {error}')
-        else:
-            logger.warning('Automatic update check error: %s', error)
+        self._report_error(f'Update check error: {error}', silent=silent)
 
     # ------------------------------------------------------------------
     # Download flow
@@ -305,14 +322,14 @@ class UpdateController:
     def _on_download_finished(self, success: bool, version: str) -> None:
         """Handle download completion."""
         if not success:
+            self._settings_window.set_update_status('Download failed', UPDATE_STATUS_ERROR_STYLE)
             for view in self._views:
                 view.show_error('Download failed. Please try again later.')
             return
 
-        # Persist and display the client update timestamp
+        # Persist the client-update timestamp (actual update downloaded)
         ts = datetime.now(UTC).isoformat()
         update_user_config(last_client_update=ts)
-        self._settings_window.set_last_updated(ts)
 
         self._pending_version = version
 
@@ -326,6 +343,8 @@ class UpdateController:
 
     def _show_ready(self, version: str) -> None:
         """Present the *ready to restart* state across all views."""
+        self._settings_window.set_update_status(f'v{version} ready', UPDATE_STATUS_UP_TO_DATE_STYLE)
+        self._settings_window.show_restart_button()
         for view in self._views:
             view.show_ready(version)
 

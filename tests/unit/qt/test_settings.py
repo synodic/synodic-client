@@ -334,18 +334,16 @@ class TestSyncDoesNotEmit:
 
 
 class TestCheckForUpdatesButton:
-    """Verify the Check for Updates button and embedded update banner."""
+    """Verify the Check for Updates button and inline status label."""
 
     @staticmethod
-    def test_button_and_banner_exist() -> None:
-        """Window has the check-updates button and an embedded UpdateBanner."""
+    def test_button_and_label_exist() -> None:
+        """Window has the check-updates button and status label."""
         window = _make_window()
         assert hasattr(window, '_check_updates_btn')
+        assert hasattr(window, '_update_status_label')
         assert window._check_updates_btn.text() == 'Check for Updates\u2026'
-        assert hasattr(window, '_update_banner')
-        from synodic_client.application.screen.update_banner import UpdateBanner
-
-        assert isinstance(window.update_banner, UpdateBanner)
+        assert not window._update_status_label.text()
 
     @staticmethod
     def test_click_emits_signal_and_disables() -> None:
@@ -358,6 +356,15 @@ class TestCheckForUpdatesButton:
 
         signal_spy.assert_called_once()
         assert window._check_updates_btn.isEnabled() is False
+        assert window._update_status_label.text() == 'Checking\u2026'
+
+    @staticmethod
+    def test_set_update_status() -> None:
+        """set_update_status sets the label text and style."""
+        window = _make_window()
+        window.set_update_status('Up to date', 'color: green;')
+        assert window._update_status_label.text() == 'Up to date'
+        assert 'green' in window._update_status_label.styleSheet()
 
     @staticmethod
     def test_reset_check_updates_button() -> None:
@@ -371,7 +378,8 @@ class TestCheckForUpdatesButton:
 
     @staticmethod
     def test_set_checking() -> None:
-        """set_checking disables the button."""
+        """set_checking disables the button and shows 'Checking\u2026' status."""
         window = _make_window()
         window.set_checking()
         assert window._check_updates_btn.isEnabled() is False
+        assert window._update_status_label.text() == 'Checking\u2026'
