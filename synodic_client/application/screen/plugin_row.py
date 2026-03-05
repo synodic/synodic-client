@@ -367,9 +367,7 @@ class PluginRow(QFrame):
         layout.addWidget(version_label)
 
         # Timestamp — always created so column width is reserved
-        self._timestamp_label = QLabel(
-            _format_relative_time(data.last_updated) if data.last_updated else ''
-        )
+        self._timestamp_label = QLabel(_format_relative_time(data.last_updated) if data.last_updated else '')
         self._timestamp_label.setStyleSheet(PLUGIN_ROW_TIMESTAMP_STYLE)
         self._timestamp_label.setMinimumWidth(PLUGIN_ROW_TIMESTAMP_MIN_WIDTH)
         if data.last_updated:
