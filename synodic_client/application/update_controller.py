@@ -99,6 +99,7 @@ class UpdateController:
 
         # Wire settings check-updates button
         self._settings_window.check_updates_requested.connect(self._on_manual_check)
+        self._settings_window.restart_requested.connect(self._apply_update)
 
     def set_user_active_predicate(self, predicate: Callable[[], bool]) -> None:
         """Set the predicate used to defer automatic checks when the user is active.
@@ -324,6 +325,7 @@ class UpdateController:
             f'v{version} ready',
             UPDATE_STATUS_UP_TO_DATE_STYLE,
         )
+        self._settings_window.show_restart_button()
 
     def _on_download_error(self, error: str) -> None:
         """Handle download error — show error banner."""

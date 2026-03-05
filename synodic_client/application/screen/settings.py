@@ -54,6 +54,9 @@ class SettingsWindow(QMainWindow):
     check_updates_requested = Signal()
     """Emitted when the user clicks the *Check for Updates* button."""
 
+    restart_requested = Signal()
+    """Emitted when the user clicks the *Restart & Update* button."""
+
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
         """[DIAG] Log every show event with a stack trace."""
         geo = self.geometry()
@@ -199,6 +202,12 @@ class SettingsWindow(QMainWindow):
         self._update_status_label = QLabel('')
         self._update_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         row.addWidget(self._update_status_label)
+
+        self._restart_btn = QPushButton('Restart \u0026 Update')
+        self._restart_btn.clicked.connect(self.restart_requested.emit)
+        self._restart_btn.hide()
+        row.addWidget(self._restart_btn)
+
         row.addStretch()
         content.addLayout(row)
 
@@ -275,12 +284,17 @@ class SettingsWindow(QMainWindow):
     def set_checking(self) -> None:
         """Enter the *checking* state — disable button and show status."""
         self._check_updates_btn.setEnabled(False)
+        self._restart_btn.hide()
         self._update_status_label.setText('Checking\u2026')
         self._update_status_label.setStyleSheet(UPDATE_STATUS_CHECKING_STYLE)
 
     def reset_check_updates_button(self) -> None:
         """Re-enable the *Check for Updates* button after a check completes."""
         self._check_updates_btn.setEnabled(True)
+
+    def show_restart_button(self) -> None:
+        """Show the *Restart & Update* button."""
+        self._restart_btn.show()
 
     def show(self) -> None:
         """Sync controls from config, then show the window."""
