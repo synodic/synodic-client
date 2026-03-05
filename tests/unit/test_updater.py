@@ -70,7 +70,12 @@ class TestGithubReleaseAssetUrl:
 @pytest.fixture
 def updater() -> Updater:
     """Create an Updater instance for testing."""
-    return Updater(current_version=Version('1.0.0'))
+    u = Updater(current_version=Version('1.0.0'))
+    # Reset state cached by the eager _get_velopack_manager() call
+    # so each test can independently mock the Velopack SDK.
+    u._velopack_manager = None
+    u._velopack_not_installed = False
+    return u
 
 
 @pytest.fixture
@@ -80,7 +85,10 @@ def updater_with_config() -> Updater:
         repo_url='https://github.com/test/repo',
         channel=UpdateChannel.DEVELOPMENT,
     )
-    return Updater(current_version=Version('1.0.0'), config=config)
+    u = Updater(current_version=Version('1.0.0'), config=config)
+    u._velopack_manager = None
+    u._velopack_not_installed = False
+    return u
 
 
 class TestUpdater:

@@ -104,7 +104,7 @@ class _TopLevelShowFilter(QObject):
         ):
             geo = obj.geometry()
             stack = ''.join(traceback.format_stack(limit=12))
-            self._diag_logger.warning(
+            self._diag_logger.debug(
                 '[DIAG] Top-level window %s: class=%s title=%r geo=(%d,%d %dx%d) visible=%s\n%s',
                 event.type().name,
                 type(obj).__qualname__,

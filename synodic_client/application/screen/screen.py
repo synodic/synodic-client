@@ -199,8 +199,7 @@ class ToolsView(QWidget):
         """Schedule an asynchronous rebuild of the tool list."""
         if self._refresh_in_progress:
             return
-        caller = ''.join(traceback.format_stack(limit=4))
-        logger.info('[DIAG] ToolsView.refresh() called, parent_visible=%s\n%s', self.isVisible(), caller)
+        logger.debug('ToolsView.refresh() called (visible=%s)', self.isVisible())
         asyncio.create_task(self._async_refresh())
 
     async def _async_refresh(self) -> None:
@@ -1112,7 +1111,7 @@ class MainWindow(QMainWindow):
         """[DIAG] Log every show event with a stack trace."""
         geo = self.geometry()
         stack = ''.join(traceback.format_stack(limit=10))
-        logger.warning(
+        logger.debug(
             '[DIAG] MainWindow.showEvent: geo=(%d,%d %dx%d) visible=%s\n%s',
             geo.x(),
             geo.y(),

@@ -114,6 +114,14 @@ class Updater:
         self._velopack_manager: Any = None
         self._velopack_not_installed: bool = False
 
+        # Eagerly resolve the Velopack manager so that
+        # _current_version reflects the installed binary version
+        # rather than the (potentially stale) Python package metadata.
+        try:
+            self._get_velopack_manager()
+        except Exception:
+            pass
+
         logger.info(
             'Updater created: version=%s, channel=%s, repo=%s',
             self._current_version,
@@ -406,6 +414,11 @@ def initialize_velopack() -> None:
         return
     _VelopackState.initialized = True
 
+    # During post-update restarts Velopack's App.run() may exit the
+    # current process (to apply the update and relaunch).  Each
+    # short-lived process writes "Initializing Velopack" to the shared
+    # log file before being replaced, so multiple entries followed by a
+    # single "initialized successfully" is expected behaviour.
     logger.info('Initializing Velopack (exe=%s)', sys.executable)
     try:
         app = velopack.App()

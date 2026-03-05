@@ -61,7 +61,7 @@ class SettingsWindow(QMainWindow):
         """[DIAG] Log every show event with a stack trace."""
         geo = self.geometry()
         stack = ''.join(traceback.format_stack(limit=10))
-        logger.warning(
+        logger.debug(
             '[DIAG] SettingsWindow.showEvent: geo=(%d,%d %dx%d) visible=%s\n%s',
             geo.x(),
             geo.y(),
