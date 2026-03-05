@@ -20,14 +20,15 @@ from porringer.schema import (
     SyncStrategy,
 )
 from porringer.schema.plugin import PluginKind
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QShowEvent
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QShowEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QMainWindow,
     QPushButton,
     QScrollArea,
+    QShortcut,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -54,6 +55,9 @@ from synodic_client.application.screen.update_banner import UpdateBanner
 from synodic_client.application.theme import (
     COMPACT_MARGINS,
     FILTER_CHIP_SPACING,
+    FILTER_PANEL_ANIMATION_MS,
+    FILTER_TOGGLE_ACTIVE_STYLE,
+    FILTER_TOGGLE_STYLE,
     MAIN_WINDOW_MIN_SIZE,
     PLUGIN_ROW_STATUS_AVAILABLE_STYLE,
     PLUGIN_ROW_STATUS_UP_TO_DATE_STYLE,
@@ -139,15 +143,15 @@ class ToolsView(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(*COMPACT_MARGINS)
 
-        # Toolbar â€” search input left, action buttons right
+        # Toolbar â€” filter toggle left, action buttons right
         toolbar = QHBoxLayout()
 
-        self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText('Search packages\u2026')
-        self._search_input.setClearButtonEnabled(True)
-        self._search_input.setStyleSheet(SEARCH_INPUT_STYLE)
-        self._search_input.textChanged.connect(self._apply_filter)
-        toolbar.addWidget(self._search_input)
+        self._filter_btn = QPushButton('\U0001f50d')
+        self._filter_btn.setToolTip('Filter packages (Ctrl+F)')
+        self._filter_btn.setFlat(True)
+        self._filter_btn.setStyleSheet(FILTER_TOGGLE_STYLE)
+        self._filter_btn.clicked.connect(self._toggle_filter_panel)
+        toolbar.addWidget(self._filter_btn)
 
         toolbar.addStretch()
 
@@ -163,13 +167,40 @@ class ToolsView(QWidget):
         toolbar.addWidget(update_all_btn)
         outer.addLayout(toolbar)
 
+        # Collapsible filter panel â€” search input + chip row
+        self._filter_panel = QWidget()
+        self._filter_panel.setMaximumHeight(0)
+        self._filter_panel.setVisible(False)
+        filter_layout = QVBoxLayout(self._filter_panel)
+        filter_layout.setContentsMargins(0, 4, 0, 4)
+        filter_layout.setSpacing(4)
+
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText('Search packages\u2026')
+        self._search_input.setClearButtonEnabled(True)
+        self._search_input.setStyleSheet(SEARCH_INPUT_STYLE)
+        self._search_input.textChanged.connect(self._apply_filter)
+        self._search_input.installEventFilter(self)
+        filter_layout.addWidget(self._search_input)
+
         # Filter chips row â€” auto-populated from discovered plugins
         chip_container = QWidget()
         self._chip_layout = QHBoxLayout(chip_container)
         self._chip_layout.setContentsMargins(0, 0, 0, 0)
         self._chip_layout.setSpacing(FILTER_CHIP_SPACING)
         self._chip_layout.addStretch()
-        outer.addWidget(chip_container)
+        filter_layout.addWidget(chip_container)
+
+        outer.addWidget(self._filter_panel)
+
+        # Animation for filter panel slide-in / slide-out
+        self._filter_anim = QPropertyAnimation(self._filter_panel, b'maximumHeight')
+        self._filter_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._filter_anim.setDuration(FILTER_PANEL_ANIMATION_MS)
+        self._filter_panel_open = False
+
+        # Ctrl+F shortcut to toggle filter panel
+        QShortcut(QKeySequence.StandardKey.Find, self, self._toggle_filter_panel)
 
         # Scroll area
         self._scroll = QScrollArea()
@@ -492,6 +523,83 @@ class ToolsView(QWidget):
             self._deselected_plugins.add(plugin_name)
         self._apply_filter()
 
+    # ------------------------------------------------------------------
+    # Filter panel toggle & animation
+    # ------------------------------------------------------------------
+
+    @property
+    def _has_active_filter(self) -> bool:
+        """Return whether any search text or deselected chip is active."""
+        return bool(self._search_input.text().strip()) or bool(self._deselected_plugins)
+
+    def _toggle_filter_panel(self) -> None:
+        """Slide the filter panel open or closed."""
+        if self._filter_panel_open:
+            self._close_filter_panel()
+        else:
+            self._open_filter_panel()
+
+    def _open_filter_panel(self) -> None:
+        """Slide the filter panel in and focus the search input."""
+        if self._filter_panel_open:
+            return
+        self._filter_panel_open = True
+        self._filter_panel.setVisible(True)
+        self._filter_panel.adjustSize()
+        target = self._filter_panel.sizeHint().height()
+        self._filter_anim.stop()
+        self._filter_anim.setStartValue(self._filter_panel.maximumHeight())
+        self._filter_anim.setEndValue(target)
+        self._filter_anim.start()
+        self._search_input.setFocus()
+
+    def _close_filter_panel(self) -> None:
+        """Slide the filter panel out and return focus to the toggle button."""
+        if not self._filter_panel_open:
+            return
+        self._filter_panel_open = False
+        self._filter_anim.stop()
+        self._filter_anim.setStartValue(self._filter_panel.maximumHeight())
+        self._filter_anim.setEndValue(0)
+        self._filter_anim.finished.connect(
+            self._on_filter_panel_closed,
+            type=Qt.ConnectionType.SingleShotConnection,
+        )
+        self._filter_anim.start()
+
+    def _on_filter_panel_closed(self) -> None:
+        """Hide the panel widget after slide-out completes."""
+        if not self._filter_panel_open:
+            self._filter_panel.setVisible(False)
+        self._filter_btn.setFocus()
+
+    def _update_filter_badge(self) -> None:
+        """Swap the toggle-button style to indicate active filters."""
+        style = FILTER_TOGGLE_ACTIVE_STYLE if self._has_active_filter else FILTER_TOGGLE_STYLE
+        self._filter_btn.setStyleSheet(style)
+
+    def _clear_active_filters(self) -> None:
+        """Reset search text and re-check all deselected chips."""
+        self._search_input.clear()
+        for name in list(self._deselected_plugins):
+            chip = self._filter_chips.get(name)
+            if chip is not None:
+                chip.setChecked(True)
+
+    def eventFilter(self, obj: object, event: object) -> bool:
+        """Handle Escape in the search input to clear filters / close panel."""
+        from PySide6.QtCore import QEvent
+        from PySide6.QtGui import QKeyEvent
+
+        if obj is self._search_input and isinstance(event, QKeyEvent):
+            if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
+                if self._has_active_filter:
+                    self._clear_active_filters()
+                else:
+                    self._close_filter_panel()
+                return True
+        return super().eventFilter(obj, event)
+
     def _active_chip_plugins(self) -> set[str] | None:
         """Return the set of plugin names whose chips are checked.
 
@@ -569,6 +677,8 @@ class ToolsView(QWidget):
         kind_has_visible |= self._finalise_provider(current_provider, provider_has_visible_child)
         if current_kind_header is not None:
             current_kind_header.setVisible(kind_has_visible)
+
+        self._update_filter_badge()
 
     def _create_connected_row(self, data: PluginRowData) -> PluginRow:
         """Create a :class:`PluginRow` and wire all its signals."""

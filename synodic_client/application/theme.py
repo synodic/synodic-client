@@ -310,6 +310,22 @@ FILTER_CHIP_STYLE = (
 FILTER_CHIP_SPACING = 4
 """Pixels between filter chips."""
 
+FILTER_PANEL_ANIMATION_MS = 200
+"""Duration of the filter panel slide-in / slide-out animation (ms)."""
+
+FILTER_TOGGLE_STYLE = (
+    'QPushButton { border: none; font-size: 16px; padding: 2px 6px; }'
+    'QPushButton:hover { background: palette(midlight); border-radius: 3px; }'
+)
+"""Default style for the filter toggle button in the ToolsView toolbar."""
+
+FILTER_TOGGLE_ACTIVE_STYLE = (
+    'QPushButton { border: none; font-size: 16px; padding: 2px 6px;'
+    '  border-bottom: 2px solid #3794ff; }'
+    'QPushButton:hover { background: palette(midlight); border-radius: 3px; }'
+)
+"""Filter toggle button style when an active filter is in effect."""
+
 # Retained from previous design — auto-update & per-plugin update buttons
 PLUGIN_TOGGLE_STYLE = (
     'QPushButton { padding: 2px 8px; border: 1px solid palette(mid); border-radius: 3px;'

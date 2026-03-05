@@ -735,3 +735,99 @@ class TestSearchFilter:
         view._rebuild_chips()
         assert not view._filter_chips['pipx'].isChecked()
         assert view._filter_chips['uv'].isChecked()
+
+
+# ---------------------------------------------------------------------------
+# Filter panel toggle (ToolsView collapsible filter)
+# ---------------------------------------------------------------------------
+
+
+class TestFilterPanel:
+    """Verify the collapsible filter panel toggle behaviour."""
+
+    @staticmethod
+    def _make_view() -> ToolsView:
+        """Build a ToolsView with a mock porringer."""
+        porringer = _make_porringer()
+        config = _make_config()
+        return ToolsView(porringer, config)
+
+    def test_panel_starts_collapsed(self) -> None:
+        """The filter panel is hidden and has zero max-height on init."""
+        view = self._make_view()
+        assert not view._filter_panel.isVisible()
+        assert view._filter_panel.maximumHeight() == 0
+        assert not view._filter_panel_open
+
+    def test_toggle_opens_panel(self) -> None:
+        """Calling _toggle_filter_panel opens a collapsed panel."""
+        view = self._make_view()
+        view._toggle_filter_panel()
+        assert view._filter_panel_open
+        assert view._filter_panel.isVisible()
+
+    def test_toggle_closes_open_panel(self) -> None:
+        """Calling _toggle_filter_panel on an open panel closes it."""
+        view = self._make_view()
+        view._open_filter_panel()
+        view._toggle_filter_panel()
+        assert not view._filter_panel_open
+
+    def test_badge_inactive_by_default(self) -> None:
+        """The filter badge is inactive when no filters are set."""
+        from synodic_client.application.theme import FILTER_TOGGLE_STYLE
+
+        view = self._make_view()
+        assert view._filter_btn.styleSheet() == FILTER_TOGGLE_STYLE
+
+    def test_badge_active_with_search_text(self) -> None:
+        """The filter badge activates when search text is entered."""
+        from synodic_client.application.theme import FILTER_TOGGLE_ACTIVE_STYLE
+
+        view = self._make_view()
+        view._search_input.setText('ruff')
+        assert view._filter_btn.styleSheet() == FILTER_TOGGLE_ACTIVE_STYLE
+
+    def test_badge_active_with_deselected_chip(self) -> None:
+        """The filter badge activates when a chip is deselected."""
+        from synodic_client.application.theme import FILTER_TOGGLE_ACTIVE_STYLE
+
+        view = self._make_view()
+        # Manually inject a deselected plugin to test badge without full tree
+        view._deselected_plugins.add('test-plugin')
+        view._update_filter_badge()
+        assert view._filter_btn.styleSheet() == FILTER_TOGGLE_ACTIVE_STYLE
+
+    def test_badge_clears_when_filters_removed(self) -> None:
+        """The filter badge deactivates when all filters are cleared."""
+        from synodic_client.application.theme import FILTER_TOGGLE_STYLE
+
+        view = self._make_view()
+        view._search_input.setText('ruff')
+        view._search_input.clear()
+        assert view._filter_btn.styleSheet() == FILTER_TOGGLE_STYLE
+
+    def test_clear_active_filters_resets_search(self) -> None:
+        """_clear_active_filters clears search text and rechecks chips."""
+        view = self._make_view()
+        view._search_input.setText('some query')
+        view._deselected_plugins.add('fake')
+        view._clear_active_filters()
+        assert view._search_input.text() == ''
+
+    def test_has_active_filter_false_by_default(self) -> None:
+        """_has_active_filter is False when no filters are set."""
+        view = self._make_view()
+        assert not view._has_active_filter
+
+    def test_has_active_filter_true_with_text(self) -> None:
+        """_has_active_filter is True when search text is non-empty."""
+        view = self._make_view()
+        view._search_input.setText('x')
+        assert view._has_active_filter
+
+    def test_has_active_filter_true_with_deselected(self) -> None:
+        """_has_active_filter is True when plugins are deselected."""
+        view = self._make_view()
+        view._deselected_plugins.add('p')
+        assert view._has_active_filter
