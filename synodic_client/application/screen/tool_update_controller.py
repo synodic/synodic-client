@@ -389,5 +389,3 @@ class ToolUpdateOrchestrator:
             tools_view.set_package_removing(plugin_name, package_name, False)
             tools_view._updates_checked = False
             tools_view.refresh()
-
-        self._window.show()
