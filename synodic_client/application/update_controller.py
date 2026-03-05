@@ -56,7 +56,7 @@ class UpdateController:
         Optional pre-resolved configuration.  ``None`` resolves from disk.
     is_user_active:
         Predicate returning ``True`` when the user has a visible window.
-        Automatic checks and auto-apply are deferred while active.
+        Auto-apply is deferred while active; checks still run normally.
     """
 
     def __init__(
@@ -102,7 +102,7 @@ class UpdateController:
         self._settings_window.restart_requested.connect(self._apply_update)
 
     def set_user_active_predicate(self, predicate: Callable[[], bool]) -> None:
-        """Set the predicate used to defer automatic checks when the user is active.
+        """Set the predicate used to defer auto-apply when the user is active.
 
         Args:
             predicate: Returns ``True`` when the user has a visible window.
@@ -201,12 +201,10 @@ class UpdateController:
     def _on_auto_check(self) -> None:
         """Handle automatic (periodic) check — silent.
 
-        Skipped when the user has a visible window to avoid disruptive
-        downloads and auto-apply restarts.  The next timer tick retries.
+        The check always runs so the settings window can show the
+        latest status and the *last updated* timestamp stays current.
+        Auto-apply is gated separately by :meth:`_can_auto_apply`.
         """
-        if self._is_user_active():
-            logger.debug('Automatic update check deferred — user is active')
-            return
         self._do_check(silent=True)
 
     def _do_check(self, *, silent: bool) -> None:

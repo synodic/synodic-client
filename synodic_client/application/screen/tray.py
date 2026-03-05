@@ -135,14 +135,10 @@ class TrayScreen:
         """Return ``True`` when the user has a visible application window.
 
         Checks all top-level ``QMainWindow`` instances (main window,
-        settings, install previews) so that automatic updates are
-        deferred whenever *any* window is open.
+        settings, install previews) so that auto-apply is deferred
+        whenever *any* window is open.
         """
-        return any(
-            w.isVisible()
-            for w in QApplication.topLevelWidgets()
-            if isinstance(w, QMainWindow)
-        )
+        return any(w.isVisible() for w in QApplication.topLevelWidgets() if isinstance(w, QMainWindow))
 
     def _on_settings_changed(self, config: ResolvedConfig) -> None:
         """React to a change made in the settings window."""

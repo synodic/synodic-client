@@ -209,7 +209,8 @@ class TestDownloadFinished:
     def test_user_active_shows_restart_button() -> None:
         """When user is active, the restart button should be shown in settings."""
         ctrl, app, client, banner, settings = _make_controller(
-            auto_apply=True, is_user_active=True,
+            auto_apply=True,
+            is_user_active=True,
         )
 
         with patch.object(ctrl, '_apply_update'):
@@ -233,22 +234,16 @@ class TestDownloadFinished:
 
 
 class TestUserActiveGating:
-    """Verify that automatic actions are deferred when the user is active."""
+    """Verify that auto-apply is deferred when the user is active.
+
+    Automatic checks always run so the settings window stays current.
+    Only the silent apply-and-restart is gated by ``_is_user_active``.
+    """
 
     @staticmethod
-    def test_auto_check_skipped_when_user_active() -> None:
-        """_on_auto_check should not call _do_check when user is active."""
+    def test_auto_check_always_runs() -> None:
+        """_on_auto_check should call _do_check even when user is active."""
         ctrl, _app, _client, banner, settings = _make_controller(is_user_active=True)
-
-        with patch.object(ctrl, '_do_check') as mock_check:
-            ctrl._on_auto_check()
-
-        mock_check.assert_not_called()
-
-    @staticmethod
-    def test_auto_check_proceeds_when_user_inactive() -> None:
-        """_on_auto_check should call _do_check when user is NOT active."""
-        ctrl, _app, _client, banner, settings = _make_controller(is_user_active=False)
 
         with patch.object(ctrl, '_do_check') as mock_check:
             ctrl._on_auto_check()
