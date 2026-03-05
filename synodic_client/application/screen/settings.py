@@ -312,8 +312,10 @@ class SettingsWindow(QMainWindow):
         self._restart_btn.show()
 
     def show(self) -> None:
-        """Sync controls from config, then show the window."""
+        """Sync controls from config, size to content, then show the window."""
         self.sync_from_config()
+        # Let the layout determine the ideal size, clamped to the minimum.
+        self.adjustSize()
         super().show()
         self.raise_()
         self.activateWindow()
