@@ -231,6 +231,12 @@ PLUGIN_ROW_UPDATE_WIDTH = 52
 PLUGIN_ROW_VERSION_MIN_WIDTH = 60
 """Minimum width for the version label column."""
 
+PLUGIN_ROW_STATUS_MIN_WIDTH = 90
+"""Minimum width for the inline auto-update status label."""
+
+PLUGIN_ROW_TIMESTAMP_MIN_WIDTH = 40
+"""Minimum width for the relative timestamp label."""
+
 PLUGIN_ROW_SPACING = 1
 """Pixels between individual tool/package rows."""
 

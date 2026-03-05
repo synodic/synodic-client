@@ -37,8 +37,10 @@ from synodic_client.application.theme import (
     PLUGIN_ROW_PROJECT_TAG_STYLE,
     PLUGIN_ROW_PROJECT_TAG_TRANSITIVE_STYLE,
     PLUGIN_ROW_REMOVE_STYLE,
+    PLUGIN_ROW_STATUS_MIN_WIDTH,
     PLUGIN_ROW_STATUS_STYLE,
     PLUGIN_ROW_STYLE,
+    PLUGIN_ROW_TIMESTAMP_MIN_WIDTH,
     PLUGIN_ROW_TIMESTAMP_STYLE,
     PLUGIN_ROW_TOGGLE_STYLE,
     PLUGIN_ROW_UPDATE_STYLE,
@@ -341,7 +343,7 @@ class PluginRow(QFrame):
 
         Controls are always created in the same order with fixed widths
         so that columns align vertically across all rows.  Hidden
-        controls still reserve space.
+        controls reserve space via ``retainSizeWhenHidden``.
         """
         if data.show_toggle:
             self._build_toggle(layout, data)
@@ -352,23 +354,27 @@ class PluginRow(QFrame):
         # Inline auto-update status (e.g. "Up to date", "v1.2 available")
         self._update_status_label = QLabel()
         self._update_status_label.setStyleSheet(PLUGIN_ROW_STATUS_STYLE)
+        self._update_status_label.setMinimumWidth(PLUGIN_ROW_STATUS_MIN_WIDTH)
         self._update_status_label.hide()
         layout.addWidget(self._update_status_label)
+        self._retain_size(layout)
 
-        # Version
-        if data.version:
-            version_label = QLabel(data.version)
-            version_label.setStyleSheet(PLUGIN_ROW_VERSION_STYLE)
-            version_label.setMinimumWidth(PLUGIN_ROW_VERSION_MIN_WIDTH)
-            version_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            layout.addWidget(version_label)
+        # Version — always created so column width is reserved
+        version_label = QLabel(data.version)
+        version_label.setStyleSheet(PLUGIN_ROW_VERSION_STYLE)
+        version_label.setMinimumWidth(PLUGIN_ROW_VERSION_MIN_WIDTH)
+        version_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(version_label)
 
-        # Timestamp
+        # Timestamp — always created so column width is reserved
+        self._timestamp_label = QLabel(
+            _format_relative_time(data.last_updated) if data.last_updated else ''
+        )
+        self._timestamp_label.setStyleSheet(PLUGIN_ROW_TIMESTAMP_STYLE)
+        self._timestamp_label.setMinimumWidth(PLUGIN_ROW_TIMESTAMP_MIN_WIDTH)
         if data.last_updated:
-            self._timestamp_label = QLabel(_format_relative_time(data.last_updated))
-            self._timestamp_label.setStyleSheet(PLUGIN_ROW_TIMESTAMP_STYLE)
             self._timestamp_label.setToolTip(f'Last updated: {data.last_updated}')
-            layout.addWidget(self._timestamp_label)
+        layout.addWidget(self._timestamp_label)
 
         # Transient inline error label (hidden by default)
         self._error_label = QLabel()
@@ -409,6 +415,17 @@ class PluginRow(QFrame):
         update_btn.setVisible(data.has_update)
         self._update_btn = update_btn
         layout.addWidget(update_btn)
+        self._retain_size(layout)
+
+    @staticmethod
+    def _retain_size(layout: QHBoxLayout) -> None:
+        """Mark the most recently added widget as size-retaining when hidden."""
+        item = layout.itemAt(layout.count() - 1)
+        if item is not None and item.widget() is not None:
+            widget = item.widget()
+            policy = widget.sizePolicy()
+            policy.setRetainSizeWhenHidden(True)
+            widget.setSizePolicy(policy)
 
     def _build_remove_button(self, layout: QHBoxLayout, data: PluginRowData) -> None:
         """Add the remove button — enabled only for global packages."""
