@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 from packaging.version import Version
 from porringer.core.schema import Package, PackageRelation, PackageRelationKind
 from porringer.schema import ManifestDirectory
-from porringer.schema.plugin import PluginInfo, PluginKind
+from porringer.schema.plugin import PluginInfo, PluginKind, RuntimePackageResult
 from PySide6.QtWidgets import QLabel, QPushButton
 
 from synodic_client.application.screen.plugin_row import (
@@ -19,7 +19,7 @@ from synodic_client.application.screen.plugin_row import (
     PluginRow,
     ProjectChildRow,
 )
-from synodic_client.application.screen.schema import PackageEntry, PluginRowData, ProjectInstance
+from synodic_client.application.screen.schema import PackageEntry, PluginRowData, ProjectInstance, _RefreshData
 from synodic_client.application.screen.screen import ToolsView
 from synodic_client.resolution import ResolvedConfig
 
@@ -831,3 +831,406 @@ class TestFilterPanel:
         view = self._make_view()
         view._deselected_plugins.add('p')
         assert view._has_active_filter
+
+
+# ---------------------------------------------------------------------------
+# RUNTIME plugin support
+# ---------------------------------------------------------------------------
+
+
+class TestRuntimePluginSupport:
+    """Verify that RUNTIME-kind plugins are included in the tool view."""
+
+    @staticmethod
+    def test_runtime_in_bucket_by_kind() -> None:
+        """RUNTIME plugins with content appear in _bucket_by_kind output."""
+        plugins = [
+            PluginInfo(
+                name='pim', kind=PluginKind.RUNTIME, version=Version('0.1.0'), installed=True, tool_version=None
+            ),
+        ]
+        packages_map = {
+            'pim': [PackageEntry(name='3.14-64', version='3.14.0')],
+        }
+        buckets = ToolsView._bucket_by_kind(plugins, packages_map)
+        assert PluginKind.RUNTIME in buckets
+        assert buckets[PluginKind.RUNTIME][0].name == 'pim'
+
+    @staticmethod
+    def test_runtime_excluded_when_empty() -> None:
+        """RUNTIME plugins without packages or tool_version are excluded."""
+        plugins = [
+            PluginInfo(
+                name='pim', kind=PluginKind.RUNTIME, version=Version('0.1.0'), installed=True, tool_version=None
+            ),
+        ]
+        packages_map: dict[str, list[PackageEntry]] = {'pim': []}
+        buckets = ToolsView._bucket_by_kind(plugins, packages_map)
+        assert PluginKind.RUNTIME not in buckets
+
+    @staticmethod
+    def test_runtime_skips_per_directory_queries() -> None:
+        """RUNTIME plugins only get a global query, not per-directory queries."""
+        porringer = _make_porringer()
+
+        call_paths: list[Path | None] = []
+
+        async def _mock_list(plugin_name: str, project_path: Path | None = None, **kwargs) -> list[Package]:
+            call_paths.append(project_path)
+            if project_path is None:
+                return [Package(name='3.14-64', version='3.14.0')]
+            return [Package(name='3.14-64', version='3.14.0')]
+
+        porringer.plugin.list_packages = AsyncMock(side_effect=_mock_list)
+        porringer.plugin.list = AsyncMock(
+            return_value=[
+                PluginInfo(
+                    name='pim', kind=PluginKind.RUNTIME, version=Version('0.1.0'), installed=True, tool_version=None
+                ),
+            ],
+        )
+        porringer.cache.list_directories.return_value = [
+            MagicMock(directory=ManifestDirectory(path=Path('/fake/project'))),
+        ]
+
+        view = ToolsView(porringer, _make_config())
+        # Use _gather_packages directly with an empty directory list
+        # (as _gather_refresh_data would do for RUNTIME plugins)
+        result = asyncio.run(view._gather_packages('pim', []))
+
+        assert len(call_paths) == 1, 'only the global query should be issued'
+        assert call_paths[0] is None, 'the single call should have no project_path'
+        assert len(result) == 1
+        assert result[0].name == '3.14-64'
+
+    @staticmethod
+    def test_runtime_global_packages_are_global() -> None:
+        """Runtime packages from the global query are marked as global in display model."""
+        entries = [PackageEntry(name='3.14-64', version='3.14.0')]
+        result = ToolsView._build_display_packages(entries, set())
+
+        assert len(result) == 1
+        pkg = result[0]
+        assert pkg.name == '3.14-64'
+        assert pkg.is_global is True
+        assert pkg.global_version == '3.14.0'
+        assert pkg.project_instances == []
+
+
+# ---------------------------------------------------------------------------
+# Per-runtime package display
+# ---------------------------------------------------------------------------
+
+# Expected widget counts (avoids PLR2004)
+_EXPECTED_RUNTIME_PROVIDERS = 2
+_EXPECTED_RUNTIME_PROVIDERS_WITH_VENV = 3
+_EXPECTED_DEFAULT_RT_PACKAGES = 2
+_EXPECTED_NON_DEFAULT_RT_PACKAGES = 1
+
+
+class TestPerRuntimeDisplay:
+    """Verify per-runtime provider headers, package rows, and default detection."""
+
+    @staticmethod
+    def _pip_plugin() -> PluginInfo:
+        return PluginInfo(
+            name='pip',
+            kind=PluginKind.PACKAGE,
+            version=Version('0.1.0'),
+            installed=True,
+            tool_version=Version('24.0'),
+        )
+
+    @staticmethod
+    def _make_runtime_results(default_exe: Path) -> list[RuntimePackageResult]:
+        """Two runtimes: 3.14 (default) and 3.13."""
+        return [
+            RuntimePackageResult(
+                provider='pim',
+                tag='3.13',
+                executable=Path('C:/Python313/python.exe'),
+                packages=[
+                    Package(name='django', version='5.0'),
+                ],
+            ),
+            RuntimePackageResult(
+                provider='pim',
+                tag='3.14',
+                executable=default_exe,
+                packages=[
+                    Package(name='requests', version='2.31.0'),
+                    Package(name='numpy', version='1.26.0'),
+                ],
+            ),
+        ]
+
+    def test_runtime_sections_create_separate_provider_headers(self) -> None:
+        """Each RuntimePackageResult produces its own PluginProviderHeader."""
+        view = ToolsView(_make_porringer(), _make_config())
+        default_exe = Path('C:/Python314/python.exe')
+        plugin = self._pip_plugin()
+        rt_results = self._make_runtime_results(default_exe)
+
+        data = _RefreshData(
+            plugins=[plugin],
+            packages_map={},
+            manifest_packages={},
+            runtime_packages={'pip': rt_results},
+            default_runtime_executable=default_exe,
+        )
+
+        view._build_runtime_sections(plugin, data, {})
+
+        providers = [w for w in view._section_widgets if isinstance(w, PluginProviderHeader)]
+        assert len(providers) == _EXPECTED_RUNTIME_PROVIDERS
+
+    def test_default_runtime_comes_first(self) -> None:
+        """The default runtime's provider header is the first one."""
+        view = ToolsView(_make_porringer(), _make_config())
+        default_exe = Path('C:/Python314/python.exe')
+        plugin = self._pip_plugin()
+        rt_results = self._make_runtime_results(default_exe)
+
+        data = _RefreshData(
+            plugins=[plugin],
+            packages_map={},
+            manifest_packages={},
+            runtime_packages={'pip': rt_results},
+            default_runtime_executable=default_exe,
+        )
+
+        view._build_runtime_sections(plugin, data, {})
+
+        providers = [w for w in view._section_widgets if isinstance(w, PluginProviderHeader)]
+        # First provider should have the default label
+        first_labels = [w for w in providers[0].findChildren(QLabel) if '(default)' in w.text()]
+        assert len(first_labels) == 1, 'First provider should have the default tag'
+
+    def test_default_runtime_packages_displayed(self) -> None:
+        """Package rows for the default runtime appear after its header."""
+        view = ToolsView(_make_porringer(), _make_config())
+        default_exe = Path('C:/Python314/python.exe')
+        plugin = self._pip_plugin()
+        rt_results = self._make_runtime_results(default_exe)
+
+        data = _RefreshData(
+            plugins=[plugin],
+            packages_map={},
+            manifest_packages={},
+            runtime_packages={'pip': rt_results},
+            default_runtime_executable=default_exe,
+        )
+
+        view._build_runtime_sections(plugin, data, {})
+
+        rows = [w for w in view._section_widgets if isinstance(w, PluginRow)]
+        # Default runtime has 2 packages, non-default has 1
+        default_rows = rows[:_EXPECTED_DEFAULT_RT_PACKAGES]
+        names = {r._package_name for r in default_rows}
+        assert names == {'requests', 'numpy'}
+
+    def test_non_default_runtime_packages_displayed(self) -> None:
+        """Package rows for the non-default runtime appear after its header."""
+        view = ToolsView(_make_porringer(), _make_config())
+        default_exe = Path('C:/Python314/python.exe')
+        plugin = self._pip_plugin()
+        rt_results = self._make_runtime_results(default_exe)
+
+        data = _RefreshData(
+            plugins=[plugin],
+            packages_map={},
+            manifest_packages={},
+            runtime_packages={'pip': rt_results},
+            default_runtime_executable=default_exe,
+        )
+
+        view._build_runtime_sections(plugin, data, {})
+
+        rows = [w for w in view._section_widgets if isinstance(w, PluginRow)]
+        non_default_rows = rows[_EXPECTED_DEFAULT_RT_PACKAGES:]
+        assert len(non_default_rows) == _EXPECTED_NON_DEFAULT_RT_PACKAGES
+        assert non_default_rows[0]._package_name == 'django'
+
+    def test_venv_packages_separate_from_runtime(self) -> None:
+        """Venv packages appear in a separate section without runtime tag."""
+        view = ToolsView(_make_porringer(), _make_config())
+        default_exe = Path('C:/Python314/python.exe')
+        plugin = self._pip_plugin()
+        rt_results = self._make_runtime_results(default_exe)
+
+        data = _RefreshData(
+            plugins=[plugin],
+            packages_map={
+                'pip': [
+                    PackageEntry(
+                        name='mylib',
+                        version='1.0.0',
+                        project_label='myproject',
+                        project_path='/projects/myproject',
+                    ),
+                ],
+            },
+            manifest_packages={},
+            runtime_packages={'pip': rt_results},
+            default_runtime_executable=default_exe,
+        )
+
+        auto_update_map: dict[str, bool | dict[str, bool]] = {}
+        # Build the full widget tree
+        view._build_widget_tree(data)
+
+        providers = [w for w in view._section_widgets if isinstance(w, PluginProviderHeader)]
+        # 2 runtime providers + 1 venv provider = 3
+        assert len(providers) == _EXPECTED_RUNTIME_PROVIDERS_WITH_VENV
+
+        # The last provider should NOT have a runtime tag
+        last_provider = providers[-1]
+        runtime_tags = [w for w in last_provider.findChildren(QLabel) if 'Python' in w.text()]
+        assert len(runtime_tags) == 0, 'Venv provider should not have a runtime tag'
+
+    def test_runtime_tag_uses_default_style(self) -> None:
+        """The default runtime tag uses the green highlight style."""
+        from synodic_client.application.theme import PLUGIN_PROVIDER_RUNTIME_TAG_DEFAULT_STYLE
+
+        view = ToolsView(_make_porringer(), _make_config())
+        default_exe = Path('C:/Python314/python.exe')
+        plugin = self._pip_plugin()
+        rt_results = self._make_runtime_results(default_exe)
+
+        data = _RefreshData(
+            plugins=[plugin],
+            packages_map={},
+            manifest_packages={},
+            runtime_packages={'pip': rt_results},
+            default_runtime_executable=default_exe,
+        )
+
+        view._build_runtime_sections(plugin, data, {})
+
+        providers = [w for w in view._section_widgets if isinstance(w, PluginProviderHeader)]
+        first = providers[0]
+        default_tags = [w for w in first.findChildren(QLabel) if '(default)' in w.text()]
+        assert len(default_tags) == 1
+        assert default_tags[0].styleSheet() == PLUGIN_PROVIDER_RUNTIME_TAG_DEFAULT_STYLE
+
+    def test_runtime_tag_uses_normal_style_for_non_default(self) -> None:
+        """Non-default runtime tags use the blue style."""
+        from synodic_client.application.theme import PLUGIN_PROVIDER_RUNTIME_TAG_STYLE
+
+        view = ToolsView(_make_porringer(), _make_config())
+        default_exe = Path('C:/Python314/python.exe')
+        plugin = self._pip_plugin()
+        rt_results = self._make_runtime_results(default_exe)
+
+        data = _RefreshData(
+            plugins=[plugin],
+            packages_map={},
+            manifest_packages={},
+            runtime_packages={'pip': rt_results},
+            default_runtime_executable=default_exe,
+        )
+
+        view._build_runtime_sections(plugin, data, {})
+
+        providers = [w for w in view._section_widgets if isinstance(w, PluginProviderHeader)]
+        # Second provider is non-default
+        second = providers[1]
+        runtime_tags = [w for w in second.findChildren(QLabel) if 'Python' in w.text() and '(default)' not in w.text()]
+        assert len(runtime_tags) == 1
+        assert runtime_tags[0].styleSheet() == PLUGIN_PROVIDER_RUNTIME_TAG_STYLE
+
+    def test_filter_chips_work_with_runtime_providers(self) -> None:
+        """Filter chips are built from runtime provider headers and filter works."""
+        view = ToolsView(_make_porringer(), _make_config())
+        default_exe = Path('C:/Python314/python.exe')
+        plugin = self._pip_plugin()
+        rt_results = self._make_runtime_results(default_exe)
+
+        data = _RefreshData(
+            plugins=[plugin],
+            packages_map={},
+            manifest_packages={},
+            runtime_packages={'pip': rt_results},
+            default_runtime_executable=default_exe,
+        )
+
+        view._build_widget_tree(data)
+
+        # Should have a 'pip' chip
+        assert 'pip' in view._filter_chips
+
+        # Deselecting 'pip' should hide all runtime rows
+        view._filter_chips['pip'].setChecked(False)
+        visible_rows = [w for w in view._section_widgets if isinstance(w, PluginRow) and not w.isHidden()]
+        assert len(visible_rows) == 0
+
+    def test_gather_runtime_packages_returns_none_for_non_consumer(self) -> None:
+        """_gather_runtime_packages returns None when plugin is not a RuntimeConsumer."""
+        from porringer.utility.exception import PluginError
+
+        porringer = _make_porringer()
+        porringer.plugin.list_packages_by_runtime = AsyncMock(
+            side_effect=PluginError('not a RuntimeConsumer'),
+        )
+
+        view = ToolsView(porringer, _make_config())
+        result = asyncio.run(view._gather_runtime_packages('pipx', MagicMock()))
+        assert result is None
+
+    def test_gather_runtime_packages_returns_results(self) -> None:
+        """_gather_runtime_packages returns list on success."""
+        porringer = _make_porringer()
+        expected = [
+            RuntimePackageResult(
+                provider='pim',
+                tag='3.14',
+                executable=Path('C:/Python314/python.exe'),
+                packages=[Package(name='requests', version='2.31.0')],
+            ),
+        ]
+        porringer.plugin.list_packages_by_runtime = AsyncMock(return_value=expected)
+
+        view = ToolsView(porringer, _make_config())
+        result = asyncio.run(view._gather_runtime_packages('pip', MagicMock()))
+        assert result == expected
+
+    def test_skip_global_flag_skips_global_query(self) -> None:
+        """_gather_packages with skip_global=True only runs per-directory queries."""
+        porringer = _make_porringer()
+        call_paths: list[Path | None] = []
+
+        async def _mock_list(plugin_name: str, project_path: Path | None = None, **kwargs) -> list[Package]:
+            call_paths.append(project_path)
+            if project_path is None:
+                return [Package(name='global-pkg', version='1.0')]
+            return [Package(name='venv-pkg', version='2.0')]
+
+        porringer.plugin.list_packages = AsyncMock(side_effect=_mock_list)
+
+        directory = ManifestDirectory(path=Path('/fake/project'))
+        view = ToolsView(porringer, _make_config())
+        result = asyncio.run(view._gather_packages('pip', [directory], skip_global=True))
+
+        assert all(p is not None for p in call_paths), 'global query should not be issued'
+        names = {e.name for e in result}
+        assert 'venv-pkg' in names
+        assert 'global-pkg' not in names
+
+    def test_bucket_by_kind_includes_runtime_packages(self) -> None:
+        """_bucket_by_kind considers runtime_packages for content check."""
+        plugins = [
+            PluginInfo(
+                name='pip',
+                kind=PluginKind.PACKAGE,
+                version=Version('0.1.0'),
+                installed=True,
+                tool_version=Version('24.0'),
+            ),
+        ]
+        # packages_map is empty, but runtime_packages has content
+        buckets = ToolsView._bucket_by_kind(
+            plugins,
+            {},
+            runtime_packages={'pip': [MagicMock()]},
+        )
+        assert PluginKind.PACKAGE in buckets

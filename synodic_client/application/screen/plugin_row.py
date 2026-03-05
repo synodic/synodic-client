@@ -25,6 +25,8 @@ from synodic_client.application.theme import (
     FILTER_CHIP_STYLE,
     PLUGIN_KIND_HEADER_STYLE,
     PLUGIN_PROVIDER_NAME_STYLE,
+    PLUGIN_PROVIDER_RUNTIME_TAG_DEFAULT_STYLE,
+    PLUGIN_PROVIDER_RUNTIME_TAG_STYLE,
     PLUGIN_PROVIDER_STATUS_INSTALLED_STYLE,
     PLUGIN_PROVIDER_STATUS_MISSING_STYLE,
     PLUGIN_PROVIDER_STYLE,
@@ -133,6 +135,7 @@ class PluginProviderHeader(QFrame):
         *,
         show_controls: bool = False,
         has_updates: bool = False,
+        runtime_label: str = '',
         parent: QWidget | None = None,
     ) -> None:
         """Initialize the provider header with plugin info and optional controls."""
@@ -151,6 +154,15 @@ class PluginProviderHeader(QFrame):
         name_label = QLabel(plugin.name)
         name_label.setStyleSheet(PLUGIN_PROVIDER_NAME_STYLE)
         layout.addWidget(name_label)
+
+        # Runtime tag pill (when per-runtime)
+        if runtime_label:
+            is_default = '(default)' in runtime_label
+            tag = QLabel(runtime_label)
+            tag.setStyleSheet(
+                PLUGIN_PROVIDER_RUNTIME_TAG_DEFAULT_STYLE if is_default else PLUGIN_PROVIDER_RUNTIME_TAG_STYLE
+            )
+            layout.addWidget(tag)
 
         # Version
         version_text = (

@@ -142,6 +142,16 @@ PLUGIN_PROVIDER_STATUS_INSTALLED_STYLE = 'font-size: 10px; color: #89d185;'
 PLUGIN_PROVIDER_STATUS_MISSING_STYLE = 'font-size: 10px; color: #f48771;'
 """Red-orange dot / label for missing providers."""
 
+PLUGIN_PROVIDER_RUNTIME_TAG_STYLE = (
+    'QLabel { font-size: 10px; color: #7fb3e0; background: #1e3a5f;  border-radius: 8px; padding: 1px 6px; }'
+)
+"""Pill-shaped runtime tag for per-runtime provider headers."""
+
+PLUGIN_PROVIDER_RUNTIME_TAG_DEFAULT_STYLE = (
+    'QLabel { font-size: 10px; color: #89d185; background: #1e3a2f;  border-radius: 8px; padding: 1px 6px; }'
+)
+"""Pill-shaped runtime tag highlighted for the default runtime."""
+
 # Compact tool / package row
 PLUGIN_ROW_STYLE = (
     'QFrame#pluginRow {'

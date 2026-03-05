@@ -23,6 +23,7 @@ from porringer.schema import (
     SubActionProgress,
     SyncStrategy,
 )
+from porringer.schema.plugin import RuntimePackageResult
 
 from synodic_client.application.screen.action_card import action_key
 from synodic_client.application.uri import normalize_manifest_key
@@ -161,6 +162,12 @@ class _RefreshData:
 
     manifest_packages: dict[str, set[str]]
     """Mapping of plugin name → manifest-referenced package names."""
+
+    runtime_packages: dict[str, list[RuntimePackageResult]] = field(default_factory=dict)
+    """Mapping of plugin name → per-runtime package results (RuntimeConsumer plugins only)."""
+
+    default_runtime_executable: Path | None = None
+    """Executable path of the resolved default runtime, if any."""
 
 
 # ---------------------------------------------------------------------------

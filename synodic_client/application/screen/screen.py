@@ -20,15 +20,15 @@ from porringer.schema import (
     SyncStrategy,
 )
 from porringer.schema.plugin import PluginKind
+from porringer.utility.exception import PluginError
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QShowEvent
+from PySide6.QtGui import QKeySequence, QShortcut, QShowEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QMainWindow,
     QPushButton,
     QScrollArea,
-    QShortcut,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -70,7 +70,10 @@ from synodic_client.resolution import ResolvedConfig, update_user_config
 logger = logging.getLogger(__name__)
 
 # Plugin kinds that support auto-update and per-plugin upgrade.
-_UPDATABLE_KINDS = frozenset({PluginKind.TOOL, PluginKind.PACKAGE})
+_UPDATABLE_KINDS = frozenset({PluginKind.TOOL, PluginKind.PACKAGE, PluginKind.RUNTIME})
+
+# Kinds whose packages are inherently global (no per-directory queries).
+_GLOBAL_ONLY_KINDS = frozenset({PluginKind.RUNTIME})
 
 # Preferred display ordering â€” Tools first, then alphabetical for the rest.
 _KIND_DISPLAY_ORDER: dict[PluginKind, int] = {
@@ -267,6 +270,14 @@ class ToolsView(QWidget):
     async def _gather_refresh_data(self) -> _RefreshData:
         """Fetch plugins, packages, and manifest requirements in parallel.
 
+        For PACKAGE-kind plugins that are ``RuntimeConsumer`` instances,
+        per-runtime package queries are attempted via
+        ``list_packages_by_runtime``.  Plugins that succeed are excluded
+        from the regular global package query (their global packages come
+        from the per-runtime results); venv-scoped packages are still
+        gathered via the standard ``_gather_packages`` path with
+        ``skip_global=True``.
+
         Returns:
             A :class:`_RefreshData` bundle containing all data needed
             to build the widget tree.
@@ -275,21 +286,50 @@ class ToolsView(QWidget):
         self._directories = directories
 
         updatable_plugins = [p for p in plugins if p.kind in _UPDATABLE_KINDS]
+        discovered = self._coordinator.discovered_plugins if self._coordinator else None
 
+        # --- Per-runtime probing for PACKAGE-kind plugins ---
+        runtime_packages: dict[str, list] = {}
+        runtime_probed: set[str] = set()
+
+        package_plugins = [p for p in updatable_plugins if p.kind == PluginKind.PACKAGE]
+        if package_plugins and discovered is not None:
+            probe_tasks: dict[str, asyncio.Task] = {}
+            async with asyncio.TaskGroup() as tg:
+                for plugin in package_plugins:
+                    probe_tasks[plugin.name] = tg.create_task(
+                        self._gather_runtime_packages(plugin.name, discovered),
+                    )
+            for name, task in probe_tasks.items():
+                result = task.result()
+                if result is not None:
+                    runtime_packages[name] = result
+                    runtime_probed.add(name)
+
+        # --- Standard package queries ---
         async with asyncio.TaskGroup() as tg:
-            pkg_tasks = {
-                plugin.name: tg.create_task(
-                    self._gather_packages(plugin.name, directories),
-                )
-                for plugin in updatable_plugins
-            }
+            pkg_tasks: dict[str, asyncio.Task] = {}
+            for plugin in updatable_plugins:
+                if plugin.name in runtime_probed:
+                    # Only gather venv/project packages (skip global)
+                    if directories:
+                        pkg_tasks[plugin.name] = tg.create_task(
+                            self._gather_packages(plugin.name, directories, skip_global=True),
+                        )
+                else:
+                    pkg_tasks[plugin.name] = tg.create_task(
+                        self._gather_packages(
+                            plugin.name,
+                            [] if plugin.kind in _GLOBAL_ONLY_KINDS else directories,
+                        ),
+                    )
             req_tasks = [tg.create_task(self._gather_project_requirements(d)) for d in directories]
             tool_plugins_task = tg.create_task(self._gather_tool_plugins())
 
         packages_map = {name: task.result() for name, task in pkg_tasks.items()}
 
         # Merge tool-managed sub-plugins into the environment plugin
-        # that owns the host tool (e.g. cppython â†’ pipx's pdm entry).
+        # that owns the host tool (e.g. cppython → pipx's pdm entry).
         tool_plugins = tool_plugins_task.result()
         for host_tool, sub_packages in tool_plugins.items():
             for env_packages in packages_map.values():
@@ -299,10 +339,17 @@ class ToolsView(QWidget):
 
         manifest_packages = self._collect_manifest_packages(req_tasks)
 
+        # Extract default runtime executable
+        default_runtime_executable = None
+        if discovered is not None and discovered.runtime_context is not None:
+            default_runtime_executable = discovered.runtime_context.get('python')
+
         return _RefreshData(
             plugins=plugins,
             packages_map=packages_map,
             manifest_packages=manifest_packages,
+            runtime_packages=runtime_packages,
+            default_runtime_executable=default_runtime_executable,
         )
 
     @staticmethod
@@ -324,7 +371,11 @@ class ToolsView(QWidget):
         self._clear_section_widgets()
 
         auto_update_map = self._config.plugin_auto_update or {}
-        kind_buckets = self._bucket_by_kind(data.plugins, data.packages_map)
+        kind_buckets = self._bucket_by_kind(
+            data.plugins,
+            data.packages_map,
+            data.runtime_packages,
+        )
 
         sorted_kinds = sorted(
             kind_buckets,
@@ -334,7 +385,14 @@ class ToolsView(QWidget):
         for kind in sorted_kinds:
             self._insert_section_widget(PluginKindHeader(kind, parent=self._container))
             for plugin in kind_buckets[kind]:
-                self._build_plugin_section(plugin, data, auto_update_map)
+                if plugin.name in data.runtime_packages:
+                    self._build_runtime_sections(plugin, data, auto_update_map)
+                    # Also emit venv packages (if any) as a separate
+                    # provider header without a runtime tag.
+                    if data.packages_map.get(plugin.name):
+                        self._build_plugin_section(plugin, data, auto_update_map)
+                else:
+                    self._build_plugin_section(plugin, data, auto_update_map)
 
         self._rebuild_chips()
         self._apply_filter()
@@ -350,16 +408,98 @@ class ToolsView(QWidget):
     def _bucket_by_kind(
         plugins: list[PluginInfo],
         packages_map: dict[str, list[PackageEntry]],
+        runtime_packages: dict[str, list] | None = None,
     ) -> OrderedDict[PluginKind, list[PluginInfo]]:
         """Group updatable plugins by kind, filtering out empty entries."""
         buckets: OrderedDict[PluginKind, list[PluginInfo]] = OrderedDict()
+        rp = runtime_packages or {}
         for plugin in plugins:
             if plugin.kind not in _UPDATABLE_KINDS:
                 continue
-            has_content = plugin.tool_version is not None or bool(packages_map.get(plugin.name))
+            has_content = (
+                plugin.tool_version is not None or bool(packages_map.get(plugin.name)) or bool(rp.get(plugin.name))
+            )
             if has_content:
                 buckets.setdefault(plugin.kind, []).append(plugin)
         return buckets
+
+    def _build_runtime_sections(
+        self,
+        plugin: PluginInfo,
+        data: _RefreshData,
+        auto_update_map: dict[str, bool | dict[str, bool]],
+    ) -> None:
+        """Build per-runtime provider headers and package rows.
+
+        Each ``RuntimePackageResult`` becomes a separate
+        :class:`PluginProviderHeader` with a runtime tag pill.
+        The default runtime (matched by executable) is placed first.
+        """
+        from porringer.schema.plugin import RuntimePackageResult
+
+        runtime_results: list[RuntimePackageResult] = data.runtime_packages[plugin.name]
+        if not runtime_results:
+            return
+
+        auto_val = auto_update_map.get(plugin.name, True)
+        plugin_updates = self._updates_available.get(plugin.name, {})
+        tool_timestamps = self._config.last_tool_updates or {}
+        default_exe = data.default_runtime_executable
+
+        # Sort: default runtime first, then descending by tag
+        def _sort_key(rt: RuntimePackageResult) -> tuple[int, str]:
+            is_default = 1 if (default_exe is not None and rt.executable == default_exe) else 0
+            return (-is_default, rt.tag)
+
+        sorted_results = sorted(runtime_results, key=_sort_key)
+
+        for rt in sorted_results:
+            is_default = default_exe is not None and rt.executable == default_exe
+            tag_text = f'Python {rt.tag}'
+            if is_default:
+                tag_text += ' (default)'
+
+            provider = PluginProviderHeader(
+                plugin,
+                auto_val is not False,
+                show_controls=True,
+                has_updates=bool(plugin_updates),
+                runtime_label=tag_text,
+                parent=self._container,
+            )
+            provider.auto_update_toggled.connect(self._on_auto_update_toggled)
+            provider.update_requested.connect(self.plugin_update_requested.emit)
+            self._insert_section_widget(provider)
+
+            # Convert RuntimePackageResult.packages to PackageEntry list
+            raw_packages = [
+                PackageEntry(
+                    name=str(pkg.name),
+                    version=str(pkg.version) if pkg.version else '',
+                    host_tool=pkg.relation.host if pkg.relation else '',
+                )
+                for pkg in rt.packages
+            ]
+            plugin_manifest = data.manifest_packages.get(plugin.name, set())
+            display_packages = self._build_display_packages(raw_packages, plugin_manifest)
+
+            for pkg in display_packages:
+                pkg_auto = self._resolve_package_auto_update(auto_val, pkg.name, pkg.is_global)
+                ts_key = f'{plugin.name}/{pkg.name}'
+                row = self._create_connected_row(
+                    PluginRowData(
+                        name=pkg.name,
+                        version=pkg.global_version or '',
+                        plugin_name=plugin.name,
+                        auto_update=pkg_auto,
+                        show_toggle=True,
+                        has_update=pkg.name in plugin_updates,
+                        is_global=True,
+                        host_tool=pkg.host_tool,
+                        last_updated=tool_timestamps.get(ts_key, ''),
+                    ),
+                )
+                self._insert_section_widget(row)
 
     def _build_plugin_section(
         self,
@@ -708,6 +848,8 @@ class ToolsView(QWidget):
         self,
         plugin_name: str,
         directories: list[ManifestDirectory],
+        *,
+        skip_global: bool = False,
     ) -> list[PackageEntry]:
         """Collect packages managed by *plugin_name*.
 
@@ -770,12 +912,35 @@ class ToolsView(QWidget):
                 )
 
         async with asyncio.TaskGroup() as tg:
-            tg.create_task(_list_global())
+            if not skip_global:
+                tg.create_task(_list_global())
             for d in directories:
                 tg.create_task(_list_one(d))
         return packages
 
-    # ------------------------------------------------------------------
+    async def _gather_runtime_packages(self, plugin_name: str, discovered) -> list | None:
+        """Try ``list_packages_by_runtime`` for *plugin_name*.
+
+        Returns the list of :class:`RuntimePackageResult` on success,
+        or ``None`` when the plugin is not a ``RuntimeConsumer``.
+        """
+        try:
+            return await self._porringer.plugin.list_packages_by_runtime(
+                plugin_name,
+                plugins=discovered,
+            )
+        except PluginError:
+            return None
+        except Exception:
+            logger.debug(
+                'Per-runtime probe failed for %s',
+                plugin_name,
+                exc_info=True,
+            )
+            return None
+
+        # ------------------------------------------------------------------
+
     # PluginManager sub-plugin discovery
     # ------------------------------------------------------------------
 
