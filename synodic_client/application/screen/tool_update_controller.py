@@ -305,6 +305,12 @@ class ToolUpdateOrchestrator:
 
         # Clear updating state on widgets
         tools_view = self._window.tools_view
+        logger.info(
+            '[DIAG] _on_tool_update_finished: manual=%s, tools_view_exists=%s, window_visible=%s',
+            manual,
+            tools_view is not None,
+            self._window.isVisible(),
+        )
         if tools_view is not None:
             if updating_plugin is not None:
                 tools_view.set_plugin_updating(updating_plugin, False)

@@ -5,14 +5,15 @@ import ctypes
 import logging
 import signal
 import sys
+import traceback
 import types
 from collections.abc import Callable
 
 import qasync
 from porringer.api import API
 from porringer.schema import LocalConfiguration
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer
+from PySide6.QtWidgets import QApplication, QWidget
 
 from synodic_client.application.icon import app_icon
 from synodic_client.application.init import run_startup_preamble
@@ -90,6 +91,34 @@ def _install_exception_hook(logger: logging.Logger) -> None:
     sys.excepthook = _exception_hook
 
 
+class _TopLevelShowFilter(QObject):
+    """[DIAG] Application-wide event filter that logs Show/WindowActivate on top-level widgets."""
+
+    _diag_logger = logging.getLogger('synodic_client.diag.window')
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        if (
+            event.type() in {QEvent.Type.Show, QEvent.Type.WindowActivate}
+            and isinstance(obj, QWidget)
+            and obj.isWindow()
+        ):
+            geo = obj.geometry()
+            stack = ''.join(traceback.format_stack(limit=12))
+            self._diag_logger.warning(
+                '[DIAG] Top-level window %s: class=%s title=%r geo=(%d,%d %dx%d) visible=%s\n%s',
+                event.type().name,
+                type(obj).__qualname__,
+                obj.windowTitle(),
+                geo.x(),
+                geo.y(),
+                geo.width(),
+                geo.height(),
+                obj.isVisible(),
+                stack,
+            )
+        return False
+
+
 def _init_app() -> QApplication:
     """Create and configure the ``QApplication``."""
     # Set the App User Model ID so Windows uses our icon on the taskbar
@@ -103,6 +132,10 @@ def _init_app() -> QApplication:
     app.setQuitOnLastWindowClosed(False)
     app.setWindowIcon(app_icon())
     app.setAttribute(Qt.ApplicationAttribute.AA_CompressHighFrequencyEvents)
+
+    # [DIAG] Install a global event filter to log every top-level window show.
+    diag_filter = _TopLevelShowFilter(app)  # parented to app, prevented from GC
+    app.installEventFilter(diag_filter)
 
     # Allow Ctrl+C in the terminal to terminate the application.
     # Qt's event loop blocks Python's default SIGINT handling, so we

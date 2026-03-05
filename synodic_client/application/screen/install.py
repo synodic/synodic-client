@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ from porringer.schema import (
     SyncStrategy,
 )
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -890,6 +892,21 @@ class InstallPreviewWindow(QMainWindow):
 
         self._init_ui()
 
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+        """[DIAG] Log every show event with a stack trace."""
+        geo = self.geometry()
+        stack = ''.join(traceback.format_stack(limit=10))
+        logger.warning(
+            '[DIAG] InstallPreviewWindow.showEvent: geo=(%d,%d %dx%d) visible=%s\n%s',
+            geo.x(),
+            geo.y(),
+            geo.width(),
+            geo.height(),
+            self.isVisible(),
+            stack,
+        )
+        super().showEvent(event)
+
     def _init_ui(self) -> None:
         """Build the UI layout."""
         central = QWidget()
@@ -951,11 +968,6 @@ class InstallPreviewWindow(QMainWindow):
             self._project_dir_field.setText(chosen)
 
     # --- Lifecycle ---
-
-    def showEvent(self, event: Any) -> None:
-        """Log when the window becomes visible."""
-        super().showEvent(event)
-        logger.info('Install preview window shown (visible=%s)', self.isVisible())
 
     def closeEvent(self, event: Any) -> None:
         """Clean up the temp directory when the window is closed."""

@@ -72,10 +72,10 @@ class TrayScreen:
             app,
             client,
             self._banner,
-            self._settings_window,
-            config,
-            is_user_active=self._is_user_active,
+            settings_window=self._settings_window,
+            config=config,
         )
+        self._update_controller.set_user_active_predicate(self._is_user_active)
 
         # Tool update orchestrator - owns tool/package update lifecycle
         self._tool_orchestrator = ToolUpdateOrchestrator(

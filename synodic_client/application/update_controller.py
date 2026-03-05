@@ -64,9 +64,9 @@ class UpdateController:
         app: QApplication,
         client: Client,
         banner: UpdateBanner,
+        *,
         settings_window: SettingsWindow,
         config: ResolvedConfig | None = None,
-        is_user_active: Callable[[], bool] | None = None,
     ) -> None:
         """Initialise the controller and start the periodic timer.
 
@@ -76,16 +76,13 @@ class UpdateController:
             banner: The in-app ``UpdateBanner`` widget.
             settings_window: The settings window for status feedback.
             config: Optional pre-resolved configuration.
-            is_user_active: Predicate returning ``True`` when the user
-                has a visible window (main or settings).  When active,
-                automatic checks and auto-apply are deferred.
         """
         self._app = app
         self._client = client
         self._banner = banner
         self._settings_window = settings_window
         self._config = config
-        self._is_user_active = is_user_active or (lambda: False)
+        self._is_user_active: Callable[[], bool] = lambda: False
         self._update_task: asyncio.Task[None] | None = None
 
         # Derive auto-apply preference from config
@@ -102,6 +99,14 @@ class UpdateController:
 
         # Wire settings check-updates button
         self._settings_window.check_updates_requested.connect(self._on_manual_check)
+
+    def set_user_active_predicate(self, predicate: Callable[[], bool]) -> None:
+        """Set the predicate used to defer automatic checks when the user is active.
+
+        Args:
+            predicate: Returns ``True`` when the user has a visible window.
+        """
+        self._is_user_active = predicate
 
     # ------------------------------------------------------------------
     # Config helpers
@@ -217,9 +222,11 @@ class UpdateController:
 
     async def _async_check(self, *, silent: bool) -> None:
         """Run the update check coroutine and route results."""
+        logger.info('[DIAG] Self-update check starting (silent=%s)', silent)
         try:
             result = await check_for_update(self._client)
             self._on_check_finished(result, silent=silent)
+            logger.info('[DIAG] Self-update check completed (silent=%s)', silent)
         except Exception as exc:
             logger.exception('Update check failed')
             self._on_check_error(str(exc), silent=silent)

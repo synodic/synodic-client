@@ -419,11 +419,12 @@ class PluginRow(QFrame):
     def _retain_size(layout: QHBoxLayout) -> None:
         """Mark the most recently added widget as size-retaining when hidden."""
         item = layout.itemAt(layout.count() - 1)
-        if item is not None and item.widget() is not None:
+        if item is not None:
             widget = item.widget()
-            policy = widget.sizePolicy()
-            policy.setRetainSizeWhenHidden(True)
-            widget.setSizePolicy(policy)
+            if widget is not None:
+                policy = widget.sizePolicy()
+                policy.setRetainSizeWhenHidden(True)
+                widget.setSizePolicy(policy)
 
     def _build_remove_button(self, layout: QHBoxLayout, data: PluginRowData) -> None:
         """Add the remove button — enabled only for global packages."""

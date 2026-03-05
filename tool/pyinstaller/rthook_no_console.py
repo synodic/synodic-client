@@ -27,6 +27,9 @@ if sys.platform == 'win32':
     _STARTF_USESHOWWINDOW = _sp.STARTF_USESHOWWINDOW
     _CREATE_NO_WINDOW = _sp.CREATE_NO_WINDOW
 
+    # [DIAG] Toggle to log every subprocess spawn to stderr.
+    _SUBPROCESS_LOGGING = True
+
     _original_init = subprocess.Popen.__init__
 
     def _patched_init(self: subprocess.Popen, *args: Any, **kwargs: Any) -> None:
@@ -36,6 +39,10 @@ if sys.platform == 'win32':
         startupinfo.dwFlags |= _STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = _SW_HIDE
         kwargs['startupinfo'] = startupinfo
+
+        if _SUBPROCESS_LOGGING:
+            cmd = args[0] if args else kwargs.get('args', '<unknown>')
+            print(f'[DIAG] subprocess.Popen: {cmd}', file=sys.stderr, flush=True)
 
         _original_init(self, *args, **kwargs)
 

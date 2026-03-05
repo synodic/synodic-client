@@ -71,9 +71,13 @@ def _make_controller(
             auto_update_interval_minutes=auto_update_interval_minutes,
         )
         controller = UpdateController(
-            app, client, banner, settings, config,
-            is_user_active=lambda: is_user_active,
+            app,
+            client,
+            banner,
+            settings_window=settings,
+            config=config,
         )
+        controller.set_user_active_predicate(lambda: is_user_active)
 
     return controller, app, client, banner, settings
 
@@ -245,7 +249,8 @@ class TestUserActiveGating:
     def test_auto_apply_deferred_when_user_active() -> None:
         """When auto_apply=True but user is active, show READY banner instead of applying."""
         ctrl, app, client, banner, settings = _make_controller(
-            auto_apply=True, is_user_active=True,
+            auto_apply=True,
+            is_user_active=True,
         )
 
         with patch.object(ctrl, '_apply_update') as mock_apply:
@@ -258,7 +263,8 @@ class TestUserActiveGating:
     def test_auto_apply_proceeds_when_user_inactive() -> None:
         """When auto_apply=True and user is inactive, _apply_update is called."""
         ctrl, app, client, banner, settings = _make_controller(
-            auto_apply=True, is_user_active=False,
+            auto_apply=True,
+            is_user_active=False,
         )
 
         with patch.object(ctrl, '_apply_update') as mock_apply:

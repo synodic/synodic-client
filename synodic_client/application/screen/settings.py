@@ -7,11 +7,12 @@ Updates* button with inline status feedback.
 
 import logging
 import sys
+import traceback
 from collections.abc import Iterator
 from contextlib import contextmanager
 
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -52,6 +53,21 @@ class SettingsWindow(QMainWindow):
 
     check_updates_requested = Signal()
     """Emitted when the user clicks the *Check for Updates* button."""
+
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+        """[DIAG] Log every show event with a stack trace."""
+        geo = self.geometry()
+        stack = ''.join(traceback.format_stack(limit=10))
+        logger.warning(
+            '[DIAG] SettingsWindow.showEvent: geo=(%d,%d %dx%d) visible=%s\n%s',
+            geo.x(),
+            geo.y(),
+            geo.width(),
+            geo.height(),
+            self.isVisible(),
+            stack,
+        )
+        super().showEvent(event)
 
     def __init__(
         self,

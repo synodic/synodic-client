@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import traceback
 from collections import OrderedDict
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from porringer.schema import (
 )
 from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
@@ -197,6 +199,8 @@ class ToolsView(QWidget):
         """Schedule an asynchronous rebuild of the tool list."""
         if self._refresh_in_progress:
             return
+        caller = ''.join(traceback.format_stack(limit=4))
+        logger.info('[DIAG] ToolsView.refresh() called, parent_visible=%s\n%s', self.isVisible(), caller)
         asyncio.create_task(self._async_refresh())
 
     async def _async_refresh(self) -> None:
@@ -1103,6 +1107,21 @@ class MainWindow(QMainWindow):
 
         # Update banner â€” always available, starts hidden.
         self._update_banner = UpdateBanner(self)
+
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+        """[DIAG] Log every show event with a stack trace."""
+        geo = self.geometry()
+        stack = ''.join(traceback.format_stack(limit=10))
+        logger.warning(
+            '[DIAG] MainWindow.showEvent: geo=(%d,%d %dx%d) visible=%s\n%s',
+            geo.x(),
+            geo.y(),
+            geo.width(),
+            geo.height(),
+            self.isVisible(),
+            stack,
+        )
+        super().showEvent(event)
 
     @property
     def porringer(self) -> API | None:
