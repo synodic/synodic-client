@@ -84,6 +84,7 @@ class UpdateController:
         self._config = config
         self._is_user_active: Callable[[], bool] = lambda: False
         self._update_task: asyncio.Task[None] | None = None
+        self._pending_version: str | None = None
 
         # Derive auto-apply preference from config
         resolved = self._resolve_config()
@@ -214,8 +215,9 @@ class UpdateController:
                 self._banner.show_error('Updater is not initialized.')
             return
 
-        # Show checking state in settings
-        self._settings_window.set_checking()
+        # Preserve the restart button when an update is already pending
+        if self._pending_version is None:
+            self._settings_window.set_checking()
 
         self._update_task = asyncio.create_task(self._async_check(silent=silent))
 
@@ -258,8 +260,14 @@ class UpdateController:
                 logger.debug('Automatic update check: no update available')
             return
 
-        # Update available — show status and start download
         version = str(result.latest_version)
+
+        # Already downloaded — restore the ready state without re-downloading
+        if version == self._pending_version:
+            self._show_ready(version)
+            return
+
+        # New update available — download it
         self._settings_window.set_update_status(
             f'v{version} available',
             UPDATE_STATUS_AVAILABLE_STYLE,
@@ -307,6 +315,8 @@ class UpdateController:
         # Persist the client update timestamp
         update_user_config(last_client_update=datetime.now(UTC).isoformat())
 
+        self._pending_version = version
+
         if self._can_auto_apply():
             # Silently apply and restart — no banner, no user interaction
             logger.info('Auto-applying update v%s', version)
@@ -317,7 +327,10 @@ class UpdateController:
             self._apply_update(silent=True)
             return
 
-        # Manual mode (or user is active) — show ready banner and let user choose when to restart
+        self._show_ready(version)
+
+    def _show_ready(self, version: str) -> None:
+        """Present the *ready to restart* state in both UIs."""
         self._banner.show_ready(version)
         self._settings_window.set_update_status(
             f'v{version} ready',
@@ -345,6 +358,7 @@ class UpdateController:
             return
 
         try:
+            self._pending_version = None
             self._client.apply_update_on_exit(restart=True, silent=silent)
             logger.info('Update scheduled — restarting application')
             self._app.quit()

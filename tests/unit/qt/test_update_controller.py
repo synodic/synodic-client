@@ -228,6 +228,81 @@ class TestDownloadFinished:
         assert banner.state.name == 'ERROR'
         settings.set_update_status.assert_called_with('Download failed', UPDATE_STATUS_ERROR_STYLE)
 
+    @staticmethod
+    def test_download_sets_pending_version() -> None:
+        """A successful download should set _pending_version."""
+        ctrl, app, client, banner, settings = _make_controller(auto_apply=False)
+        ctrl._on_download_finished(True, '2.0.0')
+
+        assert ctrl._pending_version == '2.0.0'
+
+
+# ---------------------------------------------------------------------------
+# Pending version — skip redundant downloads
+# ---------------------------------------------------------------------------
+
+
+class TestPendingVersion:
+    """Verify behaviour when an update is already downloaded and pending."""
+
+    @staticmethod
+    def test_check_skips_download_when_version_already_pending() -> None:
+        """Re-checking the same version should restore ready state, not re-download."""
+        ctrl, _app, _client, banner, settings = _make_controller(auto_apply=False)
+        ctrl._pending_version = '2.0.0'
+
+        result = UpdateInfo(available=True, current_version=Version('1.0.0'), latest_version=Version('2.0.0'))
+
+        with patch.object(ctrl, '_start_download') as mock_dl:
+            ctrl._on_check_finished(result, silent=True)
+
+        mock_dl.assert_not_called()
+        assert banner.state.name == 'READY'
+        settings.show_restart_button.assert_called_once()
+
+    @staticmethod
+    def test_check_downloads_when_newer_version() -> None:
+        """A different version should trigger a fresh download."""
+        ctrl, _app, _client, banner, settings = _make_controller(auto_apply=False)
+        ctrl._pending_version = '1.5.0'
+
+        result = UpdateInfo(available=True, current_version=Version('1.0.0'), latest_version=Version('2.0.0'))
+
+        with patch.object(ctrl, '_start_download') as mock_dl:
+            ctrl._on_check_finished(result, silent=True)
+
+        mock_dl.assert_called_once_with('2.0.0')
+
+    @staticmethod
+    def test_do_check_preserves_settings_ui_when_pending() -> None:
+        """set_checking should NOT be called when an update is already pending."""
+        ctrl, _app, _client, banner, settings = _make_controller()
+        ctrl._pending_version = '2.0.0'
+
+        with patch('asyncio.create_task'):
+            ctrl._do_check(silent=True)
+
+        settings.set_checking.assert_not_called()
+
+    @staticmethod
+    def test_do_check_shows_checking_when_no_pending() -> None:
+        """set_checking should be called when there is no pending update."""
+        ctrl, _app, _client, banner, settings = _make_controller()
+
+        with patch('asyncio.create_task'):
+            ctrl._do_check(silent=True)
+
+        settings.set_checking.assert_called_once()
+
+    @staticmethod
+    def test_apply_clears_pending_version() -> None:
+        """_apply_update should clear _pending_version."""
+        ctrl, app, client, banner, settings = _make_controller()
+        ctrl._pending_version = '2.0.0'
+        ctrl._apply_update()
+
+        assert ctrl._pending_version is None
+
 
 # ---------------------------------------------------------------------------
 # User-active gating
