@@ -49,6 +49,7 @@ def _make_controller(
     *,
     auto_apply: bool = True,
     auto_update_interval_minutes: int = 0,
+    is_user_active: bool = False,
 ) -> tuple[UpdateController, MagicMock, MagicMock, UpdateBanner, MagicMock]:
     """Build an ``UpdateController`` with mocked collaborators.
 
@@ -69,7 +70,10 @@ def _make_controller(
         mock_ucfg.return_value = MagicMock(
             auto_update_interval_minutes=auto_update_interval_minutes,
         )
-        controller = UpdateController(app, client, banner, settings, config)
+        controller = UpdateController(
+            app, client, banner, settings, config,
+            is_user_active=lambda: is_user_active,
+        )
 
     return controller, app, client, banner, settings
 
@@ -197,6 +201,88 @@ class TestDownloadFinished:
 
         assert banner.state.name == 'ERROR'
         settings.set_update_status.assert_called_with('Download failed', UPDATE_STATUS_ERROR_STYLE)
+
+
+# ---------------------------------------------------------------------------
+# User-active gating
+# ---------------------------------------------------------------------------
+
+
+class TestUserActiveGating:
+    """Verify that automatic actions are deferred when the user is active."""
+
+    @staticmethod
+    def test_auto_check_skipped_when_user_active() -> None:
+        """_on_auto_check should not call _do_check when user is active."""
+        ctrl, _app, _client, banner, settings = _make_controller(is_user_active=True)
+
+        with patch.object(ctrl, '_do_check') as mock_check:
+            ctrl._on_auto_check()
+
+        mock_check.assert_not_called()
+
+    @staticmethod
+    def test_auto_check_proceeds_when_user_inactive() -> None:
+        """_on_auto_check should call _do_check when user is NOT active."""
+        ctrl, _app, _client, banner, settings = _make_controller(is_user_active=False)
+
+        with patch.object(ctrl, '_do_check') as mock_check:
+            ctrl._on_auto_check()
+
+        mock_check.assert_called_once_with(silent=True)
+
+    @staticmethod
+    def test_manual_check_unaffected_by_active_user() -> None:
+        """_on_manual_check should always call _do_check regardless of user activity."""
+        ctrl, _app, _client, banner, settings = _make_controller(is_user_active=True)
+
+        with patch.object(ctrl, '_do_check') as mock_check:
+            ctrl._on_manual_check()
+
+        mock_check.assert_called_once_with(silent=False)
+
+    @staticmethod
+    def test_auto_apply_deferred_when_user_active() -> None:
+        """When auto_apply=True but user is active, show READY banner instead of applying."""
+        ctrl, app, client, banner, settings = _make_controller(
+            auto_apply=True, is_user_active=True,
+        )
+
+        with patch.object(ctrl, '_apply_update') as mock_apply:
+            ctrl._on_download_finished(True, '2.0.0')
+
+        mock_apply.assert_not_called()
+        assert banner.state.name == 'READY'
+
+    @staticmethod
+    def test_auto_apply_proceeds_when_user_inactive() -> None:
+        """When auto_apply=True and user is inactive, _apply_update is called."""
+        ctrl, app, client, banner, settings = _make_controller(
+            auto_apply=True, is_user_active=False,
+        )
+
+        with patch.object(ctrl, '_apply_update') as mock_apply:
+            ctrl._on_download_finished(True, '2.0.0')
+
+        mock_apply.assert_called_once_with(silent=True)
+
+    @staticmethod
+    def test_can_auto_apply_false_when_user_active() -> None:
+        """_can_auto_apply should return False when auto_apply=True but user is active."""
+        ctrl, *_ = _make_controller(auto_apply=True, is_user_active=True)
+        assert ctrl._can_auto_apply() is False
+
+    @staticmethod
+    def test_can_auto_apply_false_when_disabled() -> None:
+        """_can_auto_apply should return False when auto_apply=False."""
+        ctrl, *_ = _make_controller(auto_apply=False, is_user_active=False)
+        assert ctrl._can_auto_apply() is False
+
+    @staticmethod
+    def test_can_auto_apply_true_when_enabled_and_inactive() -> None:
+        """_can_auto_apply should return True only when auto_apply=True and user is inactive."""
+        ctrl, *_ = _make_controller(auto_apply=True, is_user_active=False)
+        assert ctrl._can_auto_apply() is True
 
 
 # ---------------------------------------------------------------------------

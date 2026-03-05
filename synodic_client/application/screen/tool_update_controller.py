@@ -54,6 +54,7 @@ class ToolUpdateOrchestrator:
         window: MainWindow,
         config_resolver: Callable[[], ResolvedConfig],
         tray: QSystemTrayIcon,
+        is_user_active: Callable[[], bool] | None = None,
     ) -> None:
         """Set up the controller.
 
@@ -61,10 +62,14 @@ class ToolUpdateOrchestrator:
             window: The main application window.
             config_resolver: Callable returning the current resolved config.
             tray: System tray icon for notification messages.
+            is_user_active: Predicate returning ``True`` when the user
+                has a visible window.  Periodic tool updates are
+                deferred while active.
         """
         self._window = window
         self._resolve_config = config_resolver
         self._tray = tray
+        self._is_user_active = is_user_active or (lambda: False)
         self._tool_task: asyncio.Task[None] | None = None
         self._tool_update_timer: QTimer | None = None
 
@@ -108,9 +113,16 @@ class ToolUpdateOrchestrator:
         self._tool_update_timer = self._restart_timer(
             self._tool_update_timer,
             config.tool_update_interval_minutes,
-            self.on_tool_update,
+            self._on_periodic_tool_update,
             'Automatic tool updating',
         )
+
+    def _on_periodic_tool_update(self) -> None:
+        """Timer callback — deferred when the user has a visible window."""
+        if self._is_user_active():
+            logger.debug('Periodic tool update deferred — user is active')
+            return
+        self.on_tool_update()
 
     # -- ToolsView signal wiring --
 

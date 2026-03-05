@@ -74,6 +74,7 @@ class TrayScreen:
             self._banner,
             self._settings_window,
             config,
+            is_user_active=self._is_user_active,
         )
 
         # Tool update orchestrator - owns tool/package update lifecycle
@@ -81,6 +82,7 @@ class TrayScreen:
             window,
             self._resolve_config,
             self.tray,
+            is_user_active=self._is_user_active,
         )
         self._tool_orchestrator.restart_tool_update_timer()
 
@@ -127,6 +129,14 @@ class TrayScreen:
     def _show_settings(self) -> None:
         """Show the settings window."""
         self._settings_window.show()
+
+    def _is_user_active(self) -> bool:
+        """Return ``True`` when the user has a visible window.
+
+        Used by the update controllers to defer automatic updates
+        while the user is actively interacting with the application.
+        """
+        return self._window.isVisible() or self._settings_window.isVisible()
 
     def _on_settings_changed(self, config: ResolvedConfig) -> None:
         """React to a change made in the settings window."""
