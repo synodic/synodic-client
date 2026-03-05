@@ -49,6 +49,7 @@ class TestUserConfig:
         assert config.prerelease_packages is None
         assert config.auto_apply is None
         assert config.auto_start is None
+        assert config.debug_logging is None
 
     @staticmethod
     def test_prerelease_packages_round_trip() -> None:

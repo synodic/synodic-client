@@ -100,6 +100,10 @@ class UserConfig(BaseModel):
     # auto-startup.
     auto_start: bool | None = None
 
+    # Enable verbose DEBUG-level logging to the log file.
+    # None resolves to False (INFO level).
+    debug_logging: bool | None = None
+
     # ISO 8601 timestamp of the last successful client self-update.
     # None means no update has been recorded.
     last_client_update: str | None = None
@@ -231,5 +235,6 @@ class ResolvedConfig:
     prerelease_packages: dict[str, list[str]] | None
     auto_apply: bool
     auto_start: bool
+    debug_logging: bool
     last_client_update: str | None
     last_tool_updates: dict[str, str] | None

@@ -35,8 +35,12 @@ def main(
         bool,
         typer.Option('--dev', help='Run in dev mode with isolated config, logs, and instance lock.'),
     ] = False,
+    debug: Annotated[
+        bool,
+        typer.Option('--debug', help='Enable DEBUG-level file logging for this session.'),
+    ] = False,
 ) -> None:
     """Launch the Synodic Client GUI application."""
     from synodic_client.application.qt import application
 
-    application(uri=uri, dev_mode=dev)
+    application(uri=uri, dev_mode=dev, debug=debug)

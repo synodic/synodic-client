@@ -20,11 +20,12 @@ from synodic_client.logging import configure_logging
 from synodic_client.protocol import extract_uri_from_args
 from synodic_client.updater import initialize_velopack
 
-# Parse --dev flag early so logging uses the right filename.
+# Parse flags early so logging uses the right filename and level.
 _dev_mode = '--dev' in sys.argv[1:]
+_debug = '--debug' in sys.argv[1:]
 set_dev_mode(_dev_mode)
 
-configure_logging()
+configure_logging(debug=_debug)
 initialize_velopack()
 
 if not _dev_mode:
@@ -35,4 +36,4 @@ if not _dev_mode:
 # Heavy imports happen here — PySide6, porringer, etc.
 from synodic_client.application.qt import application
 
-application(uri=extract_uri_from_args(), dev_mode=_dev_mode)
+application(uri=extract_uri_from_args(), dev_mode=_dev_mode, debug=_debug)

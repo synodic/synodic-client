@@ -32,7 +32,7 @@ from synodic_client.application.icon import app_icon
 from synodic_client.application.screen import _format_relative_time
 from synodic_client.application.screen.card import CardFrame
 from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE, UPDATE_STATUS_CHECKING_STYLE
-from synodic_client.logging import log_path
+from synodic_client.logging import log_path, set_debug_level
 from synodic_client.resolution import ResolvedConfig, update_user_config
 from synodic_client.schema import GITHUB_REPO_URL
 from synodic_client.startup import is_startup_registered, register_startup, remove_startup
@@ -227,6 +227,12 @@ class SettingsWindow(QMainWindow):
     def _build_advanced_section(self) -> CardFrame:
         """Construct the *Advanced* settings card."""
         card = CardFrame('Advanced')
+
+        self._debug_logging_check = QCheckBox('Debug logging')
+        self._debug_logging_check.setToolTip('Write DEBUG-level messages to the log file')
+        self._debug_logging_check.toggled.connect(self._on_debug_logging_changed)
+        card.content_layout.addWidget(self._debug_logging_check)
+
         row = QHBoxLayout()
         open_log_btn = QPushButton('Open Log\u2026')
         open_log_btn.clicked.connect(self._open_log)
@@ -262,6 +268,9 @@ class SettingsWindow(QMainWindow):
             self._detect_updates_check.setChecked(config.detect_updates)
             self._auto_apply_check.setChecked(config.auto_apply)
             self._auto_start_check.setChecked(is_startup_registered())
+
+            # Debug logging
+            self._debug_logging_check.setChecked(config.debug_logging)
 
             # Last client update timestamp
             if config.last_client_update:
@@ -327,6 +336,7 @@ class SettingsWindow(QMainWindow):
             self._detect_updates_check,
             self._auto_apply_check,
             self._auto_start_check,
+            self._debug_logging_check,
             self._check_updates_btn,
         )
         for w in widgets:
@@ -375,6 +385,10 @@ class SettingsWindow(QMainWindow):
         else:
             remove_startup()
         self.settings_changed.emit(self._config)
+
+    def _on_debug_logging_changed(self, checked: bool) -> None:
+        set_debug_level(enabled=checked)
+        self._persist(debug_logging=checked)
 
     @staticmethod
     def _open_log() -> None:

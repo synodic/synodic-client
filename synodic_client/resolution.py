@@ -114,6 +114,7 @@ def _resolve_from_user(user: UserConfig) -> ResolvedConfig:
 
     auto_apply = user.auto_apply if user.auto_apply is not None else True
     auto_start = user.auto_start if user.auto_start is not None else True
+    debug_logging = user.debug_logging if user.debug_logging is not None else False
 
     return ResolvedConfig(
         update_source=user.update_source,
@@ -125,6 +126,7 @@ def _resolve_from_user(user: UserConfig) -> ResolvedConfig:
         prerelease_packages=user.prerelease_packages,
         auto_apply=auto_apply,
         auto_start=auto_start,
+        debug_logging=debug_logging,
         last_client_update=user.last_client_update,
         last_tool_updates=user.last_tool_updates,
     )

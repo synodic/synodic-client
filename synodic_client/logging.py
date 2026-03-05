@@ -1,6 +1,7 @@
 """Centralised logging configuration for the Synodic Client.
 
-Provides a rotating file handler with eager flushing.
+Provides a rotating file handler with eager flushing and runtime
+log-level switching via :func:`set_debug_level`.
 """
 
 import logging
@@ -16,6 +17,8 @@ _LOG_FILENAME_DEV = 'synodic-dev.log'
 _MAX_BYTES = 5_242_880  # 5 MB
 _BACKUP_COUNT = 3
 _FORMAT = '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+
+_debug_active: bool = False
 
 
 def log_path() -> Path:
@@ -43,12 +46,17 @@ class EagerRotatingFileHandler(RotatingFileHandler):
         self.flush()
 
 
-def configure_logging() -> None:
+def configure_logging(*, debug: bool = False) -> None:
     """Set up application-wide logging.
 
     Attaches a :class:`EagerRotatingFileHandler` to the ``synodic_client``
     and ``porringer`` loggers and configures :func:`logging.basicConfig`
     for ``INFO`` level output on *stderr*.
+
+    Args:
+        debug: When ``True``, set the file handler and app logger to
+            ``DEBUG`` level immediately.  Equivalent to calling
+            :func:`set_debug_level` after configuration.
 
     Safe to call more than once — subsequent calls are no-ops.
     """
@@ -80,3 +88,26 @@ def configure_logging() -> None:
         porringer_logger.setLevel(logging.DEBUG)
     else:
         porringer_logger.setLevel(logging.INFO)
+
+    if debug:
+        set_debug_level(enabled=True)
+
+
+def set_debug_level(*, enabled: bool) -> None:
+    """Switch the app logger and file handler between DEBUG and INFO at runtime.
+
+    Safe to call at any time.  Has no effect if logging has not been
+    configured yet.
+
+    Args:
+        enabled: ``True`` for DEBUG, ``False`` for INFO.
+    """
+    global _debug_active  # noqa: PLW0603
+    _debug_active = enabled
+    level = logging.DEBUG if enabled else logging.INFO
+
+    app_logger = logging.getLogger('synodic_client')
+    app_logger.setLevel(level)
+    for h in app_logger.handlers:
+        if isinstance(h, EagerRotatingFileHandler):
+            h.setLevel(level)

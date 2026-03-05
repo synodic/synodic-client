@@ -24,7 +24,7 @@ from synodic_client.application.screen.tray import TrayScreen
 from synodic_client.application.uri import parse_uri
 from synodic_client.client import Client
 from synodic_client.config import set_dev_mode
-from synodic_client.logging import configure_logging
+from synodic_client.logging import configure_logging, set_debug_level
 from synodic_client.protocol import extract_uri_from_args
 from synodic_client.resolution import (
     ResolvedConfig,
@@ -149,7 +149,7 @@ def _init_app() -> QApplication:
     return app
 
 
-def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
+def application(*, uri: str | None = None, dev_mode: bool = False, debug: bool = False) -> None:
     """Application entry point.
 
     Args:
@@ -159,13 +159,14 @@ def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
             log files, or single-instance locks with the user-installed
             application.  Velopack initialisation and protocol
             registration are skipped.
+        debug: When ``True``, enable DEBUG-level file logging.
     """
     # Activate dev-mode namespacing before anything reads config paths.
     set_dev_mode(dev_mode)
 
     # Configure logging before Velopack so install/uninstall hooks and
     # first-run diagnostics are captured in the log file.
-    configure_logging()
+    configure_logging(debug=debug)
     logger = logging.getLogger('synodic_client')
     _install_exception_hook(logger)
 
@@ -179,6 +180,11 @@ def application(*, uri: str | None = None, dev_mode: bool = False) -> None:
         logger.info('Received URI: %s', uri)
 
     client, porringer, config = _init_services(logger)
+
+    # Honour the persisted debug_logging preference unless the --debug
+    # flag already activated it.
+    if not debug and config.debug_logging:
+        set_debug_level(enabled=True)
 
     app = _init_app()
 

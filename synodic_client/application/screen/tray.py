@@ -131,7 +131,8 @@ class TrayScreen:
         """Show the settings window."""
         self._settings_window.show()
 
-    def _is_user_active(self) -> bool:
+    @staticmethod
+    def _is_user_active() -> bool:
         """Return ``True`` when the user has a visible application window.
 
         Checks all top-level ``QMainWindow`` instances (main window,

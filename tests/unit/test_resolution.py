@@ -38,6 +38,7 @@ def _make_resolved(**overrides: Any) -> ResolvedConfig:
         'prerelease_packages': None,
         'auto_apply': True,
         'auto_start': True,
+        'debug_logging': False,
         'last_client_update': None,
         'last_tool_updates': None,
     }

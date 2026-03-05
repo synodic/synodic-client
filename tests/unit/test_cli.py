@@ -36,7 +36,7 @@ class TestCli:
         with patch('synodic_client.application.qt.application') as mock_app:
             result = runner.invoke(app, [])
             assert result.exit_code == 0
-            mock_app.assert_called_once_with(uri=None, dev_mode=False)
+            mock_app.assert_called_once_with(uri=None, dev_mode=False, debug=False)
 
     @staticmethod
     def test_launches_application_with_uri() -> None:
@@ -45,7 +45,7 @@ class TestCli:
         with patch('synodic_client.application.qt.application') as mock_app:
             result = runner.invoke(app, [test_uri])
             assert result.exit_code == 0
-            mock_app.assert_called_once_with(uri=test_uri, dev_mode=False)
+            mock_app.assert_called_once_with(uri=test_uri, dev_mode=False, debug=False)
 
     @staticmethod
     def test_launches_application_with_dev_flag() -> None:
@@ -53,4 +53,4 @@ class TestCli:
         with patch('synodic_client.application.qt.application') as mock_app:
             result = runner.invoke(app, ['--dev'])
             assert result.exit_code == 0
-            mock_app.assert_called_once_with(uri=None, dev_mode=True)
+            mock_app.assert_called_once_with(uri=None, dev_mode=True, debug=False)

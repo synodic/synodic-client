@@ -7,6 +7,7 @@ and installation.
 For non-installed (development) environments, updates are not supported.
 """
 
+import contextlib
 import logging
 import sys
 from collections.abc import Callable
@@ -117,10 +118,8 @@ class Updater:
         # Eagerly resolve the Velopack manager so that
         # _current_version reflects the installed binary version
         # rather than the (potentially stale) Python package metadata.
-        try:
+        with contextlib.suppress(Exception):
             self._get_velopack_manager()
-        except Exception:
-            pass
 
         logger.info(
             'Updater created: version=%s, channel=%s, repo=%s',
