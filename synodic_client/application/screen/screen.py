@@ -465,6 +465,7 @@ class ToolsView(QWidget):
                 show_controls=True,
                 has_updates=bool(plugin_updates),
                 runtime_label=tag_text,
+                runtime_tag=rt.tag,
                 parent=self._container,
             )
             provider.auto_update_toggled.connect(self._on_auto_update_toggled)
@@ -496,6 +497,7 @@ class ToolsView(QWidget):
                         has_update=pkg.name in plugin_updates,
                         is_global=True,
                         host_tool=pkg.host_tool,
+                        runtime_tag=rt.tag,
                         last_updated=tool_timestamps.get(ts_key, ''),
                     ),
                 )
@@ -867,7 +869,7 @@ class ToolsView(QWidget):
 
         async def _list_global() -> None:
             try:
-                pkgs = await self._porringer.plugin.list_packages(
+                pkgs = await self._porringer.package.list(
                     plugin_name,
                     plugins=discovered,
                 )
@@ -888,7 +890,7 @@ class ToolsView(QWidget):
 
         async def _list_one(directory: ManifestDirectory) -> None:
             try:
-                pkgs = await self._porringer.plugin.list_packages(
+                pkgs = await self._porringer.package.list(
                     plugin_name,
                     Path(directory.path),
                     plugins=discovered,
@@ -925,7 +927,7 @@ class ToolsView(QWidget):
         or ``None`` when the plugin is not a ``RuntimeConsumer``.
         """
         try:
-            return await self._porringer.plugin.list_packages_by_runtime(
+            return await self._porringer.package.list_by_runtime(
                 plugin_name,
                 plugins=discovered,
             )
@@ -1162,16 +1164,37 @@ class ToolsView(QWidget):
         return available
 
     async def _check_updates_via_coordinator(self) -> dict[str, dict[str, str]]:
-        """Use the coordinator's ``check_updates`` for efficient detection."""
+        """Use the coordinator's ``check_updates`` for efficient detection.
+
+        Fetches both flat (global) and per-runtime update results.
+        Per-runtime entries use composite keys ``"plugin:tag"`` so that
+        :meth:`_apply_update_badges` can match runtime-specific headers.
+        """
         assert self._coordinator is not None
-        results = await self._coordinator.check_updates()
+        results, runtime_results = await asyncio.gather(
+            self._coordinator.check_updates(),
+            self._coordinator.check_updates_by_runtime(),
+        )
         available: dict[str, dict[str, str]] = {}
+
+        # Flat (global) results keyed by bare plugin name
         for cr in results:
             if cr.success:
                 for pi in cr.packages:
                     if pi.update_available:
-                        latest = str(pi.latest_version) if hasattr(pi, 'latest_version') and pi.latest_version else ''
+                        latest = str(pi.latest_version) if pi.latest_version else ''
                         available.setdefault(cr.plugin, {})[pi.name] = latest
+
+        # Per-runtime results keyed by composite "plugin:tag"
+        for rcr in runtime_results:
+            for cr in rcr.results:
+                if cr.success:
+                    for pi in cr.packages:
+                        if pi.update_available:
+                            composite = f'{cr.plugin}:{rcr.tag}'
+                            latest = str(pi.latest_version) if pi.latest_version else ''
+                            available.setdefault(composite, {})[pi.name] = latest
+
         return available
 
     async def _check_directory_updates(
@@ -1252,13 +1275,13 @@ class ToolsView(QWidget):
         current_plugin: str = ''
         for widget in self._section_widgets:
             if isinstance(widget, PluginProviderHeader):
-                current_plugin = widget._plugin_name
+                current_plugin = widget._signal_key
                 plugin_updates = self._updates_available.get(current_plugin, {})
                 has = bool(plugin_updates)
                 if widget._update_btn is not None:
                     widget._update_btn.setVisible(has)
             elif isinstance(widget, PluginRow) and widget._plugin_name:
-                plugin_updates = self._updates_available.get(widget._plugin_name, {})
+                plugin_updates = self._updates_available.get(widget._signal_key, {})
                 latest_version = plugin_updates.get(widget._package_name)
                 has_update = latest_version is not None
 
@@ -1287,7 +1310,7 @@ class ToolsView(QWidget):
     def set_plugin_updating(self, plugin_name: str, updating: bool) -> None:
         """Toggle the *Updatingâ€¦* state on the header for *plugin_name*."""
         for widget in self._section_widgets:
-            if isinstance(widget, PluginProviderHeader) and widget._plugin_name == plugin_name:
+            if isinstance(widget, PluginProviderHeader) and widget._signal_key == plugin_name:
                 widget.set_updating(updating)
                 break
 
@@ -1301,7 +1324,7 @@ class ToolsView(QWidget):
         for widget in self._section_widgets:
             if (
                 isinstance(widget, PluginRow)
-                and widget._plugin_name == plugin_name
+                and widget._signal_key == plugin_name
                 and widget._package_name == package_name
             ):
                 widget.set_updating(updating)
@@ -1317,7 +1340,7 @@ class ToolsView(QWidget):
         for widget in self._section_widgets:
             if (
                 isinstance(widget, PluginRow)
-                and widget._plugin_name == plugin_name
+                and widget._signal_key == plugin_name
                 and widget._package_name == package_name
             ):
                 widget.set_removing(removing)
@@ -1333,7 +1356,7 @@ class ToolsView(QWidget):
         for widget in self._section_widgets:
             if (
                 isinstance(widget, PluginRow)
-                and widget._plugin_name == plugin_name
+                and widget._signal_key == plugin_name
                 and widget._package_name == package_name
             ):
                 widget.set_error(message)
@@ -1342,7 +1365,7 @@ class ToolsView(QWidget):
     def set_plugin_error(self, plugin_name: str, message: str) -> None:
         """Show a transient inline error on the header for *plugin_name*."""
         for widget in self._section_widgets:
-            if isinstance(widget, PluginProviderHeader) and widget._plugin_name == plugin_name:
+            if isinstance(widget, PluginProviderHeader) and widget._signal_key == plugin_name:
                 widget.set_error(message)
                 break
 

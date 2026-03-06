@@ -22,6 +22,7 @@ from porringer.schema import (
     CheckParameters,
     CheckResult,
 )
+from porringer.schema.check import RuntimeCheckResult
 
 from synodic_client.application.schema import Snapshot
 
@@ -107,7 +108,26 @@ class DataCoordinator:
             A list of :class:`CheckResult` per plugin.
         """
         params = CheckParameters(plugins=plugins)
-        return await self._porringer.sync.check_updates(
+        return await self._porringer.package.check_updates(
+            params,
+            plugins=self._snapshot.discovered,
+        )
+
+    async def check_updates_by_runtime(
+        self,
+        plugins: list[str] | None = None,
+    ) -> list[RuntimeCheckResult]:
+        """Run per-runtime update detection using cached ``DiscoveredPlugins``.
+
+        Args:
+            plugins: Optional include-set of plugin names.  ``None``
+                means all plugins.
+
+        Returns:
+            A list of :class:`RuntimeCheckResult` per runtime.
+        """
+        params = CheckParameters(plugins=plugins)
+        return await self._porringer.package.check_updates_by_runtime(
             params,
             plugins=self._snapshot.discovered,
         )

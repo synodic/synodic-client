@@ -5,7 +5,7 @@
 groups = ["default", "build", "lint", "test"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:8f6349b298fe09fa365c1c799eba84f7e77bb71e1a082d8c7d15e057ed5d6b57"
+content_hash = "sha256:f567743c6be6eef49f781b1386b32e50eee0b2dab4cb0ba0efc1ec29f5d1ac78"
 
 [[metadata.targets]]
 requires_python = ">=3.14,<3.15"
@@ -336,7 +336,7 @@ files = [
 
 [[package]]
 name = "porringer"
-version = "0.2.1.dev75"
+version = "0.2.1.dev77"
 requires_python = ">=3.14"
 summary = ""
 groups = ["default"]
@@ -349,8 +349,8 @@ dependencies = [
     "userpath>=1.9.2",
 ]
 files = [
-    {file = "porringer-0.2.1.dev75-py3-none-any.whl", hash = "sha256:3934b4d332fe2f4473d015bd13c377154be6b39d5dbbb99c5c25705943d10c1a"},
-    {file = "porringer-0.2.1.dev75.tar.gz", hash = "sha256:a2fc29a06ce81bee7080d99f58fe51de7cc18509651f4ca1b1fabf786d0f6bb1"},
+    {file = "porringer-0.2.1.dev77-py3-none-any.whl", hash = "sha256:0ef3501d381b05cae54e83b37cdaded22672602bd69d1e2a715837a068ba405a"},
+    {file = "porringer-0.2.1.dev77.tar.gz", hash = "sha256:3bfabd5cf2c467c7a792e271c36c05d993e18e01da024f143beadd7a23337f32"},
 ]
 
 [[package]]

@@ -140,6 +140,9 @@ class PluginRowData:
     host_tool: str = ''
     """Host-tool name for injected packages."""
 
+    runtime_tag: str = ''
+    """Runtime tag for per-runtime packages (e.g. ``\"3.12\"``)."""
+
     project_paths: list[str] = field(default_factory=list)
     """Filesystem paths for project-scoped packages."""
 

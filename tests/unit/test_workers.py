@@ -1,8 +1,16 @@
-"""Tests for ToolUpdateResult dataclass in workers module."""
+"""Tests for ToolUpdateResult dataclass and runtime package workers."""
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
+from porringer.core.schema import Package
+from porringer.schema.execution import SetupAction, SetupActionResult
+from porringer.schema.plugin import RuntimePackageResult
+
 from synodic_client.application.schema import ToolUpdateResult
+from synodic_client.application.workers import run_runtime_package_updates
 
 
 class TestToolUpdateResult:
@@ -53,3 +61,100 @@ class TestToolUpdateResult:
         b = ToolUpdateResult()
         a.updated_packages.add('foo')
         assert 'foo' not in b.updated_packages
+
+
+class TestRunRuntimePackageUpdates:
+    """Tests for the run_runtime_package_updates worker."""
+
+    @staticmethod
+    def test_upgrades_packages_for_matching_tag() -> None:
+        """Packages from the matching runtime tag are upgraded."""
+        porringer = MagicMock()
+        porringer.package.list_by_runtime = AsyncMock(
+            return_value=[
+                RuntimePackageResult(
+                    provider='pim',
+                    tag='3.12',
+                    executable='/usr/bin/python3.12',
+                    packages=[
+                        Package(name='pdm', version='2.22.0'),
+                        Package(name='ruff', version='0.1.0'),
+                    ],
+                ),
+                RuntimePackageResult(
+                    provider='pim',
+                    tag='3.11',
+                    executable='/usr/bin/python3.11',
+                    packages=[Package(name='black', version='24.0')],
+                ),
+            ],
+        )
+        porringer.package.upgrade = AsyncMock(
+            return_value=SetupActionResult(
+                action=SetupAction(description='upgrade'),
+                success=True,
+            ),
+        )
+        result = asyncio.run(
+            run_runtime_package_updates(porringer, 'pipx', '3.12'),
+        )
+        assert result.updated == 2
+        assert result.updated_packages == {'pdm', 'ruff'}
+        # Only the matching runtime's packages should be upgraded
+        assert porringer.package.upgrade.call_count == 2
+
+    @staticmethod
+    def test_skips_non_matching_tag() -> None:
+        """Packages from non-matching runtimes are not touched."""
+        porringer = MagicMock()
+        porringer.package.list_by_runtime = AsyncMock(
+            return_value=[
+                RuntimePackageResult(
+                    provider='pim',
+                    tag='3.11',
+                    executable='/usr/bin/python3.11',
+                    packages=[Package(name='pdm', version='2.22.0')],
+                ),
+            ],
+        )
+        porringer.package.upgrade = AsyncMock()
+        result = asyncio.run(
+            run_runtime_package_updates(porringer, 'pipx', '3.12'),
+        )
+        assert result.updated == 0
+        porringer.package.upgrade.assert_not_called()
+
+    @staticmethod
+    def test_include_packages_filters() -> None:
+        """Only packages in include_packages are upgraded."""
+        porringer = MagicMock()
+        porringer.package.list_by_runtime = AsyncMock(
+            return_value=[
+                RuntimePackageResult(
+                    provider='pim',
+                    tag='3.12',
+                    executable='/usr/bin/python3.12',
+                    packages=[
+                        Package(name='pdm', version='2.22.0'),
+                        Package(name='ruff', version='0.1.0'),
+                    ],
+                ),
+            ],
+        )
+        porringer.package.upgrade = AsyncMock(
+            return_value=SetupActionResult(
+                action=SetupAction(description='upgrade'),
+                success=True,
+            ),
+        )
+        result = asyncio.run(
+            run_runtime_package_updates(
+                porringer,
+                'pipx',
+                '3.12',
+                include_packages={'ruff'},
+            ),
+        )
+        assert result.updated == 1
+        assert result.updated_packages == {'ruff'}
+        porringer.package.upgrade.assert_called_once()

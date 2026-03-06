@@ -393,3 +393,110 @@ class TestPluginRowRemove:
             )
         )
         assert row._project_paths == ['/fake/project']
+
+
+# ---------------------------------------------------------------------------
+# Composite signal keys (runtime-scoped widgets)
+# ---------------------------------------------------------------------------
+
+
+class TestCompositeSignalKeys:
+    """Tests for ``_signal_key`` on runtime-tagged widgets."""
+
+    @staticmethod
+    def test_header_signal_key_bare() -> None:
+        """Without runtime_tag the signal key equals the plugin name."""
+        header = PluginProviderHeader(_make_plugin(name='pipx'), show_controls=True)
+        assert header._signal_key == 'pipx'
+
+    @staticmethod
+    def test_header_signal_key_composite() -> None:
+        """With runtime_tag the signal key is 'plugin:tag'."""
+        header = PluginProviderHeader(
+            _make_plugin(name='pipx'),
+            show_controls=True,
+            runtime_tag='3.12',
+        )
+        assert header._signal_key == 'pipx:3.12'
+
+    @staticmethod
+    def test_header_update_requested_emits_composite() -> None:
+        """Update button emits the composite signal key."""
+        header = PluginProviderHeader(
+            _make_plugin(name='pipx'),
+            show_controls=True,
+            has_updates=True,
+            runtime_tag='3.12',
+        )
+        spy = MagicMock()
+        header.update_requested.connect(spy)
+        assert header._update_btn is not None
+        header._update_btn.click()
+        spy.assert_called_once_with('pipx:3.12')
+
+    @staticmethod
+    def test_header_auto_update_toggled_emits_composite() -> None:
+        """Auto toggle emits the composite signal key."""
+        header = PluginProviderHeader(
+            _make_plugin(name='pipx'),
+            show_controls=True,
+            runtime_tag='3.11',
+        )
+        spy = MagicMock()
+        header.auto_update_toggled.connect(spy)
+        # Find the Auto button and click it
+        from PySide6.QtWidgets import QPushButton
+
+        for child in header.findChildren(QPushButton):
+            if child.text() == 'Auto':
+                child.click()
+                break
+        spy.assert_called_once()
+        assert spy.call_args[0][0] == 'pipx:3.11'
+
+    @staticmethod
+    def test_row_signal_key_bare() -> None:
+        """PluginRow without runtime_tag has bare signal key."""
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx'))
+        assert row._signal_key == 'pipx'
+
+    @staticmethod
+    def test_row_signal_key_composite() -> None:
+        """PluginRow with runtime_tag has composite signal key."""
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx', runtime_tag='3.12'))
+        assert row._signal_key == 'pipx:3.12'
+
+    @staticmethod
+    def test_row_update_requested_emits_composite() -> None:
+        """PluginRow update button emits composite key as plugin_name."""
+        row = PluginRow(
+            PluginRowData(
+                name='pdm',
+                plugin_name='pipx',
+                show_toggle=True,
+                has_update=True,
+                runtime_tag='3.12',
+            )
+        )
+        spy = MagicMock()
+        row.update_requested.connect(spy)
+        assert row._update_btn is not None
+        row._update_btn.click()
+        spy.assert_called_once_with('pipx:3.12', 'pdm')
+
+    @staticmethod
+    def test_row_remove_requested_emits_composite() -> None:
+        """PluginRow remove button emits composite key."""
+        row = PluginRow(
+            PluginRowData(
+                name='pdm',
+                plugin_name='pipx',
+                is_global=True,
+                runtime_tag='3.12',
+            )
+        )
+        spy = MagicMock()
+        row.remove_requested.connect(spy)
+        assert row._remove_btn is not None
+        row._remove_btn.click()
+        spy.assert_called_once_with('pipx:3.12', 'pdm')

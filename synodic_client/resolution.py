@@ -218,6 +218,10 @@ def resolve_auto_update_scope(
 
     if mapping:
         for name, value in mapping.items():
+            # Skip runtime-scoped composite keys ("plugin:tag"); they
+            # are only relevant for on-demand runtime updates.
+            if ':' in name:
+                continue
             if value is False:
                 disabled_plugins.add(name)
             elif isinstance(value, dict):

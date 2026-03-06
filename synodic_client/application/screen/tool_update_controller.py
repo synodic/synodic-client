@@ -15,6 +15,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from porringer.api import API
+from porringer.core.schema import PackageRef
 from porringer.schema.execution import SetupActionResult
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QSystemTrayIcon
@@ -22,7 +23,7 @@ from PySide6.QtWidgets import QSystemTrayIcon
 from synodic_client.application.schema import ToolUpdateResult
 from synodic_client.application.screen.screen import MainWindow, ToolsView
 from synodic_client.application.workers import (
-    run_package_remove,
+    run_runtime_package_updates,
     run_tool_updates,
 )
 from synodic_client.config import load_user_config
@@ -181,7 +182,11 @@ class ToolUpdateOrchestrator:
     # -- Single plugin update --
 
     def on_single_plugin_update(self, plugin_name: str) -> None:
-        """Upgrade a single plugin across all cached projects."""
+        """Upgrade a single plugin across all cached projects.
+
+        Composite keys ``"plugin:tag"`` trigger a per-runtime update
+        scoped to the given runtime tag.
+        """
         porringer = self._window.porringer
         if porringer is None:
             logger.warning('Single plugin update skipped: porringer not available')
@@ -191,9 +196,54 @@ class ToolUpdateOrchestrator:
         tools_view = self._window.tools_view
         if tools_view is not None:
             tools_view.set_plugin_updating(plugin_name, True)
-        self._tool_task = asyncio.create_task(
-            self._async_single_plugin_update(porringer, plugin_name),
-        )
+
+        if ':' in plugin_name:
+            bare_plugin, runtime_tag = plugin_name.split(':', 1)
+            self._tool_task = asyncio.create_task(
+                self._async_runtime_plugin_update(porringer, plugin_name, bare_plugin, runtime_tag),
+            )
+        else:
+            self._tool_task = asyncio.create_task(
+                self._async_single_plugin_update(porringer, plugin_name),
+            )
+
+    async def _async_runtime_plugin_update(
+        self,
+        porringer: API,
+        signal_key: str,
+        plugin_name: str,
+        runtime_tag: str,
+    ) -> None:
+        """Run a runtime-scoped plugin update and route results."""
+        config = self._resolve_config()
+        mapping = config.plugin_auto_update or {}
+        pkg_entry = mapping.get(signal_key) or mapping.get(plugin_name)
+        coordinator = self._window.coordinator
+        discovered = coordinator.discovered_plugins if coordinator is not None else None
+
+        include_packages: set[str] | None = None
+        if isinstance(pkg_entry, dict):
+            enabled_pkgs = {name for name, enabled in pkg_entry.items() if enabled}
+            if enabled_pkgs:
+                include_packages = enabled_pkgs
+
+        try:
+            result = await run_runtime_package_updates(
+                porringer,
+                plugin_name,
+                runtime_tag,
+                include_packages=include_packages,
+                discovered_plugins=discovered,
+            )
+            if coordinator is not None:
+                coordinator.invalidate()
+            self._on_tool_update_finished(result, updating_plugin=signal_key, manual=True)
+        except Exception as exc:
+            logger.exception('Runtime tool update failed')
+            tools_view = self._window.tools_view
+            if tools_view is not None:
+                tools_view.set_plugin_updating(signal_key, False)
+                tools_view.set_plugin_error(signal_key, f'Update failed: {exc}')
 
     async def _async_single_plugin_update(self, porringer: API, plugin_name: str) -> None:
         """Run a single-plugin tool update and route results."""
@@ -250,9 +300,40 @@ class ToolUpdateOrchestrator:
         plugin_name: str,
         package_name: str,
     ) -> None:
-        """Run a single-package tool update and route results."""
+        """Run a single-package tool update and route results.
+
+        When *plugin_name* is a composite ``"plugin:tag"`` key the
+        upgrade is scoped to that runtime tag via
+        ``porringer.package.upgrade(runtime_tag=...)``.
+        """
         coordinator = self._window.coordinator
         discovered = coordinator.discovered_plugins if coordinator is not None else None
+
+        if ':' in plugin_name:
+            bare_plugin, runtime_tag = plugin_name.split(':', 1)
+            try:
+                result = await run_runtime_package_updates(
+                    porringer,
+                    bare_plugin,
+                    runtime_tag,
+                    include_packages={package_name},
+                    discovered_plugins=discovered,
+                )
+                if coordinator is not None:
+                    coordinator.invalidate()
+                self._on_tool_update_finished(
+                    result,
+                    updating_package=(plugin_name, package_name),
+                    manual=True,
+                )
+            except Exception as exc:
+                logger.exception('Runtime package update failed')
+                tools_view = self._window.tools_view
+                if tools_view is not None:
+                    tools_view.set_package_updating(plugin_name, package_name, False)
+                    tools_view.set_package_error(plugin_name, package_name, f'Update failed: {exc}')
+            return
+
         try:
             result = await run_tool_updates(
                 porringer,
@@ -358,12 +439,19 @@ class ToolUpdateOrchestrator:
         """Run a single-package removal and route results."""
         coordinator = self._window.coordinator
         discovered = coordinator.discovered_plugins if coordinator is not None else None
+
+        bare_plugin = plugin_name
+        runtime_tag: str | None = None
+        if ':' in plugin_name:
+            bare_plugin, runtime_tag = plugin_name.split(':', 1)
+
         try:
-            result = await run_package_remove(
-                porringer,
-                plugin_name,
-                package_name,
-                discovered_plugins=discovered,
+            package_ref = PackageRef(name=package_name)
+            result = await porringer.package.uninstall(
+                bare_plugin,
+                package_ref,
+                runtime_tag=runtime_tag,
+                plugins=discovered,
             )
             logger.info(
                 'Removal result for %s/%s: success=%s, skipped=%s, skip_reason=%s, message=%s',

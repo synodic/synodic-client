@@ -136,6 +136,7 @@ class PluginProviderHeader(QFrame):
         show_controls: bool = False,
         has_updates: bool = False,
         runtime_label: str = '',
+        runtime_tag: str = '',
         parent: QWidget | None = None,
     ) -> None:
         """Initialize the provider header with plugin info and optional controls."""
@@ -143,6 +144,8 @@ class PluginProviderHeader(QFrame):
         self.setObjectName('pluginProvider')
         self.setStyleSheet(PLUGIN_PROVIDER_STYLE)
         self._plugin_name = plugin.name
+        self._runtime_tag = runtime_tag
+        self._signal_key = f'{plugin.name}:{runtime_tag}' if runtime_tag else plugin.name
         self._update_btn: QPushButton | None = None
         self._checking_spinner: _RowSpinner | None = None
 
@@ -200,7 +203,7 @@ class PluginProviderHeader(QFrame):
             toggle_btn.setStyleSheet(PLUGIN_TOGGLE_STYLE)
             toggle_btn.setToolTip('Enable automatic updates for this plugin')
             toggle_btn.clicked.connect(
-                lambda checked: self.auto_update_toggled.emit(self._plugin_name, checked),
+                lambda checked: self.auto_update_toggled.emit(self._signal_key, checked),
             )
             layout.addWidget(toggle_btn)
 
@@ -211,7 +214,7 @@ class PluginProviderHeader(QFrame):
             update_btn.setStyleSheet(PLUGIN_UPDATE_STYLE)
             update_btn.setToolTip(f'Upgrade packages via {plugin.name} now')
             update_btn.clicked.connect(
-                lambda: self.update_requested.emit(self._plugin_name),
+                lambda: self.update_requested.emit(self._signal_key),
             )
             update_btn.setVisible(has_updates)
             self._update_btn = update_btn
@@ -303,6 +306,8 @@ class PluginRow(QFrame):
         self.setStyleSheet(PLUGIN_ROW_STYLE)
         self._plugin_name = data.plugin_name
         self._package_name = data.name
+        self._runtime_tag = data.runtime_tag
+        self._signal_key = f'{data.plugin_name}:{data.runtime_tag}' if data.runtime_tag else data.plugin_name
         self._update_btn: QPushButton | None = None
         self._remove_btn: QPushButton | None = None
         self._checking_spinner: _RowSpinner | None = None
@@ -403,7 +408,7 @@ class PluginRow(QFrame):
         toggle_btn.setToolTip('Auto-update this package')
         toggle_btn.clicked.connect(
             lambda checked: self.auto_update_toggled.emit(
-                self._plugin_name,
+                self._signal_key,
                 self._package_name,
                 checked,
             ),
@@ -420,7 +425,7 @@ class PluginRow(QFrame):
         update_btn.setFixedWidth(PLUGIN_ROW_UPDATE_WIDTH)
         update_btn.setToolTip(f'Update {data.name}')
         update_btn.clicked.connect(
-            lambda: self.update_requested.emit(self._plugin_name, self._package_name),
+            lambda: self.update_requested.emit(self._signal_key, self._package_name),
         )
         update_btn.setVisible(data.has_update)
         self._update_btn = update_btn
@@ -447,7 +452,7 @@ class PluginRow(QFrame):
         if data.is_global:
             remove_btn.setToolTip(f'Remove {data.name}')
             remove_btn.clicked.connect(
-                lambda: self.remove_requested.emit(self._plugin_name, self._package_name),
+                lambda: self.remove_requested.emit(self._signal_key, self._package_name),
             )
         else:
             remove_btn.setEnabled(False)

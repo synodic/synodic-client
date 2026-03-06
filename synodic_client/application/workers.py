@@ -149,4 +149,51 @@ async def run_package_remove(
         A :class:`SetupActionResult` describing the outcome.
     """
     package_ref = PackageRef(name=package_name)
-    return await porringer.uninstall(plugin_name, package_ref, plugins=discovered_plugins)
+    return await porringer.package.uninstall(plugin_name, package_ref, plugins=discovered_plugins)
+
+
+async def run_runtime_package_updates(
+    porringer: API,
+    plugin_name: str,
+    runtime_tag: str,
+    include_packages: set[str] | None = None,
+    *,
+    discovered_plugins: DiscoveredPlugins | None = None,
+) -> ToolUpdateResult:
+    """Upgrade packages for a single plugin scoped to a specific runtime tag.
+
+    Args:
+        porringer: The porringer API instance.
+        plugin_name: The installer plugin name (e.g. ``"pipx"``).
+        runtime_tag: The runtime version tag (e.g. ``"3.12"``).
+        include_packages: Optional include-set of package names.
+        discovered_plugins: Pre-discovered plugins to pass through.
+
+    Returns:
+        A :class:`ToolUpdateResult` summarising the run.
+    """
+    result = ToolUpdateResult()
+    packages = await porringer.package.list_by_runtime(plugin_name, plugins=discovered_plugins)
+    for rt in packages:
+        if rt.tag != runtime_tag:
+            continue
+        for pkg in rt.packages:
+            pkg_name = str(pkg.name)
+            if include_packages is not None and pkg_name not in include_packages:
+                continue
+            package_ref = PackageRef(name=pkg_name)
+            action_result = await porringer.package.upgrade(
+                plugin_name,
+                package_ref,
+                runtime_tag=runtime_tag,
+                plugins=discovered_plugins,
+            )
+            if action_result.skipped:
+                result.already_latest += 1
+            elif action_result.success:
+                result.updated += 1
+                result.updated_packages.add(pkg_name)
+            else:
+                result.failed += 1
+        break
+    return result

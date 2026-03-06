@@ -51,7 +51,7 @@ def _make_porringer() -> MagicMock:
     """Build a MagicMock standing in for the porringer API."""
     mock = MagicMock()
     mock.plugin.list = AsyncMock(return_value=[])
-    mock.plugin.list_packages = AsyncMock(return_value=[])
+    mock.package.list = AsyncMock(return_value=[])
     mock.cache.list_directories.return_value = []
     return mock
 
@@ -68,7 +68,7 @@ class TestGatherPackages:
     def test_global_query_returns_packages_with_no_directories() -> None:
         """Packages from the global query appear even when no directories are cached."""
         porringer = _make_porringer()
-        porringer.plugin.list_packages = AsyncMock(
+        porringer.package.list = AsyncMock(
             return_value=[
                 Package(name='pdm', version='2.22.4'),
                 Package(name='cppython', version='0.5.0'),
@@ -84,7 +84,7 @@ class TestGatherPackages:
     def test_global_query_returns_packages_with_empty_project_path() -> None:
         """Packages from the global query should have an empty project_path."""
         porringer = _make_porringer()
-        porringer.plugin.list_packages = AsyncMock(
+        porringer.package.list = AsyncMock(
             return_value=[
                 Package(name='pdm', version='2.22.4'),
             ],
@@ -101,13 +101,13 @@ class TestGatherPackages:
     def test_global_query_called_without_project_path() -> None:
         """The global query must call list_packages with no project_path arg."""
         porringer = _make_porringer()
-        porringer.plugin.list_packages = AsyncMock(return_value=[])
+        porringer.package.list = AsyncMock(return_value=[])
 
         view = ToolsView(porringer, _make_config())
         asyncio.run(view._gather_packages('pipx', []))
 
         # At least one call should have been made with only plugin_name (no path)
-        calls = porringer.plugin.list_packages.call_args_list
+        calls = porringer.package.list.call_args_list
         plugin_name_only = 1
         min_args_with_path = 2
         global_calls = [
@@ -127,7 +127,7 @@ class TestGatherPackages:
                 return [Package(name='pdm', version='2.22.4')]
             return [Package(name='mylib', version='1.0.0')]
 
-        porringer.plugin.list_packages = AsyncMock(side_effect=_mock_list)
+        porringer.package.list = AsyncMock(side_effect=_mock_list)
 
         directory = ManifestDirectory(path=Path('/fake/project'))
         view = ToolsView(porringer, _make_config())
@@ -147,7 +147,7 @@ class TestGatherPackages:
                 return []
             return [Package(name='mylib', version='1.0.0')]
 
-        porringer.plugin.list_packages = AsyncMock(side_effect=_mock_list)
+        porringer.package.list = AsyncMock(side_effect=_mock_list)
 
         directory = ManifestDirectory(path=Path('/fake/project'))
         view = ToolsView(porringer, _make_config())
@@ -161,7 +161,7 @@ class TestGatherPackages:
     def test_global_packages_have_empty_project_label() -> None:
         """Packages from the global query should have an empty project label."""
         porringer = _make_porringer()
-        porringer.plugin.list_packages = AsyncMock(
+        porringer.package.list = AsyncMock(
             return_value=[Package(name='cppython', version='0.5.0')],
         )
 
@@ -186,7 +186,7 @@ class TestGatherPackages:
                 raise RuntimeError('global query failed')
             return [Package(name='django', version='5.0')]
 
-        porringer.plugin.list_packages = AsyncMock(side_effect=_mock_list)
+        porringer.package.list = AsyncMock(side_effect=_mock_list)
 
         directory = ManifestDirectory(path=Path('/fake/project'))
         view = ToolsView(porringer, _make_config())
@@ -201,7 +201,7 @@ class TestGatherPackages:
     def test_relation_host_extracted_into_host_tool() -> None:
         """Packages with a PackageRelation populate the host_tool element."""
         porringer = _make_porringer()
-        porringer.plugin.list_packages = AsyncMock(
+        porringer.package.list = AsyncMock(
             return_value=[
                 Package(
                     name='cppython',
@@ -881,7 +881,7 @@ class TestRuntimePluginSupport:
                 return [Package(name='3.14-64', version='3.14.0')]
             return [Package(name='3.14-64', version='3.14.0')]
 
-        porringer.plugin.list_packages = AsyncMock(side_effect=_mock_list)
+        porringer.package.list = AsyncMock(side_effect=_mock_list)
         porringer.plugin.list = AsyncMock(
             return_value=[
                 PluginInfo(
@@ -1169,7 +1169,7 @@ class TestPerRuntimeDisplay:
         from porringer.utility.exception import PluginError
 
         porringer = _make_porringer()
-        porringer.plugin.list_packages_by_runtime = AsyncMock(
+        porringer.package.list_by_runtime = AsyncMock(
             side_effect=PluginError('not a RuntimeConsumer'),
         )
 
@@ -1188,7 +1188,7 @@ class TestPerRuntimeDisplay:
                 packages=[Package(name='requests', version='2.31.0')],
             ),
         ]
-        porringer.plugin.list_packages_by_runtime = AsyncMock(return_value=expected)
+        porringer.package.list_by_runtime = AsyncMock(return_value=expected)
 
         view = ToolsView(porringer, _make_config())
         result = asyncio.run(view._gather_runtime_packages('pip', MagicMock()))
@@ -1205,7 +1205,7 @@ class TestPerRuntimeDisplay:
                 return [Package(name='global-pkg', version='1.0')]
             return [Package(name='venv-pkg', version='2.0')]
 
-        porringer.plugin.list_packages = AsyncMock(side_effect=_mock_list)
+        porringer.package.list = AsyncMock(side_effect=_mock_list)
 
         directory = ManifestDirectory(path=Path('/fake/project'))
         view = ToolsView(porringer, _make_config())

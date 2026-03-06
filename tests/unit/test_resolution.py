@@ -296,6 +296,24 @@ class TestResolveAutoUpdateScope:
         assert packages is not None
         assert 'ruff' in packages
 
+    @staticmethod
+    def test_composite_keys_ignored() -> None:
+        """Runtime-scoped composite keys must not affect global auto-update."""
+        config = _make_resolved(
+            plugin_auto_update={
+                'pip:3.12': False,
+                'uv:3.11': {'ruff': False},
+            },
+        )
+        plugins, packages = resolve_auto_update_scope(
+            config,
+            ['pip', 'uv'],
+        )
+        # Neither bare plugin should be disabled
+        assert plugins is None
+        # No per-package filtering from composite keys
+        assert packages is None
+
 
 # ---------------------------------------------------------------------------
 # resolve_update_config
