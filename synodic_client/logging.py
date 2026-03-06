@@ -6,15 +6,14 @@ log-level switching via :func:`set_debug_level`.
 
 import logging
 import sys
-import tempfile
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from synodic_client.config import is_dev_mode
+from synodic_client.config import config_dir, is_dev_mode
 
 _LOG_FILENAME = 'synodic.log'
 _LOG_FILENAME_DEV = 'synodic-dev.log'
-_MAX_BYTES = 5_242_880  # 5 MB
+_MAX_BYTES = 1_048_576  # 1 MB
 _BACKUP_COUNT = 3
 _FORMAT = '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
 
@@ -24,13 +23,13 @@ _debug_active: bool = False
 def log_path() -> Path:
     """Return the path to the application log file.
 
-    The file lives in the system temp directory so it is cleaned up
-    automatically by the OS and avoids permission issues.
+    The file lives under ``config_dir() / 'logs'`` so that agents and
+    developers can find it at a deterministic, well-known location.
 
     Returns:
         Path to the log file.
     """
-    return Path(tempfile.gettempdir()) / (_LOG_FILENAME_DEV if is_dev_mode() else _LOG_FILENAME)
+    return config_dir() / 'logs' / (_LOG_FILENAME_DEV if is_dev_mode() else _LOG_FILENAME)
 
 
 class EagerRotatingFileHandler(RotatingFileHandler):
@@ -67,6 +66,8 @@ def configure_logging(*, debug: bool = False) -> None:
         return
 
     logging.basicConfig(level=logging.INFO)
+
+    log_path().parent.mkdir(parents=True, exist_ok=True)
 
     handler = EagerRotatingFileHandler(
         str(log_path()),

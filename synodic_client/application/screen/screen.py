@@ -315,11 +315,10 @@ class ToolsView(QWidget):
             pkg_tasks: dict[str, asyncio.Task] = {}
             for plugin in updatable_plugins:
                 if plugin.name in runtime_probed:
-                    # Only gather venv/project packages (skip global)
-                    if directories:
-                        pkg_tasks[plugin.name] = tg.create_task(
-                            self._gather_packages(plugin.name, directories, skip_global=True),
-                        )
+                    # Runtime-probed plugins show only per-runtime
+                    # packages; venv/project packages belong in
+                    # ProjectsView and are intentionally skipped here.
+                    continue
                 else:
                     pkg_tasks[plugin.name] = tg.create_task(
                         self._gather_packages(
@@ -390,10 +389,6 @@ class ToolsView(QWidget):
             for plugin in kind_buckets[kind]:
                 if plugin.name in data.runtime_packages:
                     self._build_runtime_sections(plugin, data, auto_update_map)
-                    # Also emit venv packages (if any) as a separate
-                    # provider header without a runtime tag.
-                    if data.packages_map.get(plugin.name):
-                        self._build_plugin_section(plugin, data, auto_update_map)
                 else:
                     self._build_plugin_section(plugin, data, auto_update_map)
 

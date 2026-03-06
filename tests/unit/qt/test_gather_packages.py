@@ -922,7 +922,6 @@ class TestRuntimePluginSupport:
 
 # Expected widget counts (avoids PLR2004)
 _EXPECTED_RUNTIME_PROVIDERS = 2
-_EXPECTED_RUNTIME_PROVIDERS_WITH_VENV = 3
 _EXPECTED_DEFAULT_RT_PACKAGES = 2
 _EXPECTED_NON_DEFAULT_RT_PACKAGES = 1
 
@@ -1050,8 +1049,8 @@ class TestPerRuntimeDisplay:
         assert len(non_default_rows) == _EXPECTED_NON_DEFAULT_RT_PACKAGES
         assert non_default_rows[0]._package_name == 'django'
 
-    def test_venv_packages_separate_from_runtime(self) -> None:
-        """Venv packages appear in a separate section without runtime tag."""
+    def test_venv_packages_excluded_for_runtime_probed_plugin(self) -> None:
+        """Venv packages must not appear in ToolsView for runtime-probed plugins."""
         view = ToolsView(_make_porringer(), _make_config())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
@@ -1078,13 +1077,8 @@ class TestPerRuntimeDisplay:
         view._build_widget_tree(data)
 
         providers = [w for w in view._section_widgets if isinstance(w, PluginProviderHeader)]
-        # 2 runtime providers + 1 venv provider = 3
-        assert len(providers) == _EXPECTED_RUNTIME_PROVIDERS_WITH_VENV
-
-        # The last provider should NOT have a runtime tag
-        last_provider = providers[-1]
-        runtime_tags = [w for w in last_provider.findChildren(QLabel) if 'Python' in w.text()]
-        assert len(runtime_tags) == 0, 'Venv provider should not have a runtime tag'
+        # Only the 2 runtime providers — no extra venv provider
+        assert len(providers) == _EXPECTED_RUNTIME_PROVIDERS
 
     def test_runtime_tag_uses_default_style(self) -> None:
         """The default runtime tag uses the green highlight style."""

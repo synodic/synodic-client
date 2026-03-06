@@ -2,12 +2,11 @@
 
 import logging
 import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 from synodic_client.application.screen.settings import SettingsWindow
-from synodic_client.config import set_dev_mode
+from synodic_client.config import config_dir, set_dev_mode
 from synodic_client.logging import (
     EagerRotatingFileHandler,
     configure_logging,
@@ -19,10 +18,10 @@ class TestLogPath:
     """Tests for log_path()."""
 
     @staticmethod
-    def test_returns_path_in_temp_dir() -> None:
-        """log_path() should resolve inside the system temp directory."""
+    def test_returns_path_in_config_logs_dir() -> None:
+        """log_path() should resolve inside config_dir() / 'logs'."""
         path = log_path()
-        assert path.parent == Path(tempfile.gettempdir())
+        assert path.parent == config_dir() / 'logs'
 
     @staticmethod
     def test_filename() -> None:
