@@ -221,6 +221,9 @@ class SettingsWindow(QMainWindow):
         card = CardFrame('Startup')
         self._auto_start_check = QCheckBox('Start with Windows')
         self._auto_start_check.toggled.connect(self._on_auto_start_changed)
+        if not getattr(sys, 'frozen', False):
+            self._auto_start_check.setEnabled(False)
+            self._auto_start_check.setToolTip('Auto-start is only available for installed builds')
         card.content_layout.addWidget(self._auto_start_check)
         return card
 
@@ -388,10 +391,11 @@ class SettingsWindow(QMainWindow):
 
     def _on_auto_start_changed(self, checked: bool) -> None:
         self._config = update_user_config(auto_start=checked)
-        if checked:
-            register_startup(sys.executable)
-        else:
-            remove_startup()
+        if getattr(sys, 'frozen', False):
+            if checked:
+                register_startup(sys.executable)
+            else:
+                remove_startup()
         self.settings_changed.emit(self._config)
 
     def _on_debug_logging_changed(self, checked: bool) -> None:

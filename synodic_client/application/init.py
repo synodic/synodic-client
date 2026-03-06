@@ -53,12 +53,16 @@ def run_startup_preamble(exe_path: str | None = None) -> None:
     # Seed user config from the build config (one-time propagation).
     seed_user_config_from_build()
 
-    register_protocol(exe_path)
+    frozen = getattr(sys, 'frozen', False)
+
+    if frozen:
+        register_protocol(exe_path)
 
     config = resolve_config()
-    if config.auto_start:
-        register_startup(exe_path)
-    else:
-        remove_startup()
+    if frozen:
+        if config.auto_start:
+            register_startup(exe_path)
+        else:
+            remove_startup()
 
-    logger.info('Startup preamble complete (auto_start=%s)', config.auto_start)
+    logger.info('Startup preamble complete (auto_start=%s, frozen=%s)', config.auto_start, frozen)
