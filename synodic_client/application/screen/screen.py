@@ -19,10 +19,10 @@ from porringer.schema import (
     SkipReason,
     SyncStrategy,
 )
-from porringer.schema.plugin import PluginKind
+from porringer.schema.plugin import PluginKind, RuntimePackageResult
 from porringer.utility.exception import PluginError
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QShortcut, QShowEvent
+from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt, QTimer, Signal
+from PySide6.QtGui import QKeyEvent, QKeySequence, QShortcut, QShowEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
@@ -48,7 +48,7 @@ from synodic_client.application.screen.schema import (
     PackageEntry,
     PluginRowData,
     ProjectInstance,
-    _RefreshData,
+    RefreshData,
 )
 from synodic_client.application.screen.spinner import SpinnerWidget
 from synodic_client.application.screen.update_banner import UpdateBanner
@@ -146,29 +146,7 @@ class ToolsView(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(*COMPACT_MARGINS)
 
-        # Toolbar â€” filter toggle left, action buttons right
-        toolbar = QHBoxLayout()
-
-        self._filter_btn = QPushButton('\U0001f50d')
-        self._filter_btn.setToolTip('Filter packages (Ctrl+F)')
-        self._filter_btn.setFlat(True)
-        self._filter_btn.setStyleSheet(FILTER_TOGGLE_STYLE)
-        self._filter_btn.clicked.connect(self._toggle_filter_panel)
-        toolbar.addWidget(self._filter_btn)
-
-        toolbar.addStretch()
-
-        check_btn = QPushButton('Check for Updates')
-        check_btn.setToolTip('Scan all manifests for available package updates')
-        check_btn.clicked.connect(self._on_check_for_updates)
-        toolbar.addWidget(check_btn)
-        self._check_btn = check_btn
-
-        update_all_btn = QPushButton('Update All')
-        update_all_btn.setToolTip('Upgrade all auto-update-enabled plugins now')
-        update_all_btn.clicked.connect(self.update_all_requested.emit)
-        toolbar.addWidget(update_all_btn)
-        outer.addLayout(toolbar)
+        outer.addLayout(self._build_toolbar())
 
         # Collapsible filter panel â€” search input + chip row
         self._filter_panel = QWidget()
@@ -227,6 +205,32 @@ class ToolsView(QWidget):
         self._timestamp_timer.timeout.connect(self._refresh_timestamps)
         self._timestamp_timer.start()
 
+    def _build_toolbar(self) -> QHBoxLayout:
+        """Build the toolbar with filter toggle and action buttons."""
+        toolbar = QHBoxLayout()
+
+        self._filter_btn = QPushButton('\U0001f50d')
+        self._filter_btn.setToolTip('Filter packages (Ctrl+F)')
+        self._filter_btn.setFlat(True)
+        self._filter_btn.setStyleSheet(FILTER_TOGGLE_STYLE)
+        self._filter_btn.clicked.connect(self._toggle_filter_panel)
+        toolbar.addWidget(self._filter_btn)
+
+        toolbar.addStretch()
+
+        check_btn = QPushButton('Check for Updates')
+        check_btn.setToolTip('Scan all manifests for available package updates')
+        check_btn.clicked.connect(self._on_check_for_updates)
+        toolbar.addWidget(check_btn)
+        self._check_btn = check_btn
+
+        update_all_btn = QPushButton('Update All')
+        update_all_btn.setToolTip('Upgrade all auto-update-enabled plugins now')
+        update_all_btn.clicked.connect(self.update_all_requested.emit)
+        toolbar.addWidget(update_all_btn)
+
+        return toolbar
+
     # --- Public API ---
 
     def refresh(self) -> None:
@@ -267,7 +271,7 @@ class ToolsView(QWidget):
     # _async_refresh helper methods
     # ------------------------------------------------------------------
 
-    async def _gather_refresh_data(self) -> _RefreshData:
+    async def _gather_refresh_data(self) -> RefreshData:
         """Fetch plugins, packages, and manifest requirements in parallel.
 
         For PACKAGE-kind plugins that are ``RuntimeConsumer`` instances,
@@ -279,7 +283,7 @@ class ToolsView(QWidget):
         ``skip_global=True``.
 
         Returns:
-            A :class:`_RefreshData` bundle containing all data needed
+            A :class:`RefreshData` bundle containing all data needed
             to build the widget tree.
         """
         plugins, directories = await self._fetch_data()
@@ -330,8 +334,7 @@ class ToolsView(QWidget):
 
         # Merge tool-managed sub-plugins into the environment plugin
         # that owns the host tool (e.g. cppython → pipx's pdm entry).
-        tool_plugins = tool_plugins_task.result()
-        for host_tool, sub_packages in tool_plugins.items():
+        for host_tool, sub_packages in tool_plugins_task.result().items():
             for env_packages in packages_map.values():
                 if any(entry.name == host_tool for entry in env_packages):
                     env_packages.extend(sub_packages)
@@ -344,7 +347,7 @@ class ToolsView(QWidget):
         if discovered is not None and discovered.runtime_context is not None:
             default_runtime_executable = discovered.runtime_context.get('python')
 
-        return _RefreshData(
+        return RefreshData(
             plugins=plugins,
             packages_map=packages_map,
             manifest_packages=manifest_packages,
@@ -366,7 +369,7 @@ class ToolsView(QWidget):
                     )
         return manifest_packages
 
-    def _build_widget_tree(self, data: _RefreshData) -> None:
+    def _build_widget_tree(self, data: RefreshData) -> None:
         """Clear existing widgets and rebuild the tool/package tree."""
         self._clear_section_widgets()
 
@@ -426,7 +429,7 @@ class ToolsView(QWidget):
     def _build_runtime_sections(
         self,
         plugin: PluginInfo,
-        data: _RefreshData,
+        data: RefreshData,
         auto_update_map: dict[str, bool | dict[str, bool]],
     ) -> None:
         """Build per-runtime provider headers and package rows.
@@ -435,8 +438,6 @@ class ToolsView(QWidget):
         :class:`PluginProviderHeader` with a runtime tag pill.
         The default runtime (matched by executable) is placed first.
         """
-        from porringer.schema.plugin import RuntimePackageResult
-
         runtime_results: list[RuntimePackageResult] = data.runtime_packages[plugin.name]
         if not runtime_results:
             return
@@ -464,10 +465,9 @@ class ToolsView(QWidget):
                 auto_val is not False,
                 show_controls=True,
                 has_updates=bool(plugin_updates),
-                runtime_label=tag_text,
-                runtime_tag=rt.tag,
                 parent=self._container,
             )
+            provider.set_runtime(rt.tag, label=tag_text)
             provider.auto_update_toggled.connect(self._on_auto_update_toggled)
             provider.update_requested.connect(self.plugin_update_requested.emit)
             self._insert_section_widget(provider)
@@ -506,7 +506,7 @@ class ToolsView(QWidget):
     def _build_plugin_section(
         self,
         plugin: PluginInfo,
-        data: _RefreshData,
+        data: RefreshData,
         auto_update_map: dict[str, bool | dict[str, bool]],
     ) -> None:
         """Build the provider header and package rows for a single plugin.
@@ -728,18 +728,19 @@ class ToolsView(QWidget):
             if chip is not None:
                 chip.setChecked(True)
 
-    def eventFilter(self, obj: object, event: object) -> bool:
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         """Handle Escape in the search input to clear filters / close panel."""
-        from PySide6.QtCore import QEvent
-        from PySide6.QtGui import QKeyEvent
-
-        if obj is self._search_input and isinstance(event, QKeyEvent):
-            if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
-                if self._has_active_filter:
-                    self._clear_active_filters()
-                else:
-                    self._close_filter_panel()
-                return True
+        if (
+            obj is self._search_input
+            and isinstance(event, QKeyEvent)
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() == Qt.Key.Key_Escape
+        ):
+            if self._has_active_filter:
+                self._clear_active_filters()
+            else:
+                self._close_filter_panel()
+            return True
         return super().eventFilter(obj, event)
 
     def _active_chip_plugins(self) -> set[str] | None:

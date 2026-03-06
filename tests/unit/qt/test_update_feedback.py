@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from packaging.version import Version
 from porringer.schema import PluginInfo
 from porringer.schema.plugin import PluginKind
+from PySide6.QtWidgets import QPushButton
 
 from synodic_client.application.screen.plugin_row import PluginProviderHeader, PluginRow
 from synodic_client.application.screen.schema import PluginRowData
@@ -415,8 +416,8 @@ class TestCompositeSignalKeys:
         header = PluginProviderHeader(
             _make_plugin(name='pipx'),
             show_controls=True,
-            runtime_tag='3.12',
         )
+        header.set_runtime('3.12')
         assert header._signal_key == 'pipx:3.12'
 
     @staticmethod
@@ -426,8 +427,8 @@ class TestCompositeSignalKeys:
             _make_plugin(name='pipx'),
             show_controls=True,
             has_updates=True,
-            runtime_tag='3.12',
         )
+        header.set_runtime('3.12')
         spy = MagicMock()
         header.update_requested.connect(spy)
         assert header._update_btn is not None
@@ -440,13 +441,11 @@ class TestCompositeSignalKeys:
         header = PluginProviderHeader(
             _make_plugin(name='pipx'),
             show_controls=True,
-            runtime_tag='3.11',
         )
+        header.set_runtime('3.11')
         spy = MagicMock()
         header.auto_update_toggled.connect(spy)
         # Find the Auto button and click it
-        from PySide6.QtWidgets import QPushButton
-
         for child in header.findChildren(QPushButton):
             if child.text() == 'Auto':
                 child.click()

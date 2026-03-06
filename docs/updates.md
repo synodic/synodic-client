@@ -44,12 +44,12 @@ client.initialize_updater(config)
 # Check for updates
 info = client.check_for_update()
 if info and info.available:
-    print(f"Update available: {info.current_version} -> {info.latest_version}")
-    
+    print(f'Update available: {info.current_version} -> {info.latest_version}')
+
     # Download with progress
     def on_progress(percent: int) -> None:
-        print(f"Downloading: {percent}%")
-    
+        print(f'Downloading: {percent}%')
+
     if client.download_update(on_progress):
         # Apply and restart
         client.apply_update_on_exit(restart=True)

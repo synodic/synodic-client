@@ -135,8 +135,6 @@ class PluginProviderHeader(QFrame):
         *,
         show_controls: bool = False,
         has_updates: bool = False,
-        runtime_label: str = '',
-        runtime_tag: str = '',
         parent: QWidget | None = None,
     ) -> None:
         """Initialize the provider header with plugin info and optional controls."""
@@ -144,28 +142,19 @@ class PluginProviderHeader(QFrame):
         self.setObjectName('pluginProvider')
         self.setStyleSheet(PLUGIN_PROVIDER_STYLE)
         self._plugin_name = plugin.name
-        self._runtime_tag = runtime_tag
-        self._signal_key = f'{plugin.name}:{runtime_tag}' if runtime_tag else plugin.name
+        self._runtime_tag = ''
+        self._signal_key = plugin.name
         self._update_btn: QPushButton | None = None
         self._checking_spinner: _RowSpinner | None = None
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(6)
 
         # Plugin name
         name_label = QLabel(plugin.name)
         name_label.setStyleSheet(PLUGIN_PROVIDER_NAME_STYLE)
-        layout.addWidget(name_label)
-
-        # Runtime tag pill (when per-runtime)
-        if runtime_label:
-            is_default = '(default)' in runtime_label
-            tag = QLabel(runtime_label)
-            tag.setStyleSheet(
-                PLUGIN_PROVIDER_RUNTIME_TAG_DEFAULT_STYLE if is_default else PLUGIN_PROVIDER_RUNTIME_TAG_STYLE
-            )
-            layout.addWidget(tag)
+        self._layout.addWidget(name_label)
 
         # Version
         version_text = (
@@ -177,7 +166,7 @@ class PluginProviderHeader(QFrame):
         )
         version_label = QLabel(version_text)
         version_label.setStyleSheet(PLUGIN_PROVIDER_VERSION_STYLE)
-        layout.addWidget(version_label)
+        self._layout.addWidget(version_label)
 
         # Installed indicator
         status_label = QLabel('\u25cf' if plugin.installed else '\u25cb')
@@ -185,47 +174,73 @@ class PluginProviderHeader(QFrame):
             PLUGIN_PROVIDER_STATUS_INSTALLED_STYLE if plugin.installed else PLUGIN_PROVIDER_STATUS_MISSING_STYLE
         )
         status_label.setToolTip('Installed' if plugin.installed else 'Not installed')
-        layout.addWidget(status_label)
+        self._layout.addWidget(status_label)
 
-        layout.addStretch()
+        self._layout.addStretch()
 
         # Transient inline error label (hidden by default)
         self._status_label = QLabel()
         self._status_label.setStyleSheet(PLUGIN_ROW_ERROR_STYLE)
         self._status_label.hide()
-        layout.addWidget(self._status_label)
+        self._layout.addWidget(self._status_label)
 
         # Auto / Update controls (only for updatable kinds)
         if show_controls:
-            toggle_btn = QPushButton('Auto')
-            toggle_btn.setCheckable(True)
-            toggle_btn.setChecked(auto_update)
-            toggle_btn.setStyleSheet(PLUGIN_TOGGLE_STYLE)
-            toggle_btn.setToolTip('Enable automatic updates for this plugin')
-            toggle_btn.clicked.connect(
-                lambda checked: self.auto_update_toggled.emit(self._signal_key, checked),
+            self._build_controls(self._layout, plugin, auto_update, has_updates)
+
+    def set_runtime(self, tag: str, label: str = '') -> None:
+        """Set runtime identity and optionally insert a runtime tag pill.
+
+        Must be called before the widget is added to a visible layout.
+        """
+        self._runtime_tag = tag
+        self._signal_key = f'{self._plugin_name}:{tag}' if tag else self._plugin_name
+        if label:
+            is_default = '(default)' in label
+            pill = QLabel(label)
+            pill.setStyleSheet(
+                PLUGIN_PROVIDER_RUNTIME_TAG_DEFAULT_STYLE if is_default else PLUGIN_PROVIDER_RUNTIME_TAG_STYLE
             )
-            layout.addWidget(toggle_btn)
+            # Insert after the name label (index 1)
+            self._layout.insertWidget(1, pill)
 
-            self._checking_spinner = _RowSpinner(self)
-            layout.addWidget(self._checking_spinner)
+    def _build_controls(
+        self,
+        layout: QHBoxLayout,
+        plugin: PluginInfo,
+        auto_update: bool,
+        has_updates: bool,
+    ) -> None:
+        """Build Auto/Update control buttons."""
+        toggle_btn = QPushButton('Auto')
+        toggle_btn.setCheckable(True)
+        toggle_btn.setChecked(auto_update)
+        toggle_btn.setStyleSheet(PLUGIN_TOGGLE_STYLE)
+        toggle_btn.setToolTip('Enable automatic updates for this plugin')
+        toggle_btn.clicked.connect(
+            lambda checked: self.auto_update_toggled.emit(self._signal_key, checked),
+        )
+        layout.addWidget(toggle_btn)
 
-            update_btn = QPushButton('Update')
-            update_btn.setStyleSheet(PLUGIN_UPDATE_STYLE)
-            update_btn.setToolTip(f'Upgrade packages via {plugin.name} now')
-            update_btn.clicked.connect(
-                lambda: self.update_requested.emit(self._signal_key),
-            )
-            update_btn.setVisible(has_updates)
-            self._update_btn = update_btn
-            layout.addWidget(update_btn)
+        self._checking_spinner = _RowSpinner(self)
+        layout.addWidget(self._checking_spinner)
 
-            if not plugin.installed:
-                toggle_btn.setEnabled(False)
-                toggle_btn.setChecked(False)
-                toggle_btn.setToolTip('Not installed \u2014 cannot auto-update')
-                update_btn.setEnabled(False)
-                update_btn.setToolTip('Not installed \u2014 cannot update')
+        update_btn = QPushButton('Update')
+        update_btn.setStyleSheet(PLUGIN_UPDATE_STYLE)
+        update_btn.setToolTip(f'Upgrade packages via {plugin.name} now')
+        update_btn.clicked.connect(
+            lambda: self.update_requested.emit(self._signal_key),
+        )
+        update_btn.setVisible(has_updates)
+        self._update_btn = update_btn
+        layout.addWidget(update_btn)
+
+        if not plugin.installed:
+            toggle_btn.setEnabled(False)
+            toggle_btn.setChecked(False)
+            toggle_btn.setToolTip('Not installed \u2014 cannot auto-update')
+            update_btn.setEnabled(False)
+            update_btn.setToolTip('Not installed \u2014 cannot update')
 
     def set_updating(self, updating: bool) -> None:
         """Toggle the button between *Updating…* and *Update* states."""

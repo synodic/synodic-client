@@ -154,7 +154,7 @@ class PluginRowData:
 
 
 @dataclass(slots=True)
-class _RefreshData:
+class RefreshData:
     """Internal data bundle returned by ``ToolsView._gather_refresh_data``."""
 
     plugins: list[PluginInfo]

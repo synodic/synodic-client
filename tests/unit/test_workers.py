@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 from porringer.core.schema import Package
@@ -11,6 +12,8 @@ from porringer.schema.plugin import RuntimePackageResult
 
 from synodic_client.application.schema import ToolUpdateResult
 from synodic_client.application.workers import run_runtime_package_updates
+
+_EXPECTED_RUNTIME_UPGRADES = 2
 
 
 class TestToolUpdateResult:
@@ -75,7 +78,7 @@ class TestRunRuntimePackageUpdates:
                 RuntimePackageResult(
                     provider='pim',
                     tag='3.12',
-                    executable='/usr/bin/python3.12',
+                    executable=Path('/usr/bin/python3.12'),
                     packages=[
                         Package(name='pdm', version='2.22.0'),
                         Package(name='ruff', version='0.1.0'),
@@ -84,7 +87,7 @@ class TestRunRuntimePackageUpdates:
                 RuntimePackageResult(
                     provider='pim',
                     tag='3.11',
-                    executable='/usr/bin/python3.11',
+                    executable=Path('/usr/bin/python3.11'),
                     packages=[Package(name='black', version='24.0')],
                 ),
             ],
@@ -98,10 +101,10 @@ class TestRunRuntimePackageUpdates:
         result = asyncio.run(
             run_runtime_package_updates(porringer, 'pipx', '3.12'),
         )
-        assert result.updated == 2
+        assert result.updated == _EXPECTED_RUNTIME_UPGRADES
         assert result.updated_packages == {'pdm', 'ruff'}
         # Only the matching runtime's packages should be upgraded
-        assert porringer.package.upgrade.call_count == 2
+        assert porringer.package.upgrade.call_count == _EXPECTED_RUNTIME_UPGRADES
 
     @staticmethod
     def test_skips_non_matching_tag() -> None:
@@ -112,7 +115,7 @@ class TestRunRuntimePackageUpdates:
                 RuntimePackageResult(
                     provider='pim',
                     tag='3.11',
-                    executable='/usr/bin/python3.11',
+                    executable=Path('/usr/bin/python3.11'),
                     packages=[Package(name='pdm', version='2.22.0')],
                 ),
             ],
@@ -133,7 +136,7 @@ class TestRunRuntimePackageUpdates:
                 RuntimePackageResult(
                     provider='pim',
                     tag='3.12',
-                    executable='/usr/bin/python3.12',
+                    executable=Path('/usr/bin/python3.12'),
                     packages=[
                         Package(name='pdm', version='2.22.0'),
                         Package(name='ruff', version='0.1.0'),

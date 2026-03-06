@@ -10,6 +10,7 @@ from packaging.version import Version
 from porringer.core.schema import Package, PackageRelation, PackageRelationKind
 from porringer.schema import ManifestDirectory
 from porringer.schema.plugin import PluginInfo, PluginKind, RuntimePackageResult
+from porringer.utility.exception import PluginError
 from PySide6.QtWidgets import QLabel, QPushButton
 
 from synodic_client.application.screen.plugin_row import (
@@ -19,8 +20,14 @@ from synodic_client.application.screen.plugin_row import (
     PluginRow,
     ProjectChildRow,
 )
-from synodic_client.application.screen.schema import PackageEntry, PluginRowData, ProjectInstance, _RefreshData
+from synodic_client.application.screen.schema import PackageEntry, PluginRowData, ProjectInstance, RefreshData
 from synodic_client.application.screen.screen import ToolsView
+from synodic_client.application.theme import (
+    FILTER_TOGGLE_ACTIVE_STYLE,
+    FILTER_TOGGLE_STYLE,
+    PLUGIN_PROVIDER_RUNTIME_TAG_DEFAULT_STYLE,
+    PLUGIN_PROVIDER_RUNTIME_TAG_STYLE,
+)
 from synodic_client.resolution import ResolvedConfig
 
 # Named constants for expected counts (avoids PLR2004)
@@ -775,23 +782,17 @@ class TestFilterPanel:
 
     def test_badge_inactive_by_default(self) -> None:
         """The filter badge is inactive when no filters are set."""
-        from synodic_client.application.theme import FILTER_TOGGLE_STYLE
-
         view = self._make_view()
         assert view._filter_btn.styleSheet() == FILTER_TOGGLE_STYLE
 
     def test_badge_active_with_search_text(self) -> None:
         """The filter badge activates when search text is entered."""
-        from synodic_client.application.theme import FILTER_TOGGLE_ACTIVE_STYLE
-
         view = self._make_view()
         view._search_input.setText('ruff')
         assert view._filter_btn.styleSheet() == FILTER_TOGGLE_ACTIVE_STYLE
 
     def test_badge_active_with_deselected_chip(self) -> None:
         """The filter badge activates when a chip is deselected."""
-        from synodic_client.application.theme import FILTER_TOGGLE_ACTIVE_STYLE
-
         view = self._make_view()
         # Manually inject a deselected plugin to test badge without full tree
         view._deselected_plugins.add('test-plugin')
@@ -800,8 +801,6 @@ class TestFilterPanel:
 
     def test_badge_clears_when_filters_removed(self) -> None:
         """The filter badge deactivates when all filters are cleared."""
-        from synodic_client.application.theme import FILTER_TOGGLE_STYLE
-
         view = self._make_view()
         view._search_input.setText('ruff')
         view._search_input.clear()
@@ -813,7 +812,7 @@ class TestFilterPanel:
         view._search_input.setText('some query')
         view._deselected_plugins.add('fake')
         view._clear_active_filters()
-        assert view._search_input.text() == ''
+        assert not view._search_input.text()
 
     def test_has_active_filter_false_by_default(self) -> None:
         """_has_active_filter is False when no filters are set."""
@@ -971,7 +970,7 @@ class TestPerRuntimeDisplay:
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
 
-        data = _RefreshData(
+        data = RefreshData(
             plugins=[plugin],
             packages_map={},
             manifest_packages={},
@@ -991,7 +990,7 @@ class TestPerRuntimeDisplay:
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
 
-        data = _RefreshData(
+        data = RefreshData(
             plugins=[plugin],
             packages_map={},
             manifest_packages={},
@@ -1013,7 +1012,7 @@ class TestPerRuntimeDisplay:
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
 
-        data = _RefreshData(
+        data = RefreshData(
             plugins=[plugin],
             packages_map={},
             manifest_packages={},
@@ -1036,7 +1035,7 @@ class TestPerRuntimeDisplay:
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
 
-        data = _RefreshData(
+        data = RefreshData(
             plugins=[plugin],
             packages_map={},
             manifest_packages={},
@@ -1058,7 +1057,7 @@ class TestPerRuntimeDisplay:
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
 
-        data = _RefreshData(
+        data = RefreshData(
             plugins=[plugin],
             packages_map={
                 'pip': [
@@ -1075,7 +1074,6 @@ class TestPerRuntimeDisplay:
             default_runtime_executable=default_exe,
         )
 
-        auto_update_map: dict[str, bool | dict[str, bool]] = {}
         # Build the full widget tree
         view._build_widget_tree(data)
 
@@ -1090,14 +1088,12 @@ class TestPerRuntimeDisplay:
 
     def test_runtime_tag_uses_default_style(self) -> None:
         """The default runtime tag uses the green highlight style."""
-        from synodic_client.application.theme import PLUGIN_PROVIDER_RUNTIME_TAG_DEFAULT_STYLE
-
         view = ToolsView(_make_porringer(), _make_config())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
 
-        data = _RefreshData(
+        data = RefreshData(
             plugins=[plugin],
             packages_map={},
             manifest_packages={},
@@ -1115,14 +1111,12 @@ class TestPerRuntimeDisplay:
 
     def test_runtime_tag_uses_normal_style_for_non_default(self) -> None:
         """Non-default runtime tags use the blue style."""
-        from synodic_client.application.theme import PLUGIN_PROVIDER_RUNTIME_TAG_STYLE
-
         view = ToolsView(_make_porringer(), _make_config())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
 
-        data = _RefreshData(
+        data = RefreshData(
             plugins=[plugin],
             packages_map={},
             manifest_packages={},
@@ -1146,7 +1140,7 @@ class TestPerRuntimeDisplay:
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
 
-        data = _RefreshData(
+        data = RefreshData(
             plugins=[plugin],
             packages_map={},
             manifest_packages={},
@@ -1164,10 +1158,9 @@ class TestPerRuntimeDisplay:
         visible_rows = [w for w in view._section_widgets if isinstance(w, PluginRow) and not w.isHidden()]
         assert len(visible_rows) == 0
 
-    def test_gather_runtime_packages_returns_none_for_non_consumer(self) -> None:
+    @staticmethod
+    def test_gather_runtime_packages_returns_none_for_non_consumer() -> None:
         """_gather_runtime_packages returns None when plugin is not a RuntimeConsumer."""
-        from porringer.utility.exception import PluginError
-
         porringer = _make_porringer()
         porringer.package.list_by_runtime = AsyncMock(
             side_effect=PluginError('not a RuntimeConsumer'),
@@ -1177,7 +1170,8 @@ class TestPerRuntimeDisplay:
         result = asyncio.run(view._gather_runtime_packages('pipx', MagicMock()))
         assert result is None
 
-    def test_gather_runtime_packages_returns_results(self) -> None:
+    @staticmethod
+    def test_gather_runtime_packages_returns_results() -> None:
         """_gather_runtime_packages returns list on success."""
         porringer = _make_porringer()
         expected = [
@@ -1194,7 +1188,8 @@ class TestPerRuntimeDisplay:
         result = asyncio.run(view._gather_runtime_packages('pip', MagicMock()))
         assert result == expected
 
-    def test_skip_global_flag_skips_global_query(self) -> None:
+    @staticmethod
+    def test_skip_global_flag_skips_global_query() -> None:
         """_gather_packages with skip_global=True only runs per-directory queries."""
         porringer = _make_porringer()
         call_paths: list[Path | None] = []
@@ -1216,7 +1211,8 @@ class TestPerRuntimeDisplay:
         assert 'venv-pkg' in names
         assert 'global-pkg' not in names
 
-    def test_bucket_by_kind_includes_runtime_packages(self) -> None:
+    @staticmethod
+    def test_bucket_by_kind_includes_runtime_packages() -> None:
         """_bucket_by_kind considers runtime_packages for content check."""
         plugins = [
             PluginInfo(
