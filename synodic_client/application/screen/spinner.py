@@ -128,6 +128,7 @@ class SpinnerWidget(QWidget):
         # Auto-overlay: track parent geometry via event filter
         if parent is not None:
             self.setAutoFillBackground(True)
+            self.setStyleSheet('background: palette(window);')
             self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             parent.installEventFilter(self)
             self.setGeometry(parent.rect())
