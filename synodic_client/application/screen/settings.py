@@ -120,6 +120,7 @@ class SettingsWindow(QMainWindow):
 
         scroll.setWidget(container)
         self.setCentralWidget(scroll)
+        self._scroll_content = container
 
     def _build_updates_section(self) -> CardFrame:
         """Construct the *Updates* settings card."""
@@ -317,8 +318,14 @@ class SettingsWindow(QMainWindow):
     def show(self) -> None:
         """Sync controls from config, size to content, then show the window."""
         self.sync_from_config()
-        # Let the layout determine the ideal size, clamped to the minimum.
-        self.adjustSize()
+        # QScrollArea doesn't propagate its content's sizeHint, so
+        # adjustSize() only reaches the minimum.  Compute the ideal
+        # height from the content widget directly.
+        content_hint = self._scroll_content.sizeHint()
+        margins = self._scroll_content.layout().contentsMargins()
+        ideal_w = max(content_hint.width() + margins.left() + margins.right(), self.minimumWidth())
+        ideal_h = max(content_hint.height() + margins.top() + margins.bottom(), self.minimumHeight())
+        self.resize(ideal_w, ideal_h)
         super().show()
         self.raise_()
         self.activateWindow()
