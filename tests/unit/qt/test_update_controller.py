@@ -414,3 +414,57 @@ class TestCheckError:
         ctrl._on_check_error('timeout', silent=True)
 
         assert banner.state.name == 'HIDDEN'
+
+
+# ---------------------------------------------------------------------------
+# Timestamp sync — _persist_check_timestamp updates config
+# ---------------------------------------------------------------------------
+
+
+class TestPersistCheckTimestamp:
+    """Verify _persist_check_timestamp syncs the settings config."""
+
+    @staticmethod
+    def test_persist_updates_settings_config() -> None:
+        """_persist_check_timestamp should call update_config on the settings window."""
+        ctrl, _app, _client, _banner, settings = _make_controller()
+
+        fake_resolved = _make_config(last_client_update='2026-03-09T00:00:00+00:00')
+        with patch(
+            'synodic_client.application.update_controller.update_user_config',
+            return_value=fake_resolved,
+        ):
+            ctrl._persist_check_timestamp()
+
+        settings.update_config.assert_called_once_with(fake_resolved)
+        settings.set_last_checked.assert_called_once()
+
+    @staticmethod
+    def test_on_check_finished_success_syncs_config() -> None:
+        """A successful check should persist timestamp AND sync settings config."""
+        ctrl, _app, _client, _banner, settings = _make_controller()
+        result = UpdateInfo(available=False, current_version=Version('1.0.0'))
+
+        fake_resolved = _make_config(last_client_update='2026-03-09T00:00:00+00:00')
+        with patch(
+            'synodic_client.application.update_controller.update_user_config',
+            return_value=fake_resolved,
+        ):
+            ctrl._on_check_finished(result, silent=True)
+
+        settings.update_config.assert_called_once_with(fake_resolved)
+
+    @staticmethod
+    def test_download_finished_syncs_config_and_label() -> None:
+        """_on_download_finished should sync config and update the label."""
+        ctrl, _app, _client, _banner, settings = _make_controller(auto_apply=False)
+
+        fake_resolved = _make_config(last_client_update='2026-03-09T00:00:00+00:00')
+        with patch(
+            'synodic_client.application.update_controller.update_user_config',
+            return_value=fake_resolved,
+        ):
+            ctrl._on_download_finished(True, '2.0.0')
+
+        settings.update_config.assert_called_once_with(fake_resolved)
+        settings.set_last_checked.assert_called_once()

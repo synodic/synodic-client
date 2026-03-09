@@ -132,7 +132,8 @@ class UpdateController:
     def _persist_check_timestamp(self) -> None:
         """Persist the current time as *last_client_update* and refresh the label."""
         ts = datetime.now(UTC).isoformat()
-        update_user_config(last_client_update=ts)
+        resolved = update_user_config(last_client_update=ts)
+        self._settings_window.update_config(resolved)
         self._settings_window.set_last_checked(ts)
 
     def _report_error(self, message: str, *, silent: bool) -> None:
@@ -329,7 +330,9 @@ class UpdateController:
 
         # Persist the client-update timestamp (actual update downloaded)
         ts = datetime.now(UTC).isoformat()
-        update_user_config(last_client_update=ts)
+        resolved = update_user_config(last_client_update=ts)
+        self._settings_window.update_config(resolved)
+        self._settings_window.set_last_checked(ts)
 
         self._pending_version = version
 

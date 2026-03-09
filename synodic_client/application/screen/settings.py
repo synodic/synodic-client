@@ -305,6 +305,15 @@ class SettingsWindow(QMainWindow):
         """Re-enable the *Check for Updates* button after a check completes."""
         self._check_updates_btn.setEnabled(True)
 
+    def update_config(self, config: ResolvedConfig) -> None:
+        """Replace the internal config snapshot without emitting signals.
+
+        Called by controllers that persist timestamps so that the next
+        :meth:`sync_from_config` sees fresh data instead of the stale
+        snapshot captured at construction time.
+        """
+        self._config = config
+
     def set_last_checked(self, timestamp: str) -> None:
         """Update the *last updated* label from an ISO 8601 timestamp."""
         relative = _format_relative_time(timestamp)

@@ -382,7 +382,12 @@ class ToolUpdateOrchestrator:
             for pkg_name in result.updated_packages:
                 key = f'{plugin_name}/{pkg_name}' if plugin_name else pkg_name
                 existing[key] = now
-            update_user_config(last_tool_updates=existing)
+            resolved = update_user_config(last_tool_updates=existing)
+            # Refresh the config on the tools view so the next rebuild
+            # picks up the updated timestamps instead of stale data.
+            tools_view_ref = self._window.tools_view
+            if tools_view_ref is not None:
+                tools_view_ref._config = resolved
 
         # Clear updating state on widgets
         tools_view = self._window.tools_view

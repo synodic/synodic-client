@@ -404,3 +404,46 @@ class TestCheckForUpdatesButton:
         window.set_checking()
         assert window._check_updates_btn.isEnabled() is False
         assert window._update_status_label.text() == 'Checking\u2026'
+
+
+# ---------------------------------------------------------------------------
+# update_config — silent config refresh
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateConfig:
+    """Verify that update_config refreshes _config without emitting signals."""
+
+    @staticmethod
+    def test_update_config_replaces_internal_config() -> None:
+        """update_config should replace _config with the new snapshot."""
+        window = _make_window(_make_config(last_client_update=None))
+        new_config = _make_config(last_client_update='2026-03-09T12:00:00+00:00')
+
+        window.update_config(new_config)
+
+        assert window._config is new_config
+        assert window._config.last_client_update == '2026-03-09T12:00:00+00:00'
+
+    @staticmethod
+    def test_update_config_does_not_emit_settings_changed() -> None:
+        """update_config must NOT emit settings_changed to avoid circular reinit."""
+        window = _make_window()
+        signal_spy = MagicMock()
+        window.settings_changed.connect(signal_spy)
+
+        window.update_config(_make_config(update_channel='dev'))
+
+        signal_spy.assert_not_called()
+
+    @staticmethod
+    def test_sync_after_update_config_uses_new_timestamp() -> None:
+        """sync_from_config after update_config should display the refreshed timestamp."""
+        window = _make_window(_make_config(last_client_update=None))
+        assert window._last_client_update_label.text() == ''
+
+        new_config = _make_config(last_client_update='2026-03-09T12:00:00+00:00')
+        window.update_config(new_config)
+        window.sync_from_config()
+
+        assert 'Last updated:' in window._last_client_update_label.text()
