@@ -22,7 +22,7 @@ from synodic_client.application.data import DataCoordinator
 from synodic_client.application.screen.install import SetupPreviewWidget
 from synodic_client.application.screen.schema import PreviewPhase
 from synodic_client.application.screen.sidebar import ManifestSidebar
-from synodic_client.application.screen.spinner import SpinnerWidget
+from synodic_client.application.screen.spinner import LoadingIndicator
 from synodic_client.application.theme import COMPACT_MARGINS
 from synodic_client.resolution import ResolvedConfig
 
@@ -91,9 +91,10 @@ class ProjectsView(QWidget):
         self._empty_placeholder.setStyleSheet('color: grey; font-size: 13px;')
         self._stack.addWidget(self._empty_placeholder)
 
-        outer.addLayout(right, stretch=1)
+        self._loading_indicator = LoadingIndicator('Loading projects\u2026')
+        self._stack.addWidget(self._loading_indicator)
 
-        self._loading_spinner = SpinnerWidget('Loading projects\u2026', parent=self)
+        outer.addLayout(right, stretch=1)
 
     # --- Public API ---
 
@@ -106,7 +107,8 @@ class ProjectsView(QWidget):
     async def _async_refresh(self) -> None:
         """Refresh the sidebar and stacked widgets from the porringer cache."""
         self._refresh_in_progress = True
-        self._loading_spinner.start()
+        self._loading_indicator.start()
+        self._stack.setCurrentWidget(self._loading_indicator)
         self._sidebar.set_enabled(False)
 
         try:
@@ -167,7 +169,7 @@ class ProjectsView(QWidget):
         except Exception:
             logger.exception('Failed to refresh projects')
         finally:
-            self._loading_spinner.stop()
+            self._loading_indicator.stop()
             self._sidebar.set_enabled(True)
             self._refresh_in_progress = False
 

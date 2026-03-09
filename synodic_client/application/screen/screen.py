@@ -50,7 +50,7 @@ from synodic_client.application.screen.schema import (
     ProjectInstance,
     RefreshData,
 )
-from synodic_client.application.screen.spinner import SpinnerWidget
+from synodic_client.application.screen.spinner import LoadingIndicator
 from synodic_client.application.screen.update_banner import UpdateBanner
 from synodic_client.application.theme import (
     COMPACT_MARGINS,
@@ -197,7 +197,8 @@ class ToolsView(QWidget):
         self._scroll.setWidget(self._container)
         outer.addWidget(self._scroll)
 
-        self._loading_spinner = SpinnerWidget('Loading tools\u2026', parent=self)
+        self._loading_indicator = LoadingIndicator('Loading tools\u2026')
+        outer.addWidget(self._loading_indicator)
 
         # Periodic timer to refresh relative timestamps (every 60s)
         self._timestamp_timer = QTimer(self)
@@ -224,10 +225,10 @@ class ToolsView(QWidget):
         toolbar.addWidget(check_btn)
         self._check_btn = check_btn
 
-        update_all_btn = QPushButton('Update All')
-        update_all_btn.setToolTip('Upgrade all auto-update-enabled plugins now')
-        update_all_btn.clicked.connect(self.update_all_requested.emit)
-        toolbar.addWidget(update_all_btn)
+        self._update_all_btn = QPushButton('Update All')
+        self._update_all_btn.setToolTip('Upgrade all auto-update-enabled plugins now')
+        self._update_all_btn.clicked.connect(self.update_all_requested.emit)
+        toolbar.addWidget(self._update_all_btn)
 
         return toolbar
 
@@ -248,7 +249,10 @@ class ToolsView(QWidget):
         background task so the widget tree renders immediately.
         """
         self._refresh_in_progress = True
-        self._loading_spinner.start()
+        self._scroll.hide()
+        self._loading_indicator.start()
+        self._check_btn.setEnabled(False)
+        self._update_all_btn.setEnabled(False)
         need_deferred_check = False
 
         try:
@@ -259,7 +263,10 @@ class ToolsView(QWidget):
             logger.exception('Failed to refresh tools')
             need_deferred_check = False
         finally:
-            self._loading_spinner.stop()
+            self._loading_indicator.stop()
+            self._scroll.show()
+            self._check_btn.setEnabled(True)
+            self._update_all_btn.setEnabled(True)
             self._refresh_in_progress = False
 
         # Fire-and-forget: detect updates in the background, then patch

@@ -47,6 +47,7 @@ COPY_BTN_STYLE = (
 # ---------------------------------------------------------------------------
 HEADER_STYLE = 'font-size: 14px; font-weight: bold;'
 MUTED_STYLE = 'color: grey;'
+LOADING_LABEL_STYLE = 'color: grey; font-size: 13px;'
 COMMAND_HEADER_STYLE = 'color: grey; margin-top: 6px;'
 
 # ---------------------------------------------------------------------------
