@@ -34,7 +34,11 @@ async def check_for_update(client: Client) -> UpdateInfo | None:
         An ``UpdateInfo`` result, or ``None`` when no updater is initialised.
     """
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, client.check_for_update)
+    try:
+        return await loop.run_in_executor(None, client.check_for_update)
+    except asyncio.CancelledError:
+        logger.debug('check_for_update cancelled')
+        raise
 
 
 async def download_update(
@@ -61,7 +65,11 @@ async def download_update(
 
         return client.download_update(progress_callback)
 
-    return await loop.run_in_executor(None, _run)
+    try:
+        return await loop.run_in_executor(None, _run)
+    except asyncio.CancelledError:
+        logger.debug('download_update cancelled')
+        raise
 
 
 async def run_tool_updates(
@@ -107,24 +115,28 @@ async def run_tool_updates(
             plugins=plugins,
             include_packages=include_packages,
         )
-        async for event in porringer.sync.execute_stream(
-            params,
-            plugins=discovered_plugins,
-        ):
-            if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result is not None:
-                action_result = event.result
-                if action_result.skipped:
-                    if action_result.skip_reason in {
-                        SkipReason.ALREADY_LATEST,
-                        SkipReason.ALREADY_INSTALLED,
-                    }:
-                        result.already_latest += 1
-                elif action_result.success:
-                    result.updated += 1
-                    if action_result.action.package:
-                        result.updated_packages.add(str(action_result.action.package.name))
-                else:
-                    result.failed += 1
+        try:
+            async for event in porringer.sync.execute_stream(
+                params,
+                plugins=discovered_plugins,
+            ):
+                if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result is not None:
+                    action_result = event.result
+                    if action_result.skipped:
+                        if action_result.skip_reason in {
+                            SkipReason.ALREADY_LATEST,
+                            SkipReason.ALREADY_INSTALLED,
+                        }:
+                            result.already_latest += 1
+                    elif action_result.success:
+                        result.updated += 1
+                        if action_result.action.package:
+                            result.updated_packages.add(str(action_result.action.package.name))
+                    else:
+                        result.failed += 1
+        except asyncio.CancelledError:
+            logger.debug('run_tool_updates cancelled during manifest processing')
+            raise
         result.manifests_processed += 1
     return result
 

@@ -74,6 +74,16 @@ class ToolUpdateOrchestrator:
         self._tool_task: asyncio.Task[None] | None = None
         self._tool_update_timer: QTimer | None = None
 
+    def shutdown(self) -> None:
+        """Stop timers and cancel in-flight tasks for a clean exit."""
+        if self._tool_update_timer is not None:
+            self._tool_update_timer.stop()
+            self._tool_update_timer = None
+        if self._tool_task is not None and not self._tool_task.done():
+            self._tool_task.cancel()
+            self._tool_task = None
+        logger.info('ToolUpdateOrchestrator shut down')
+
     # -- Timer management --
 
     @staticmethod
@@ -175,6 +185,9 @@ class ToolUpdateOrchestrator:
             if coordinator is not None:
                 coordinator.invalidate()
             self._on_tool_update_finished(result)
+        except asyncio.CancelledError:
+            logger.debug('Tool update cancelled (shutdown)')
+            raise
         except Exception as exc:
             logger.exception('Tool update failed')
             self._on_tool_update_error(str(exc))
@@ -238,6 +251,9 @@ class ToolUpdateOrchestrator:
             if coordinator is not None:
                 coordinator.invalidate()
             self._on_tool_update_finished(result, updating_plugin=signal_key, manual=True)
+        except asyncio.CancelledError:
+            logger.debug('Runtime plugin update cancelled (shutdown)')
+            raise
         except Exception as exc:
             logger.exception('Runtime tool update failed')
             tools_view = self._window.tools_view
@@ -270,6 +286,9 @@ class ToolUpdateOrchestrator:
             if coordinator is not None:
                 coordinator.invalidate()
             self._on_tool_update_finished(result, updating_plugin=plugin_name, manual=True)
+        except asyncio.CancelledError:
+            logger.debug('Single plugin update cancelled (shutdown)')
+            raise
         except Exception as exc:
             logger.exception('Tool update failed')
             tools_view = self._window.tools_view
@@ -326,6 +345,9 @@ class ToolUpdateOrchestrator:
                     updating_package=(plugin_name, package_name),
                     manual=True,
                 )
+            except asyncio.CancelledError:
+                logger.debug('Runtime package update cancelled (shutdown)')
+                raise
             except Exception as exc:
                 logger.exception('Runtime package update failed')
                 tools_view = self._window.tools_view
@@ -348,6 +370,9 @@ class ToolUpdateOrchestrator:
                 updating_package=(plugin_name, package_name),
                 manual=True,
             )
+        except asyncio.CancelledError:
+            logger.debug('Package update cancelled (shutdown)')
+            raise
         except Exception as exc:
             logger.exception('Package update failed')
             tools_view = self._window.tools_view
@@ -470,6 +495,9 @@ class ToolUpdateOrchestrator:
             if coordinator is not None:
                 coordinator.invalidate()
             self._on_package_remove_finished(result, plugin_name, package_name)
+        except asyncio.CancelledError:
+            logger.debug('Package removal cancelled (shutdown)')
+            raise
         except Exception as exc:
             logger.exception('Package removal failed')
             tools_view = self._window.tools_view

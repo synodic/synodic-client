@@ -141,6 +141,12 @@ class TrayScreen:
         """
         return any(w.isVisible() for w in QApplication.topLevelWidgets() if isinstance(w, QMainWindow))
 
+    def shutdown(self) -> None:
+        """Stop all timers and cancel in-flight tasks for a clean exit."""
+        self._update_controller.shutdown()
+        self._tool_orchestrator.shutdown()
+        logger.info('TrayScreen shut down')
+
     def _on_settings_changed(self, config: ResolvedConfig) -> None:
         """React to a change made in the settings window."""
         self._config = config

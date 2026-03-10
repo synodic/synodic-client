@@ -111,6 +111,16 @@ class UpdateController:
         """
         self._is_user_active = predicate
 
+    def shutdown(self) -> None:
+        """Stop timers and cancel in-flight tasks for a clean exit."""
+        if self._auto_update_timer is not None:
+            self._auto_update_timer.stop()
+            self._auto_update_timer = None
+        if self._update_task is not None and not self._update_task.done():
+            self._update_task.cancel()
+            self._update_task = None
+        logger.info('UpdateController shut down')
+
     # ------------------------------------------------------------------
     # Config helpers
     # ------------------------------------------------------------------
@@ -250,6 +260,9 @@ class UpdateController:
             result = await check_for_update(self._client)
             self._on_check_finished(result, silent=silent)
             logger.info('[DIAG] Self-update check completed (silent=%s)', silent)
+        except asyncio.CancelledError:
+            logger.debug('Update check cancelled (shutdown)')
+            raise
         except Exception as exc:
             logger.exception('Update check failed')
             self._on_check_error(str(exc), silent=silent)
@@ -311,6 +324,9 @@ class UpdateController:
                 on_progress=self._on_download_progress,
             )
             self._on_download_finished(success, version)
+        except asyncio.CancelledError:
+            logger.debug('Update download cancelled (shutdown)')
+            raise
         except Exception as exc:
             logger.exception('Update download failed')
             self._on_download_error(str(exc))
