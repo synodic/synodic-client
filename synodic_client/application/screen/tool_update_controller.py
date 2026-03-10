@@ -438,7 +438,7 @@ class ToolUpdateOrchestrator:
         # not None) call show() below which triggers the refresh.
         tools_view = self._window.tools_view
         if tools_view is not None:
-            tools_view._updates_checked = False
+            tools_view.invalidate_update_data()
             if self._window.isVisible() and target is None:
                 tools_view.refresh()
 
@@ -538,5 +538,5 @@ class ToolUpdateOrchestrator:
         tools_view = self._window.tools_view
         if tools_view is not None:
             tools_view.set_package_removing(plugin_name, package_name, False)
-            tools_view._updates_checked = False
+            tools_view.invalidate_update_data()
             tools_view.refresh()

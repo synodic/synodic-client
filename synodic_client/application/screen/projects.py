@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from synodic_client.application.data import DataCoordinator
+from synodic_client.application.package_state import PackageStateStore
 from synodic_client.application.screen.install import SetupPreviewWidget
 from synodic_client.application.screen.schema import PreviewPhase
 from synodic_client.application.screen.sidebar import ManifestSidebar
@@ -48,6 +49,7 @@ class ProjectsView(QWidget):
         parent: QWidget | None = None,
         *,
         coordinator: DataCoordinator | None = None,
+        package_store: PackageStateStore | None = None,
     ) -> None:
         """Initialize the projects view.
 
@@ -57,11 +59,13 @@ class ProjectsView(QWidget):
             parent: Optional parent widget.
             coordinator: Shared data coordinator for validated directory
                 data.
+            package_store: Shared package update state registry.
         """
         super().__init__(parent)
         self._porringer = porringer
         self._store = store
         self._coordinator = coordinator
+        self._package_store = package_store
         self._refresh_in_progress = False
         self._pending_select: Path | None = None
         self._widgets: dict[Path, SetupPreviewWidget] = {}
@@ -166,7 +170,6 @@ class ProjectsView(QWidget):
                     widget.load(
                         str(path),
                         project_directory=path if path.is_dir() else path.parent,
-                        detect_updates=self._store.config.detect_updates,
                     )
 
         except Exception:
@@ -200,6 +203,7 @@ class ProjectsView(QWidget):
                     self,
                     show_close=False,
                     config=self._store.config,
+                    package_store=self._package_store,
                 )
                 widget._discovered_plugins = discovered
                 widget.install_finished.connect(self._on_install_finished)

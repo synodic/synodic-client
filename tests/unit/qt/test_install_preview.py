@@ -662,12 +662,12 @@ class TestPreviewWorkerSignals:
         assert order == ['parsed', 'plugins', 'ready']
 
 
-class TestPreviewWorkerUpdateDetection:
-    """Tests for run_preview passing update-detection flags to porringer."""
+class TestPreviewWorkerPrerelease:
+    """Tests for run_preview passing prerelease config to porringer."""
 
     @staticmethod
-    def test_passes_detect_updates_and_prerelease_packages(tmp_path: Path) -> None:
-        """Verify detect_updates and prerelease_packages are forwarded to SetupParameters."""
+    def test_passes_prerelease_packages(tmp_path: Path) -> None:
+        """Verify prerelease_packages are forwarded to SetupParameters."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text('{}')
 
@@ -688,19 +688,17 @@ class TestPreviewWorkerUpdateDetection:
                 porringer,
                 str(manifest),
                 config=PreviewConfig(
-                    detect_updates=True,
                     prerelease_packages={'some-pkg'},
                 ),
             ),
         )
 
         assert len(captured_params) == 1
-        assert captured_params[0].detect_updates is True
         assert captured_params[0].prerelease_packages == {'some-pkg'}
 
     @staticmethod
-    def test_defaults_detect_updates_true(tmp_path: Path) -> None:
-        """Verify detect_updates defaults to True."""
+    def test_defaults_prerelease_none(tmp_path: Path) -> None:
+        """Verify prerelease_packages defaults to None."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text('{}')
 
@@ -719,7 +717,6 @@ class TestPreviewWorkerUpdateDetection:
         asyncio.run(run_preview(porringer, str(manifest)))
 
         assert len(captured_params) == 1
-        assert captured_params[0].detect_updates is True
         assert captured_params[0].prerelease_packages is None
 
 

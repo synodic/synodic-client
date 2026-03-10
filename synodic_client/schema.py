@@ -78,10 +78,6 @@ class UserConfig(BaseModel):
     # ``None`` or absent means all plugins auto-update with manifest-aware defaults.
     plugin_auto_update: dict[str, bool | dict[str, bool]] | None = None
 
-    # Check for updates during dry-run previews.  When True the preview
-    # will query package indices for newer versions.
-    detect_updates: bool = True
-
     # Per-manifest pre-release overrides.  Outer key is a normalised
     # manifest path (or URL for remote manifests) produced by
     # ``normalize_manifest_key()``.  Inner value is a sorted list of
@@ -231,7 +227,6 @@ class ResolvedConfig:
     auto_update_interval_minutes: int
     tool_update_interval_minutes: int
     plugin_auto_update: dict[str, bool | dict[str, bool]] | None
-    detect_updates: bool
     prerelease_packages: dict[str, list[str]] | None
     auto_apply: bool
     auto_start: bool

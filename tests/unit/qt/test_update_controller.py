@@ -35,7 +35,6 @@ def _make_config(**overrides: Any) -> ResolvedConfig:
         'auto_update_interval_minutes': DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
         'tool_update_interval_minutes': DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
         'plugin_auto_update': None,
-        'detect_updates': True,
         'prerelease_packages': None,
         'auto_apply': True,
         'auto_start': True,

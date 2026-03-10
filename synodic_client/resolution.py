@@ -122,7 +122,6 @@ def _resolve_from_user(user: UserConfig) -> ResolvedConfig:
         auto_update_interval_minutes=auto_interval,
         tool_update_interval_minutes=tool_interval,
         plugin_auto_update=user.plugin_auto_update,
-        detect_updates=user.detect_updates,
         prerelease_packages=user.prerelease_packages,
         auto_apply=auto_apply,
         auto_start=auto_start,

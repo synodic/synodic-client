@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from synodic_client.application.package_state import PackageStateStore
 from synodic_client.application.screen import skip_reason_label
 from synodic_client.application.screen.action_card import ActionCardList, action_key
 from synodic_client.application.screen.card import CardFrame
@@ -113,6 +114,7 @@ class SetupPreviewWidget(QWidget):
         *,
         show_close: bool = True,
         config: ResolvedConfig | None = None,
+        package_store: PackageStateStore | None = None,
     ) -> None:
         """Initialize the preview widget.
 
@@ -122,11 +124,13 @@ class SetupPreviewWidget(QWidget):
             show_close: Whether to show the Close button.  Set ``False``
                 when embedding inside a persistent view (e.g. a tab).
             config: Global configuration for per-manifest pre-release state.
+            package_store: Shared package update state registry.
         """
         super().__init__(parent)
         self._porringer = porringer
         self._show_close = show_close
         self._config = config
+        self._package_store = package_store
         self._discovered_plugins: DiscoveredPlugins | None = None
 
         self._model = PreviewModel()
@@ -293,7 +297,6 @@ class SetupPreviewWidget(QWidget):
         path_or_url: str,
         *,
         project_directory: Path | None = None,
-        detect_updates: bool = True,
     ) -> None:
         """Load a manifest preview, or skip if the same manifest is already showing results.
 
@@ -305,7 +308,6 @@ class SetupPreviewWidget(QWidget):
         Args:
             path_or_url: Manifest path or URL.
             project_directory: Working directory for project sync actions.
-            detect_updates: Query package indices for newer versions.
         """
         key = normalize_manifest_key(path_or_url)
 
@@ -345,7 +347,6 @@ class SetupPreviewWidget(QWidget):
             self._run_preview_task(
                 path_or_url,
                 project_directory=self._model.project_directory,
-                detect_updates=detect_updates,
                 prerelease_packages=overrides,
             ),
         )
@@ -474,7 +475,6 @@ class SetupPreviewWidget(QWidget):
         path_or_url: str,
         *,
         project_directory: Path | None = None,
-        detect_updates: bool = True,
         prerelease_packages: set[str] | None = None,
     ) -> None:
         """Run the preview coroutine and route completion/errors."""
@@ -484,7 +484,6 @@ class SetupPreviewWidget(QWidget):
                 path_or_url,
                 config=PreviewConfig(
                     project_directory=project_directory,
-                    detect_updates=detect_updates,
                     prerelease_packages=prerelease_packages,
                 ),
                 callbacks=PreviewCallbacks(
@@ -639,6 +638,16 @@ class SetupPreviewWidget(QWidget):
             card = self._card_list.get_card(action)
             if card is not None:
                 card.set_check_result(result)
+
+            # Record in shared store so ToolsView can reflect the update
+            if self._package_store is not None and action.installer and action.package:
+                self._package_store.record_action_result(
+                    action.installer,
+                    str(action.package.name),
+                    installed_version=result.installed_version or '',
+                    available_version=result.available_version or '',
+                    has_update=result.skip_reason == SkipReason.UPDATE_AVAILABLE,
+                )
 
         # Update phase text
         m.checked_count += 1
@@ -987,11 +996,9 @@ class InstallPreviewWindow(QMainWindow):
         logger.info('Starting install preview for: %s', self._manifest_url)
         self._url_label.setText(f'<b>Manifest:</b> {self._manifest_url}')
 
-        detect = self._config.detect_updates if self._config else True
         self._preview_widget.load(
             self._manifest_url,
             project_directory=self._project_directory,
-            detect_updates=detect,
         )
 
     # --- Callbacks ---

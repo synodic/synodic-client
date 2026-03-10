@@ -45,7 +45,6 @@ class TestUserConfig:
         assert config.auto_update_interval_minutes is None
         assert config.tool_update_interval_minutes is None
         assert config.plugin_auto_update is None
-        assert config.detect_updates is True
         assert config.prerelease_packages is None
         assert config.auto_apply is None
         assert config.auto_start is None
@@ -170,7 +169,6 @@ class TestSaveUserConfig:
         assert data['update_channel'] == 'dev'
         assert 'update_source' in data
         assert 'auto_update_interval_minutes' in data
-        assert 'detect_updates' in data
 
     @staticmethod
     def test_creates_directory(tmp_path: Path) -> None:

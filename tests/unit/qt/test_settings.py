@@ -24,7 +24,6 @@ def _make_config(**overrides: Any) -> ResolvedConfig:
         'auto_update_interval_minutes': DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
         'tool_update_interval_minutes': DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
         'plugin_auto_update': None,
-        'detect_updates': True,
         'prerelease_packages': None,
         'auto_apply': True,
         'auto_start': True,
@@ -145,20 +144,6 @@ class TestSyncFromConfig:
         assert window._tool_update_spin.value() == custom_interval
 
     @staticmethod
-    def test_detect_updates_true_default() -> None:
-        """Default detect_updates is checked."""
-        window = _make_window(_make_config())
-        window.sync_from_config()
-        assert window._detect_updates_check.isChecked() is True
-
-    @staticmethod
-    def test_detect_updates_false() -> None:
-        """Disabled detect_updates is unchecked."""
-        window = _make_window(_make_config(detect_updates=False))
-        window.sync_from_config()
-        assert window._detect_updates_check.isChecked() is False
-
-    @staticmethod
     def test_auto_start_reflects_registry() -> None:
         """Auto-start checkbox mirrors the OS registration state."""
         window = _make_window(_make_config())
@@ -249,18 +234,6 @@ class TestSettingsCallbacks:
             window._tool_update_spin.setValue(new_interval)
 
         mock_update.assert_called_with(tool_update_interval_minutes=new_interval)
-
-    @staticmethod
-    def test_detect_updates_change() -> None:
-        """Toggling detect_updates saves via the store."""
-        config = _make_config()
-        window = _make_window(config)
-        window.sync_from_config()
-
-        with patch.object(window._store, 'update') as mock_update:
-            window._detect_updates_check.setChecked(False)
-
-        mock_update.assert_called_with(detect_updates=False)
 
     @staticmethod
     def test_auto_start_registers_startup_when_frozen() -> None:

@@ -232,7 +232,6 @@ async def run_preview(
             paths=[manifest_path],
             dry_run=True,
             project_directory=cfg.project_directory,
-            detect_updates=cfg.detect_updates,
             prerelease_packages=cfg.prerelease_packages,
         )
         state = _DispatchState()

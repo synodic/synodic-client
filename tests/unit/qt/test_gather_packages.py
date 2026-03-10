@@ -1,4 +1,4 @@
-﻿"""Tests for ToolsView._gather_packages global + per-directory queries."""
+"""Tests for ToolsView._gather_packages global + per-directory queries."""
 
 from __future__ import annotations
 
@@ -45,7 +45,6 @@ def _make_config() -> ResolvedConfig:
         auto_update_interval_minutes=60,
         tool_update_interval_minutes=60,
         plugin_auto_update=None,
-        detect_updates=False,
         prerelease_packages=None,
         auto_apply=True,
         auto_start=False,

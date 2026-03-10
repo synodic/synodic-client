@@ -334,7 +334,6 @@ class PreviewConfig:
     """Optional execution parameters for :func:`run_preview`."""
 
     project_directory: Path | None = None
-    detect_updates: bool = True
     prerelease_packages: set[str] | None = None
 
 

@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.data import DataCoordinator
 from synodic_client.application.icon import app_icon
+from synodic_client.application.package_state import PackageStateStore
 from synodic_client.application.screen.plugin_row import (
     FilterChip,
     PluginKindHeader,
@@ -115,6 +116,7 @@ class ToolsView(QWidget):
         parent: QWidget | None = None,
         *,
         coordinator: DataCoordinator | None = None,
+        package_store: PackageStateStore | None = None,
     ) -> None:
         """Initialize the tools view.
 
@@ -125,21 +127,24 @@ class ToolsView(QWidget):
             coordinator: Shared data coordinator.  When provided, the
                 view delegates plugin/directory fetching to the
                 coordinator instead of calling porringer directly.
+            package_store: Shared package update state registry.
         """
         super().__init__(parent)
         self._porringer = porringer
         self._store = store
         self._coordinator = coordinator
+        self._package_store = package_store
         self._section_widgets: list[QWidget] = []
         self._filter_chips: dict[str, FilterChip] = {}
         self._deselected_plugins: set[str] = set()
         self._refresh_in_progress = False
         self._check_in_progress = False
-        self._updates_checked = False
-        self._updates_available: dict[str, dict[str, str]] = {}
         self._directories: list[ManifestDirectory] = []
         self._timestamp_timer: QTimer | None = None
         self._init_ui()
+
+        if self._package_store is not None:
+            self._package_store.state_changed.connect(self._on_package_state_changed)
 
     def _init_ui(self) -> None:
         """Initialize the UI components."""
@@ -234,6 +239,11 @@ class ToolsView(QWidget):
 
     # --- Public API ---
 
+    def invalidate_update_data(self) -> None:
+        """Clear cached update state so the next refresh re-checks."""
+        if self._package_store is not None:
+            self._package_store.clear()
+
     def refresh(self) -> None:
         """Schedule an asynchronous rebuild of the tool list."""
         if self._refresh_in_progress:
@@ -257,7 +267,7 @@ class ToolsView(QWidget):
 
         try:
             data = await self._gather_refresh_data()
-            need_deferred_check = not self._updates_checked
+            need_deferred_check = not self._has_update_data
             self._build_widget_tree(data)
         except Exception:
             logger.exception('Failed to refresh tools')
@@ -272,7 +282,7 @@ class ToolsView(QWidget):
         # Fire-and-forget: detect updates in the background, then patch
         # the just-rendered widget tree with update badges.
         if need_deferred_check:
-            asyncio.create_task(self._deferred_update_check(self._directories))
+            asyncio.create_task(self._deferred_update_check())
 
     # ------------------------------------------------------------------
     # _async_refresh helper methods
@@ -445,7 +455,6 @@ class ToolsView(QWidget):
             return
 
         auto_val = auto_update_map.get(plugin.name, True)
-        plugin_updates = self._updates_available.get(plugin.name, {})
         tool_timestamps = self._store.config.last_tool_updates or {}
         default_exe = data.default_runtime_executable
 
@@ -462,11 +471,14 @@ class ToolsView(QWidget):
             if is_default:
                 tag_text += ' (default)'
 
+            # Runtime updates use composite keys "plugin:tag"
+            rt_updates = self._get_plugin_updates(f'{plugin.name}:{rt.tag}')
+
             provider = PluginProviderHeader(
                 plugin,
                 auto_val is not False,
                 show_controls=True,
-                has_updates=bool(plugin_updates),
+                has_updates=bool(rt_updates),
                 parent=self._container,
             )
             provider.set_runtime(rt.tag, label=tag_text)
@@ -496,7 +508,7 @@ class ToolsView(QWidget):
                         plugin_name=plugin.name,
                         auto_update=pkg_auto,
                         show_toggle=True,
-                        has_update=pkg.name in plugin_updates,
+                        has_update=pkg.name in rt_updates,
                         is_global=True,
                         host_tool=pkg.host_tool,
                         runtime_tag=rt.tag,
@@ -518,7 +530,7 @@ class ToolsView(QWidget):
         ``ProjectChildRow`` widgets are no longer used.
         """
         auto_val = auto_update_map.get(plugin.name, True)
-        plugin_updates = self._updates_available.get(plugin.name, {})
+        plugin_updates = self._get_plugin_updates(plugin.name)
 
         provider = PluginProviderHeader(
             plugin,
@@ -1121,11 +1133,15 @@ class ToolsView(QWidget):
         asyncio.create_task(self._run_inline_update_check())
 
     async def _run_inline_update_check(self) -> None:
-        """Check for updates with inline spinners (no overlay / rebuild)."""
+        """Check for updates with inline spinners (no overlay / rebuild).
+
+        Used by both the manual *Check for Updates* button and the
+        automatic deferred check after initial refresh.
+        """
         self._check_in_progress = True
         try:
-            self._updates_available = await self._check_for_updates(self._directories)
-            self._updates_checked = True
+            available = await self._check_for_updates(self._directories)
+            self._store_check_results(available)
             self._apply_update_badges()
         except Exception:
             logger.debug('Inline update check failed', exc_info=True)
@@ -1225,7 +1241,6 @@ class ToolsView(QWidget):
             params = SetupParameters(
                 paths=[str(manifest_path)],
                 dry_run=True,
-                detect_updates=True,
                 project_directory=path,
             )
             async for event in self._porringer.sync.execute_stream(params):
@@ -1247,31 +1262,42 @@ class ToolsView(QWidget):
             )
         return available
 
-    async def _deferred_update_check(
-        self,
-        directories: list[ManifestDirectory],
-    ) -> None:
+    async def _deferred_update_check(self) -> None:
         """Run update detection in the background, then patch the widget tree.
 
         Called after the initial render so the user sees the tool list
         immediately while update badges are populated asynchronously.
-        Inline per-row spinners provide visual feedback.
+        Delegates to :meth:`_run_inline_update_check`.
         """
-        self._check_in_progress = True
         self._check_btn.setEnabled(False)
         self._check_btn.setText('Checking\u2026')
         self._set_all_checking(True)
-        try:
-            self._updates_available = await self._check_for_updates(directories)
-            self._updates_checked = True
+        await self._run_inline_update_check()
+
+    def _get_plugin_updates(self, signal_key: str) -> dict[str, str]:
+        """Return ``{package_name: latest_version}`` for *signal_key*.
+
+        Reads from the shared :class:`PackageStateStore` when available,
+        otherwise returns an empty dict.
+        """
+        if self._package_store is not None:
+            return self._package_store.get_updates(signal_key)
+        return {}
+
+    def _store_check_results(self, available: dict[str, dict[str, str]]) -> None:
+        """Push check results into the store."""
+        if self._package_store is not None:
+            self._package_store.set_check_results(available)
+
+    @property
+    def _has_update_data(self) -> bool:
+        """Return whether update data has been fetched at least once."""
+        return self._package_store is not None and self._package_store.has_data
+
+    def _on_package_state_changed(self) -> None:
+        """Re-apply badges when another view writes to the shared store."""
+        if not self._check_in_progress and not self._refresh_in_progress:
             self._apply_update_badges()
-        except Exception:
-            logger.debug('Deferred update check failed', exc_info=True)
-        finally:
-            self._set_all_checking(False)
-            self._check_btn.setEnabled(True)
-            self._check_btn.setText('Check for Updates')
-            self._check_in_progress = False
 
     def _apply_update_badges(self) -> None:
         """Walk existing widgets and show/hide Update buttons + set inline status."""
@@ -1279,12 +1305,12 @@ class ToolsView(QWidget):
         for widget in self._section_widgets:
             if isinstance(widget, PluginProviderHeader):
                 current_plugin = widget._signal_key
-                plugin_updates = self._updates_available.get(current_plugin, {})
+                plugin_updates = self._get_plugin_updates(current_plugin)
                 has = bool(plugin_updates)
                 if widget._update_btn is not None:
                     widget._update_btn.setVisible(has)
             elif isinstance(widget, PluginRow) and widget._plugin_name:
-                plugin_updates = self._updates_available.get(widget._signal_key, {})
+                plugin_updates = self._get_plugin_updates(widget._signal_key)
                 latest_version = plugin_updates.get(widget._package_name)
                 has_update = latest_version is not None
 
@@ -1295,7 +1321,7 @@ class ToolsView(QWidget):
                 if has_update:
                     version_text = f'v{latest_version} available' if latest_version else 'Update available'
                     widget.set_update_status(version_text, PLUGIN_ROW_STATUS_AVAILABLE_STYLE)
-                elif self._updates_checked:
+                elif self._has_update_data:
                     widget.set_update_status('Up to date', PLUGIN_ROW_STATUS_UP_TO_DATE_STYLE)
 
     def _set_all_checking(self, checking: bool) -> None:
@@ -1401,6 +1427,7 @@ class MainWindow(QMainWindow):
         self._porringer = porringer
         self._store = store
         self._coordinator: DataCoordinator | None = DataCoordinator(porringer) if porringer is not None else None
+        self._package_store: PackageStateStore | None = PackageStateStore(self) if porringer is not None else None
         self.setWindowTitle('Synodic Client')
         self.setMinimumSize(*MAIN_WINDOW_MIN_SIZE)
         self.setWindowIcon(app_icon())
@@ -1453,6 +1480,7 @@ class MainWindow(QMainWindow):
                 self._store,
                 self,
                 coordinator=self._coordinator,
+                package_store=self._package_store,
             )
             self._tabs.addTab(self._projects_view, 'Projects')
 
@@ -1461,6 +1489,7 @@ class MainWindow(QMainWindow):
                 self._store,
                 self,
                 coordinator=self._coordinator,
+                package_store=self._package_store,
             )
             self._tabs.addTab(self._tools_view, 'Tools')
             self.tools_view_created.emit(self._tools_view)

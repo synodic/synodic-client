@@ -182,11 +182,6 @@ class SettingsWindow(QMainWindow):
         row.addStretch()
         content.addLayout(row)
 
-        # Detect updates during previews
-        self._detect_updates_check = QCheckBox('Detect updates during previews')
-        self._detect_updates_check.toggled.connect(self._on_detect_updates_changed)
-        content.addWidget(self._detect_updates_check)
-
         # Automatically apply updates
         self._auto_apply_check = QCheckBox('Automatically apply updates')
         self._auto_apply_check.toggled.connect(self._on_auto_apply_changed)
@@ -266,7 +261,6 @@ class SettingsWindow(QMainWindow):
             self._tool_update_spin.setValue(config.tool_update_interval_minutes)
 
             # Checkboxes
-            self._detect_updates_check.setChecked(config.detect_updates)
             self._auto_apply_check.setChecked(config.auto_apply)
             self._auto_start_check.setChecked(is_startup_registered())
 
@@ -351,7 +345,6 @@ class SettingsWindow(QMainWindow):
             self._source_edit,
             self._auto_update_spin,
             self._tool_update_spin,
-            self._detect_updates_check,
             self._auto_apply_check,
             self._auto_start_check,
             self._debug_logging_check,
@@ -389,9 +382,6 @@ class SettingsWindow(QMainWindow):
 
     def _on_tool_update_interval_changed(self, value: int) -> None:
         self._persist(tool_update_interval_minutes=value)
-
-    def _on_detect_updates_changed(self, checked: bool) -> None:
-        self._persist(detect_updates=checked)
 
     def _on_auto_apply_changed(self, checked: bool) -> None:
         self._persist(auto_apply=checked)
