@@ -24,7 +24,7 @@ class ConfigStore(QObject):
 
         store = ConfigStore(initial_config)
         store.changed.connect(some_consumer.on_config_changed)
-        store.update(auto_apply=False)   # persists + emits
+        store.update(auto_apply=False)  # persists + emits
     """
 
     changed = Signal(object)
