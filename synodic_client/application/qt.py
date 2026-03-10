@@ -31,6 +31,7 @@ from synodic_client.resolution import (
     resolve_config,
     resolve_update_config,
 )
+from synodic_client.subprocess_patch import apply as _apply_subprocess_patch
 from synodic_client.updater import initialize_velopack
 
 
@@ -180,6 +181,7 @@ def application(*, uri: str | None = None, dev_mode: bool = False, debug: bool =
     """
     # Activate dev-mode namespacing before anything reads config paths.
     set_dev_mode(dev_mode)
+    _apply_subprocess_patch()
 
     # Configure logging before Velopack so install/uninstall hooks and
     # first-run diagnostics are captured in the log file.

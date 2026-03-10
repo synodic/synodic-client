@@ -3,7 +3,7 @@
 When the application is built as a windowed executable (``console=False``),
 every ``subprocess.Popen`` call that launches a console program (pip, pipx,
 uv, winget, etc.) would briefly flash a visible console window.  This hook
-patches every ``subprocess.Popen`` call with two complementary mitigations:
+patches ``subprocess.Popen.__init__`` with two complementary mitigations:
 
 * ``CREATE_NO_WINDOW`` in *creationflags* — prevents Windows from allocating
   a new console for the child process.
@@ -11,6 +11,11 @@ patches every ``subprocess.Popen`` call with two complementary mitigations:
   — tells Windows to pass ``SW_HIDE`` as the initial ``nCmdShow`` to the
   child, suppressing the brief window flash that some GUI-subsystem tools
   (e.g. ``winget.exe``) produce even without a console.
+
+Since ``asyncio.create_subprocess_exec`` and all other high-level subprocess
+APIs ultimately call ``subprocess.Popen``, patching ``Popen.__init__`` is
+sufficient.  Flags are OR-ed (not replaced) so any caller-supplied values
+are preserved.
 
 Placed as a runtime hook so the patch is active before any application or
 library code spawns subprocesses.
@@ -27,9 +32,6 @@ if sys.platform == 'win32':
     _STARTF_USESHOWWINDOW = _sp.STARTF_USESHOWWINDOW
     _CREATE_NO_WINDOW = _sp.CREATE_NO_WINDOW
 
-    # [DIAG] Toggle to log every subprocess spawn to stderr.
-    _SUBPROCESS_LOGGING = True
-
     _original_init = subprocess.Popen.__init__
 
     def _patched_init(self: subprocess.Popen, *args: Any, **kwargs: Any) -> None:
@@ -39,10 +41,6 @@ if sys.platform == 'win32':
         startupinfo.dwFlags |= _STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = _SW_HIDE
         kwargs['startupinfo'] = startupinfo
-
-        if _SUBPROCESS_LOGGING:
-            cmd = args[0] if args else kwargs.get('args', '<unknown>')
-            print(f'[DIAG] subprocess.Popen: {cmd}', file=sys.stderr, flush=True)
 
         _original_init(self, *args, **kwargs)
 

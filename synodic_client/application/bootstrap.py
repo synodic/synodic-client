@@ -17,6 +17,7 @@ import sys
 
 from synodic_client.config import set_dev_mode
 from synodic_client.logging import configure_logging
+from synodic_client.subprocess_patch import apply as _apply_subprocess_patch
 from synodic_client.protocol import extract_uri_from_args
 from synodic_client.updater import initialize_velopack
 
@@ -24,6 +25,7 @@ from synodic_client.updater import initialize_velopack
 _dev_mode = '--dev' in sys.argv[1:]
 _debug = '--debug' in sys.argv[1:]
 set_dev_mode(_dev_mode)
+_apply_subprocess_patch()
 
 configure_logging(debug=_debug)
 initialize_velopack()
