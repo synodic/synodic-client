@@ -23,7 +23,6 @@ from synodic_client.schema import (
     UpdateInfo,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -42,6 +41,7 @@ class ModelSpy:
         model.check_button_enabled_changed.connect(self.check_button_enabled.append)
         model.restart_visible_changed.connect(self.restart_visible.append)
         model.last_checked_changed.connect(self.last_checked.append)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
