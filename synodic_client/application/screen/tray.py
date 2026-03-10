@@ -16,6 +16,7 @@ from synodic_client.application.screen.screen import MainWindow
 from synodic_client.application.screen.settings import SettingsWindow
 from synodic_client.application.screen.tool_update_controller import ToolUpdateOrchestrator
 from synodic_client.application.update_controller import UpdateController
+from synodic_client.application.update_model import UpdateModel
 from synodic_client.client import Client
 
 if TYPE_CHECKING:
@@ -66,16 +67,28 @@ class TrayScreen:
         # MainWindow gear button -> open settings
         window.settings_requested.connect(self._show_settings)
 
+        # Update model — centralised observable state for the update lifecycle
+        self._update_model = UpdateModel()
+
         # Update controller - owns the self-update lifecycle & timer
         self._banner = window.update_banner
         self._update_controller = UpdateController(
             app,
             client,
-            [self._banner],
-            settings_window=self._settings_window,
+            self._update_model,
             store=self._store,
         )
         self._update_controller.set_user_active_predicate(self._is_user_active)
+
+        # Connect views to the model
+        self._banner.connect_model(self._update_model)
+        self._settings_window.connect_model(self._update_model)
+
+        # Wire user-action signals back to the controller
+        self._banner.restart_requested.connect(self._update_controller.request_apply)
+        self._banner.retry_requested.connect(self._update_controller.request_retry)
+        self._settings_window.check_updates_requested.connect(self._update_controller.request_check)
+        self._settings_window.restart_requested.connect(self._update_controller.request_apply)
 
         # Tool update orchestrator - owns tool/package update lifecycle
         self._tool_orchestrator = ToolUpdateOrchestrator(

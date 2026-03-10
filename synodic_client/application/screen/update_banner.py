@@ -15,6 +15,8 @@ The banner slides in/out using a ``QPropertyAnimation`` on
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from enum import Enum, auto
 
 from PySide6.QtCore import (
     QEasingCurve,
@@ -34,7 +36,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from synodic_client.application.screen.schema import UpdateBannerState, _BannerConfig
 from synodic_client.application.theme import (
     UPDATE_BANNER_ANIMATION_MS,
     UPDATE_BANNER_BTN_STYLE,
@@ -47,8 +48,32 @@ from synodic_client.application.theme import (
     UPDATE_BANNER_STYLE,
     UPDATE_BANNER_VERSION_STYLE,
 )
+from synodic_client.application.update_model import UpdateModel, UpdatePhase
 
 logger = logging.getLogger(__name__)
+
+
+class UpdateBannerState(Enum):
+    """Visual states for the update banner."""
+
+    HIDDEN = auto()
+    DOWNLOADING = auto()
+    READY = auto()
+    ERROR = auto()
+
+
+@dataclass(frozen=True, slots=True)
+class _BannerConfig:
+    """Bundled visual configuration for a banner state transition."""
+
+    state: UpdateBannerState
+    style: str
+    icon: str
+    text: str
+    text_style: str
+    version: str = ''
+    action_label: str = ''
+    show_progress: bool = False
 
 
 # Height of the banner content (progress variant is slightly taller).
@@ -77,6 +102,7 @@ class UpdateBanner(QFrame):
 
         self._state = UpdateBannerState.HIDDEN
         self._target_version: str = ''
+        self._error_dismiss_timer: QTimer | None = None
 
         # --- Layout ---
         self._outer = QVBoxLayout(self)
@@ -128,6 +154,28 @@ class UpdateBanner(QFrame):
         self._anim = QPropertyAnimation(self, b'maximumHeight')
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._anim.setDuration(UPDATE_BANNER_ANIMATION_MS)
+
+    # --- Model binding ---
+
+    def connect_model(self, model: UpdateModel) -> None:
+        """Connect to an :class:`UpdateModel` for state observation.
+
+        The model's lifecycle signals drive the banner's visual state
+        transitions so the controller never needs to call banner
+        methods directly.
+        """
+        self._model = model
+        model.phase_changed.connect(self._on_model_phase)
+        model.progress_changed.connect(self.show_downloading_progress)
+
+    def _on_model_phase(self, phase: UpdatePhase) -> None:
+        """React to a lifecycle phase change from the model."""
+        if phase == UpdatePhase.DOWNLOADING:
+            self.show_downloading(self._model.version)
+        elif phase == UpdatePhase.READY:
+            self.show_ready(self._model.version)
+        elif phase == UpdatePhase.ERROR:
+            self.show_error(self._model.error_message)
 
     # --- Public API ---
 
@@ -191,6 +239,12 @@ class UpdateBanner(QFrame):
         Args:
             message: Human-readable error description.
         """
+        # Cancel any pending auto-dismiss from a previous error to avoid
+        # stacking timers that would forcibly hide a freshly shown banner.
+        if self._error_dismiss_timer is not None:
+            self._error_dismiss_timer.stop()
+            self._error_dismiss_timer = None
+
         self._configure(
             _BannerConfig(
                 state=UpdateBannerState.ERROR,
@@ -201,12 +255,20 @@ class UpdateBanner(QFrame):
                 action_label='Retry',
             )
         )
-        QTimer.singleShot(UPDATE_BANNER_ERROR_DISMISS_MS, self._auto_dismiss_error)
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(UPDATE_BANNER_ERROR_DISMISS_MS)
+        timer.timeout.connect(self._auto_dismiss_error)
+        timer.start()
+        self._error_dismiss_timer = timer
 
     def hide_banner(self) -> None:
         """Slide the banner out and reset to hidden."""
         if self._state == UpdateBannerState.HIDDEN:
             return
+        if self._error_dismiss_timer is not None:
+            self._error_dismiss_timer.stop()
+            self._error_dismiss_timer = None
         self._state = UpdateBannerState.HIDDEN
         self._animate_height(0)
 

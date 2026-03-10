@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.screen.settings import SettingsWindow
 from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE
+from synodic_client.application.update_model import UpdateModel
 from synodic_client.resolution import ResolvedConfig
 from synodic_client.schema import DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES, DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
 
@@ -331,8 +332,8 @@ class TestCheckForUpdatesButton:
         assert not window._update_status_label.text()
 
     @staticmethod
-    def test_click_emits_signal_and_disables() -> None:
-        """Clicking the button emits check_updates_requested and disables it."""
+    def test_click_emits_signal() -> None:
+        """Clicking the button emits check_updates_requested."""
         window = _make_window()
         signal_spy = MagicMock()
         window.check_updates_requested.connect(signal_spy)
@@ -340,34 +341,44 @@ class TestCheckForUpdatesButton:
         window._check_updates_btn.click()
 
         signal_spy.assert_called_once()
-        assert window._check_updates_btn.isEnabled() is False
-        assert window._update_status_label.text() == 'Checking\u2026'
 
     @staticmethod
-    def test_set_update_status() -> None:
-        """set_update_status sets the label text and style."""
+    def test_model_status_updates_label() -> None:
+        """Model status_text_changed updates the label text and style."""
         window = _make_window()
-        window.set_update_status('Up to date', 'color: green;')
+        model = UpdateModel()
+        window.connect_model(model)
+
+        model.set_status('Up to date', 'color: green;')
+
         assert window._update_status_label.text() == 'Up to date'
         assert 'green' in window._update_status_label.styleSheet()
 
     @staticmethod
-    def test_reset_check_updates_button() -> None:
-        """reset_check_updates_button re-enables the button."""
+    def test_model_check_button_enabled() -> None:
+        """Model check_button_enabled_changed toggles the button."""
         window = _make_window()
-        window._check_updates_btn.setEnabled(False)
+        model = UpdateModel()
+        window.connect_model(model)
 
-        window.reset_check_updates_button()
+        model.set_check_button_enabled(False)
+        assert window._check_updates_btn.isEnabled() is False
 
+        model.set_check_button_enabled(True)
         assert window._check_updates_btn.isEnabled() is True
 
     @staticmethod
-    def test_set_checking() -> None:
-        """set_checking disables the button and shows 'Checking\u2026' status."""
+    def test_model_restart_visible() -> None:
+        """Model restart_visible_changed toggles the restart button."""
         window = _make_window()
-        window.set_checking()
-        assert window._check_updates_btn.isEnabled() is False
-        assert window._update_status_label.text() == 'Checking\u2026'
+        model = UpdateModel()
+        window.connect_model(model)
+
+        model.set_restart_visible(True)
+        assert window._restart_btn.isHidden() is False
+
+        model.set_restart_visible(False)
+        assert window._restart_btn.isHidden() is True
 
 
 # ---------------------------------------------------------------------------

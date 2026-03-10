@@ -32,7 +32,8 @@ from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen import _format_relative_time
 from synodic_client.application.screen.card import CardFrame
-from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE, UPDATE_STATUS_CHECKING_STYLE
+from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE
+from synodic_client.application.update_model import UpdateModel
 from synodic_client.logging import log_path, set_debug_level
 from synodic_client.schema import GITHUB_REPO_URL
 from synodic_client.startup import is_startup_registered, register_startup, remove_startup
@@ -238,6 +239,32 @@ class SettingsWindow(QMainWindow):
         return card
 
     # ------------------------------------------------------------------
+    # Model binding
+    # ------------------------------------------------------------------
+
+    def connect_model(self, model: UpdateModel) -> None:
+        """Connect to an :class:`UpdateModel` for state observation.
+
+        The model's settings-facing signals drive the update status
+        label, check button, restart button, and timestamp label.
+        """
+        model.status_text_changed.connect(self._on_status_changed)
+        model.check_button_enabled_changed.connect(self._check_updates_btn.setEnabled)
+        model.restart_visible_changed.connect(self._restart_btn.setVisible)
+        model.last_checked_changed.connect(self._on_last_checked_changed)
+
+    def _on_status_changed(self, text: str, style: str) -> None:
+        """Apply a status text and style from the model."""
+        self._update_status_label.setText(text)
+        self._update_status_label.setStyleSheet(style)
+
+    def _on_last_checked_changed(self, timestamp: str) -> None:
+        """Apply a *last updated* timestamp from the model."""
+        relative = _format_relative_time(timestamp)
+        self._last_client_update_label.setText(f'Last updated: {relative}')
+        self._last_client_update_label.setToolTip(f'Last updated: {timestamp}')
+
+    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
@@ -274,37 +301,6 @@ class SettingsWindow(QMainWindow):
                 self._last_client_update_label.setToolTip(f'Last updated: {config.last_client_update}')
             else:
                 self._last_client_update_label.setText('')
-
-    def set_update_status(self, text: str, style: str = '') -> None:
-        """Set the inline status text next to the *Check for Updates* button.
-
-        Args:
-            text: The status message.
-            style: Optional stylesheet for the label (e.g. color).
-        """
-        self._update_status_label.setText(text)
-        self._update_status_label.setStyleSheet(style)
-
-    def set_checking(self) -> None:
-        """Enter the *checking* state — disable button and show status."""
-        self._check_updates_btn.setEnabled(False)
-        self._restart_btn.hide()
-        self._update_status_label.setText('Checking\u2026')
-        self._update_status_label.setStyleSheet(UPDATE_STATUS_CHECKING_STYLE)
-
-    def reset_check_updates_button(self) -> None:
-        """Re-enable the *Check for Updates* button after a check completes."""
-        self._check_updates_btn.setEnabled(True)
-
-    def set_last_checked(self, timestamp: str) -> None:
-        """Update the *last updated* label from an ISO 8601 timestamp."""
-        relative = _format_relative_time(timestamp)
-        self._last_client_update_label.setText(f'Last updated: {relative}')
-        self._last_client_update_label.setToolTip(f'Last updated: {timestamp}')
-
-    def show_restart_button(self) -> None:
-        """Show the *Restart & Update* button."""
-        self._restart_btn.show()
 
     def show(self) -> None:
         """Sync controls from config, size to content, then show the window."""
@@ -360,8 +356,6 @@ class SettingsWindow(QMainWindow):
 
     def _on_check_updates_clicked(self) -> None:
         """Handle the *Check for Updates* button click."""
-        self._check_updates_btn.setEnabled(False)
-        self._update_status_label.setText('Checking\u2026')
         self.check_updates_requested.emit()
 
     def _on_channel_changed(self, index: int) -> None:

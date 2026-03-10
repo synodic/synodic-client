@@ -11,9 +11,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import Enum, auto
 from pathlib import Path
-from typing import Protocol, runtime_checkable
 
 from porringer.schema import (
     PluginInfo,
@@ -343,62 +341,3 @@ class _DispatchState:
 
     action_index: dict[int, int] = field(default_factory=dict)
     got_parsed: bool = False
-
-
-# ---------------------------------------------------------------------------
-# Update view protocol & banner data models
-# ---------------------------------------------------------------------------
-
-
-@runtime_checkable
-class UpdateView(Protocol):
-    """Minimal display contract for the self-update lifecycle.
-
-    :class:`UpdateBanner` satisfies this protocol implicitly via
-    structural typing.  The controller broadcasts state transitions
-    through a ``list[UpdateView]`` so that every window showing update
-    status stays in sync.
-    """
-
-    def show_downloading(self, version: str) -> None:
-        """Indicate that *version* is being downloaded."""
-        ...
-
-    def show_downloading_progress(self, percentage: int) -> None:
-        """Update the download progress indicator."""
-        ...
-
-    def show_ready(self, version: str) -> None:
-        """Indicate that *version* is downloaded and ready to install."""
-        ...
-
-    def show_error(self, message: str) -> None:
-        """Display an error *message* in the update area."""
-        ...
-
-    def hide_banner(self) -> None:
-        """Hide the update banner."""
-        ...
-
-
-class UpdateBannerState(Enum):
-    """Visual states for the update banner."""
-
-    HIDDEN = auto()
-    DOWNLOADING = auto()
-    READY = auto()
-    ERROR = auto()
-
-
-@dataclass(frozen=True, slots=True)
-class _BannerConfig:
-    """Bundled visual configuration for a banner state transition."""
-
-    state: UpdateBannerState
-    style: str
-    icon: str
-    text: str
-    text_style: str
-    version: str = ''
-    action_label: str = ''
-    show_progress: bool = False

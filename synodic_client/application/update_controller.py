@@ -4,6 +4,10 @@ Owns the full update lifecycle — check → download → apply — and the
 periodic auto-update timer.  Extracted from :class:`TrayScreen` so
 that tray, settings, and banner concerns are cleanly separated from
 the update state-machine.
+
+The controller is the sole writer to an :class:`UpdateModel`; views
+observe the model via Qt signals and never receive imperative calls
+from the controller.
 """
 
 from __future__ import annotations
@@ -17,13 +21,13 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-from synodic_client.application.screen.schema import UpdateView
-from synodic_client.application.screen.update_banner import UpdateBanner
 from synodic_client.application.theme import (
     UPDATE_STATUS_AVAILABLE_STYLE,
+    UPDATE_STATUS_CHECKING_STYLE,
     UPDATE_STATUS_ERROR_STYLE,
     UPDATE_STATUS_UP_TO_DATE_STYLE,
 )
+from synodic_client.application.update_model import UpdateModel
 from synodic_client.application.workers import check_for_update, download_update
 from synodic_client.resolution import (
     ResolvedConfig,
@@ -33,7 +37,6 @@ from synodic_client.schema import UpdateInfo
 
 if TYPE_CHECKING:
     from synodic_client.application.config_store import ConfigStore
-    from synodic_client.application.screen.settings import SettingsWindow
     from synodic_client.client import Client
 
 logger = logging.getLogger(__name__)
@@ -42,17 +45,18 @@ logger = logging.getLogger(__name__)
 class UpdateController:
     """Manages the self-update lifecycle: check → download → apply.
 
+    The controller is the sole writer to the :class:`UpdateModel`.
+    Views connect to the model's signals; the controller never calls
+    view methods directly.
+
     Parameters
     ----------
     app:
         The running ``QApplication`` (needed for ``quit()`` on auto-apply).
     client:
         The Synodic Client service facade.
-    views:
-        One or more :class:`UpdateView` implementations to broadcast
-        state transitions to (typically ``UpdateBanner`` instances).
-    settings_window:
-        The ``SettingsWindow`` (check button + last-updated label).
+    model:
+        The shared :class:`UpdateModel` that views observe.
     store:
         The centralised :class:`ConfigStore`.
     """
@@ -61,9 +65,8 @@ class UpdateController:
         self,
         app: QApplication,
         client: Client,
-        views: list[UpdateView],
+        model: UpdateModel,
         *,
-        settings_window: SettingsWindow,
         store: ConfigStore,
     ) -> None:
         """Initialise the controller and start the periodic timer.
@@ -71,35 +74,28 @@ class UpdateController:
         Args:
             app: The running ``QApplication``.
             client: The Synodic Client service facade.
-            views: One or more :class:`UpdateView` implementations.
-            settings_window: The settings window (check button + timestamp).
+            model: The shared :class:`UpdateModel`.
             store: The centralised :class:`ConfigStore`.
         """
         self._app = app
         self._client = client
-        self._views = views
-        self._settings_window = settings_window
+        self._model = model
         self._store = store
         self._is_user_active: Callable[[], bool] = lambda: False
         self._update_task: asyncio.Task[None] | None = None
         self._pending_version: str | None = None
+        self._failed_version: str | None = None
 
         # Derive auto-apply preference from config
         self._auto_apply: bool = store.config.auto_apply
 
+        # Track update-relevant config fields to avoid reinitialising
+        # on every config save (e.g. timestamp-only changes).
+        self._update_config_key = self._extract_update_key(store.config)
+
         # Periodic auto-update timer
         self._auto_update_timer: QTimer | None = None
         self._restart_auto_update_timer()
-
-        # Wire banner signals (UpdateBanner-specific, outside the protocol)
-        for view in self._views:
-            if isinstance(view, UpdateBanner):
-                view.restart_requested.connect(self._apply_update)
-                view.retry_requested.connect(lambda: self.check_now(silent=True))
-
-        # Wire settings check-updates and restart buttons
-        self._settings_window.check_updates_requested.connect(self._on_manual_check)
-        self._settings_window.restart_requested.connect(self._apply_update)
 
         # React to config changes from any source
         self._store.changed.connect(self._on_config_changed)
@@ -138,20 +134,20 @@ class UpdateController:
         """Persist the current time as *last_client_update* and refresh the label."""
         ts = datetime.now(UTC).isoformat()
         self._store.update(last_client_update=ts)
-        self._settings_window.set_last_checked(ts)
+        self._model.set_last_checked(ts)
 
     def _report_error(self, message: str, *, silent: bool) -> None:
         """Show an error to the user or log it, depending on *silent*.
 
         Always updates the settings status line.  When not *silent*,
-        also broadcasts the error to all update-banner views.
+        also transitions the model to the ERROR phase so the banner
+        displays the error.
         """
-        self._settings_window.set_update_status('Check failed', UPDATE_STATUS_ERROR_STYLE)
+        self._model.set_status('Check failed', UPDATE_STATUS_ERROR_STYLE)
         if silent:
             logger.warning('%s', message)
         else:
-            for view in self._views:
-                view.show_error(message)
+            self._model.set_error(message)
 
     # ------------------------------------------------------------------
     # Timer management
@@ -190,21 +186,52 @@ class UpdateController:
         """
         self._do_check(silent=silent)
 
+    def request_check(self) -> None:
+        """Handle a user-initiated update check (from settings button)."""
+        self._do_check(silent=False)
+
+    def request_retry(self) -> None:
+        """Handle a banner retry — clear the failed version lock and re-check."""
+        self._failed_version = None
+        self.check_now(silent=True)
+
+    def request_apply(self) -> None:
+        """Handle a user-initiated apply/restart."""
+        self._apply_update(silent=False)
+
     def _on_config_changed(self, config: object) -> None:
         """React to a config change — reinitialise the updater and timers.
 
-        Also triggers an immediate (silent) check so the user gets
-        feedback after switching channels.
+        Only reinitialises when update-relevant fields change (channel,
+        source, interval, auto-apply).  Timestamp-only changes (e.g.
+        ``last_client_update``) are ignored to prevent an infinite
+        check → persist → reinitialise → check loop.
         """
         if not isinstance(config, ResolvedConfig):
             return
         self._auto_apply = config.auto_apply
+
+        new_key = self._extract_update_key(config)
+        if new_key == self._update_config_key:
+            return
+        self._update_config_key = new_key
+
         self._reinitialize_updater(config)
         self.check_now(silent=True)
 
     # ------------------------------------------------------------------
     # Updater re-initialisation
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_update_key(config: ResolvedConfig) -> tuple[object, ...]:
+        """Return a hashable tuple of the fields that affect the updater."""
+        return (
+            config.update_source,
+            config.update_channel,
+            config.auto_update_interval_minutes,
+            config.auto_apply,
+        )
 
     def _reinitialize_updater(self, config: ResolvedConfig) -> None:
         """Re-derive update settings and restart the updater and timer."""
@@ -221,10 +248,6 @@ class UpdateController:
     # Check flow
     # ------------------------------------------------------------------
 
-    def _on_manual_check(self) -> None:
-        """Handle manual check-for-updates (from settings button)."""
-        self._do_check(silent=False)
-
     def _on_auto_check(self) -> None:
         """Handle automatic (periodic) check — silent.
 
@@ -237,17 +260,17 @@ class UpdateController:
     def _do_check(self, *, silent: bool) -> None:
         """Run an update check."""
         if self._client.updater is None:
+            self._model.set_check_button_enabled(True)
             if not silent:
-                for view in self._views:
-                    view.show_error('Updater is not initialized.')
+                self._model.set_error('Updater is not initialized.')
             return
 
-        # Preserve the banner state when an update is already pending.
-        # Skip the visual "Checking…" transition when the settings
-        # window isn't visible to avoid widget operations on a hidden
-        # QMainWindow (which can cause transient flashes on Windows).
-        if self._pending_version is None and self._settings_window.isVisible():
-            self._settings_window.set_checking()
+        # Always disable the button; only show "Checking…" when no
+        # download is already pending (to preserve the ready state).
+        self._model.set_check_button_enabled(False)
+        if self._pending_version is None:
+            self._model.set_restart_visible(False)
+            self._model.set_status('Checking\u2026', UPDATE_STATUS_CHECKING_STYLE)
 
         self._update_task = asyncio.create_task(self._async_check(silent=silent))
 
@@ -265,7 +288,7 @@ class UpdateController:
 
     def _on_check_finished(self, result: UpdateInfo | None, *, silent: bool = False) -> None:
         """Route the update-check result."""
-        self._settings_window.reset_check_updates_button()
+        self._model.set_check_button_enabled(True)
 
         if result is None:
             self._report_error('Failed to check for updates.', silent=silent)
@@ -279,7 +302,7 @@ class UpdateController:
         self._persist_check_timestamp()
 
         if not result.available:
-            self._settings_window.set_update_status('Up to date', UPDATE_STATUS_UP_TO_DATE_STYLE)
+            self._model.set_status('Up to date', UPDATE_STATUS_UP_TO_DATE_STYLE)
             if not silent:
                 logger.info('No updates available (current: %s)', result.current_version)
             else:
@@ -293,57 +316,64 @@ class UpdateController:
             self._show_ready(version)
             return
 
+        # Skip re-downloading a version that already failed (auto-check only).
+        # A manual retry via the banner clears ``_failed_version``.
+        if silent and version == self._failed_version:
+            logger.debug('Skipping download of previously failed version %s', version)
+            return
+
         # New update available — download it
-        self._settings_window.set_update_status(f'v{version} available', UPDATE_STATUS_AVAILABLE_STYLE)
-        for view in self._views:
-            view.show_downloading(version)
-        self._start_download(version)
+        self._model.set_status(f'v{version} available', UPDATE_STATUS_AVAILABLE_STYLE)
+        self._model.begin_download(version)
+        self._start_download(version, silent=silent)
 
     def _on_check_error(self, error: str, *, silent: bool = False) -> None:
         """Handle unexpected exception during update check."""
-        self._settings_window.reset_check_updates_button()
+        self._model.set_check_button_enabled(True)
         self._report_error(f'Update check error: {error}', silent=silent)
 
     # ------------------------------------------------------------------
     # Download flow
     # ------------------------------------------------------------------
 
-    def _start_download(self, version: str) -> None:
+    def _start_download(self, version: str, *, silent: bool = False) -> None:
         """Start downloading the update in the background."""
-        self._update_task = asyncio.create_task(self._async_download(version))
+        self._update_task = asyncio.create_task(self._async_download(version, silent=silent))
 
-    async def _async_download(self, version: str) -> None:
+    async def _async_download(self, version: str, *, silent: bool = False) -> None:
         """Run the download coroutine and route results."""
         try:
             success = await download_update(
                 self._client,
                 on_progress=self._on_download_progress,
             )
-            self._on_download_finished(success, version)
+            self._on_download_finished(success, version, silent=silent)
         except asyncio.CancelledError:
             logger.debug('Update download cancelled (shutdown)')
             raise
         except Exception as exc:
             logger.exception('Update download failed')
-            self._on_download_error(str(exc))
+            self._on_download_error(str(exc), silent=silent)
 
     def _on_download_progress(self, percentage: int) -> None:
-        """Broadcast download progress to all views."""
-        for view in self._views:
-            view.show_downloading_progress(percentage)
+        """Broadcast download progress to the model."""
+        self._model.set_progress(percentage)
 
-    def _on_download_finished(self, success: bool, version: str) -> None:
+    def _on_download_finished(self, success: bool, version: str, *, silent: bool = False) -> None:
         """Handle download completion."""
         if not success:
-            self._settings_window.set_update_status('Download failed', UPDATE_STATUS_ERROR_STYLE)
-            for view in self._views:
-                view.show_error('Download failed. Please try again later.')
+            self._failed_version = version
+            self._model.set_status('Download failed', UPDATE_STATUS_ERROR_STYLE)
+            if not silent:
+                self._model.set_error('Download failed. Please try again later.')
+            else:
+                logger.warning('Download failed for %s (silent)', version)
             return
 
         # Persist the client-update timestamp (actual update downloaded)
         ts = datetime.now(UTC).isoformat()
         self._store.update(last_client_update=ts)
-        self._settings_window.set_last_checked(ts)
+        self._model.set_last_checked(ts)
 
         self._pending_version = version
 
@@ -356,16 +386,17 @@ class UpdateController:
         self._show_ready(version)
 
     def _show_ready(self, version: str) -> None:
-        """Present the *ready to restart* state across all views."""
-        self._settings_window.set_update_status(f'v{version} ready', UPDATE_STATUS_UP_TO_DATE_STYLE)
-        self._settings_window.show_restart_button()
-        for view in self._views:
-            view.show_ready(version)
+        """Present the *ready to restart* state via the model."""
+        self._model.set_status(f'v{version} ready', UPDATE_STATUS_UP_TO_DATE_STYLE)
+        self._model.set_restart_visible(True)
+        self._model.set_ready(version)
 
-    def _on_download_error(self, error: str) -> None:
-        """Handle download error — show error across all views."""
-        for view in self._views:
-            view.show_error(f'Download error: {error}')
+    def _on_download_error(self, error: str, *, silent: bool = False) -> None:
+        """Handle download error."""
+        if not silent:
+            self._model.set_error(f'Download error: {error}')
+        else:
+            logger.warning('Download error (silent): %s', error)
 
     # ------------------------------------------------------------------
     # Apply
@@ -388,5 +419,4 @@ class UpdateController:
             self._app.quit()
         except Exception as e:
             logger.error('Failed to apply update: %s', e)
-            for view in self._views:
-                view.show_error(f'Failed to apply update: {e}')
+            self._model.set_error(f'Failed to apply update: {e}')
