@@ -208,7 +208,7 @@ class UpdateBanner(QFrame):
         if self._state == UpdateBannerState.HIDDEN:
             return
         self._state = UpdateBannerState.HIDDEN
-        self._slide_out()
+        self._animate_height(0)
 
     # --- Internal ---
 
@@ -239,26 +239,34 @@ class UpdateBanner(QFrame):
             self._progress.hide()
 
         target_height = _BANNER_HEIGHT_WITH_PROGRESS if config.show_progress else _BANNER_HEIGHT
-        self._slide_in(target_height)
+        self._animate_height(target_height)
 
-    def _slide_in(self, target_height: int) -> None:
-        """Animate the banner from collapsed to *target_height*."""
-        self.setVisible(True)
-        self._anim.stop()
-        self._anim.setStartValue(self.maximumHeight())
-        self._anim.setEndValue(target_height)
-        self._anim.start()
+    def _animate_height(self, target: int) -> None:
+        """Animate (or snap) the banner to *target* height.
 
-    def _slide_out(self) -> None:
-        """Animate the banner down to zero height, then hide."""
+        When *target* > 0 the banner slides in; when 0 it slides out.
+        If the parent window is hidden the change is applied instantly
+        to avoid property-change cycles that can cause transient window
+        flashes on Windows.
+        """
         self._anim.stop()
+
+        parent_window = self.window()
+        if parent_window is not None and not parent_window.isVisible():
+            self.setMaximumHeight(target)
+            self.setVisible(target > 0)
+            return
+
+        if target > 0:
+            self.setVisible(True)
+        else:
+            self._anim.finished.connect(
+                self._on_slide_out_done,
+                type=Qt.ConnectionType.SingleShotConnection,
+            )
+
         self._anim.setStartValue(self.maximumHeight())
-        self._anim.setEndValue(0)
-        # Use a one-shot connection to avoid accumulating slots.
-        self._anim.finished.connect(
-            self._on_slide_out_done,
-            type=Qt.ConnectionType.SingleShotConnection,
-        )
+        self._anim.setEndValue(target)
         self._anim.start()
 
     def _on_slide_out_done(self) -> None:

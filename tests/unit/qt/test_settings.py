@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.screen.settings import SettingsWindow
 from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE
 from synodic_client.resolution import ResolvedConfig
@@ -35,10 +36,15 @@ def _make_config(**overrides: Any) -> ResolvedConfig:
     return ResolvedConfig(**defaults)
 
 
+def _make_store(config: ResolvedConfig | None = None) -> ConfigStore:
+    """Create a ``ConfigStore`` seeded with *config*."""
+    return ConfigStore(config or _make_config())
+
+
 def _make_window(config: ResolvedConfig | None = None, version: str = '0.0.0.test') -> SettingsWindow:
     """Create a ``SettingsWindow`` without showing it."""
-    cfg = config or _make_config()
-    window = SettingsWindow(cfg, version=version)
+    store = _make_store(config)
+    window = SettingsWindow(store, version=version)
     return window
 
 
@@ -167,21 +173,19 @@ class TestSyncFromConfig:
 
 
 class TestSettingsCallbacks:
-    """Verify that control changes persist via update_user_config and emit the signal."""
+    """Verify that control changes persist via the ConfigStore."""
 
     @staticmethod
     def test_channel_change_to_dev() -> None:
-        """Switching to dev calls update_user_config and emits settings_changed."""
+        """Switching to dev calls store.update with update_channel='dev'."""
         config = _make_config()
         window = _make_window(config)
-        signal_spy = MagicMock()
-        window.settings_changed.connect(signal_spy)
 
         new_config = _make_config(update_channel='dev')
-        with patch('synodic_client.application.screen.settings.update_user_config', return_value=new_config):
+        with patch.object(window._store, 'update', return_value=new_config) as mock_update:
             window._channel_combo.setCurrentIndex(1)
 
-        signal_spy.assert_called_once_with(new_config)
+        mock_update.assert_called_with(update_channel='dev')
 
     @staticmethod
     def test_channel_change_to_stable() -> None:
@@ -191,26 +195,23 @@ class TestSettingsCallbacks:
         window.sync_from_config()
 
         new_config = _make_config(update_channel='stable')
-        target = 'synodic_client.application.screen.settings.update_user_config'
-        with patch(target, return_value=new_config) as mock_update:
+        with patch.object(window._store, 'update', return_value=new_config) as mock_update:
             window._channel_combo.setCurrentIndex(0)
 
         mock_update.assert_called_with(update_channel='stable')
 
     @staticmethod
     def test_source_change() -> None:
-        """Editing the source saves and emits."""
+        """Editing the source saves via the store."""
         config = _make_config()
         window = _make_window(config)
-        signal_spy = MagicMock()
-        window.settings_changed.connect(signal_spy)
 
         new_config = _make_config(update_source='https://custom.example.com')
-        with patch('synodic_client.application.screen.settings.update_user_config', return_value=new_config):
+        with patch.object(window._store, 'update', return_value=new_config) as mock_update:
             window._source_edit.setText('https://custom.example.com')
             window._on_source_changed()
 
-        signal_spy.assert_called_once_with(new_config)
+        mock_update.assert_called_with(update_source='https://custom.example.com')
 
     @staticmethod
     def test_source_blank_sets_none() -> None:
@@ -219,8 +220,7 @@ class TestSettingsCallbacks:
         window = _make_window(config)
 
         new_config = _make_config(update_source=None)
-        target = 'synodic_client.application.screen.settings.update_user_config'
-        with patch(target, return_value=new_config) as mock_update:
+        with patch.object(window._store, 'update', return_value=new_config) as mock_update:
             window._source_edit.setText('')
             window._on_source_changed()
 
@@ -228,48 +228,39 @@ class TestSettingsCallbacks:
 
     @staticmethod
     def test_auto_update_interval_change() -> None:
-        """Changing auto-update interval saves and emits."""
+        """Changing auto-update interval saves via the store."""
         new_interval = 90
         config = _make_config()
         window = _make_window(config)
-        signal_spy = MagicMock()
-        window.settings_changed.connect(signal_spy)
 
-        new_config = _make_config(auto_update_interval_minutes=new_interval)
-        with patch('synodic_client.application.screen.settings.update_user_config', return_value=new_config):
+        with patch.object(window._store, 'update') as mock_update:
             window._auto_update_spin.setValue(new_interval)
 
-        signal_spy.assert_called_once_with(new_config)
+        mock_update.assert_called_with(auto_update_interval_minutes=new_interval)
 
     @staticmethod
     def test_tool_update_interval_change() -> None:
-        """Changing tool-update interval saves and emits."""
+        """Changing tool-update interval saves via the store."""
         new_interval = 120
         config = _make_config()
         window = _make_window(config)
-        signal_spy = MagicMock()
-        window.settings_changed.connect(signal_spy)
 
-        new_config = _make_config(tool_update_interval_minutes=new_interval)
-        with patch('synodic_client.application.screen.settings.update_user_config', return_value=new_config):
+        with patch.object(window._store, 'update') as mock_update:
             window._tool_update_spin.setValue(new_interval)
 
-        signal_spy.assert_called_once_with(new_config)
+        mock_update.assert_called_with(tool_update_interval_minutes=new_interval)
 
     @staticmethod
     def test_detect_updates_change() -> None:
-        """Toggling detect_updates saves and emits."""
+        """Toggling detect_updates saves via the store."""
         config = _make_config()
         window = _make_window(config)
         window.sync_from_config()
-        signal_spy = MagicMock()
-        window.settings_changed.connect(signal_spy)
 
-        new_config = _make_config(detect_updates=False)
-        with patch('synodic_client.application.screen.settings.update_user_config', return_value=new_config):
+        with patch.object(window._store, 'update') as mock_update:
             window._detect_updates_check.setChecked(False)
 
-        signal_spy.assert_called_once_with(new_config)
+        mock_update.assert_called_with(detect_updates=False)
 
     @staticmethod
     def test_auto_start_registers_startup_when_frozen() -> None:
@@ -279,7 +270,7 @@ class TestSettingsCallbacks:
 
         new_config = _make_config(auto_start=True)
         with (
-            patch('synodic_client.application.screen.settings.update_user_config', return_value=new_config),
+            patch.object(window._store, 'update', return_value=new_config),
             patch('synodic_client.application.screen.settings.register_startup') as mock_register,
             patch('synodic_client.application.screen.settings.is_startup_registered', return_value=False),
             patch('synodic_client.application.screen.settings.getattr', return_value=True),
@@ -300,7 +291,7 @@ class TestSettingsCallbacks:
 
         new_config = _make_config(auto_start=False)
         with (
-            patch('synodic_client.application.screen.settings.update_user_config', return_value=new_config),
+            patch.object(window._store, 'update', return_value=new_config),
             patch('synodic_client.application.screen.settings.remove_startup') as mock_remove,
             patch('synodic_client.application.screen.settings.getattr', return_value=True),
         ):
@@ -316,7 +307,7 @@ class TestSettingsCallbacks:
 
         new_config = _make_config(auto_start=True)
         with (
-            patch('synodic_client.application.screen.settings.update_user_config', return_value=new_config),
+            patch.object(window._store, 'update', return_value=new_config),
             patch('synodic_client.application.screen.settings.register_startup') as mock_register,
             patch('synodic_client.application.screen.settings.remove_startup') as mock_remove,
             patch('synodic_client.application.screen.settings.is_startup_registered', return_value=False),
@@ -334,15 +325,15 @@ class TestSettingsCallbacks:
 
 
 class TestSyncDoesNotEmit:
-    """Verify that sync_from_config does not trigger settings_changed."""
+    """Verify that sync_from_config does not trigger store.changed."""
 
     @staticmethod
     def test_sync_no_signal() -> None:
-        """Syncing controls from config must not emit settings_changed."""
+        """Syncing controls from config must not emit store.changed."""
         config = _make_config(update_channel='dev', auto_update_interval_minutes=60)
         window = _make_window(config)
         signal_spy = MagicMock()
-        window.settings_changed.connect(signal_spy)
+        window._store.changed.connect(signal_spy)
 
         window.sync_from_config()
 
@@ -407,43 +398,21 @@ class TestCheckForUpdatesButton:
 
 
 # ---------------------------------------------------------------------------
-# update_config — silent config refresh
+# Store config is always fresh
 # ---------------------------------------------------------------------------
 
 
-class TestUpdateConfig:
-    """Verify that update_config refreshes _config without emitting signals."""
+class TestStoreConfig:
+    """Verify that store.config reflects updates without a manual refresh."""
 
     @staticmethod
-    def test_update_config_replaces_internal_config() -> None:
-        """update_config should replace _config with the new snapshot."""
-        window = _make_window(_make_config(last_client_update=None))
-        new_config = _make_config(last_client_update='2026-03-09T12:00:00+00:00')
-
-        window.update_config(new_config)
-
-        assert window._config is new_config
-        assert window._config.last_client_update == '2026-03-09T12:00:00+00:00'
-
-    @staticmethod
-    def test_update_config_does_not_emit_settings_changed() -> None:
-        """update_config must NOT emit settings_changed to avoid circular reinit."""
-        window = _make_window()
-        signal_spy = MagicMock()
-        window.settings_changed.connect(signal_spy)
-
-        window.update_config(_make_config(update_channel='dev'))
-
-        signal_spy.assert_not_called()
-
-    @staticmethod
-    def test_sync_after_update_config_uses_new_timestamp() -> None:
-        """sync_from_config after update_config should display the refreshed timestamp."""
+    def test_sync_after_store_update_uses_new_timestamp() -> None:
+        """sync_from_config after a store update should display the refreshed timestamp."""
         window = _make_window(_make_config(last_client_update=None))
         assert not window._last_client_update_label.text()
 
         new_config = _make_config(last_client_update='2026-03-09T12:00:00+00:00')
-        window.update_config(new_config)
+        window._store.set(new_config)
         window.sync_from_config()
 
         assert 'Last updated:' in window._last_client_update_label.text()

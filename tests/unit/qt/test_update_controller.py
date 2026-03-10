@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from packaging.version import Version
 
+from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.screen.update_banner import UpdateBanner
 from synodic_client.application.theme import (
     UPDATE_STATUS_AVAILABLE_STYLE,
@@ -66,6 +67,7 @@ def _make_controller(
     client.updater = MagicMock()
     banner = UpdateBanner()
     settings = MagicMock()
+    store = ConfigStore(config)
 
     with patch('synodic_client.application.update_controller.resolve_update_config') as mock_ucfg:
         mock_ucfg.return_value = MagicMock(
@@ -76,7 +78,7 @@ def _make_controller(
             client,
             [banner],
             settings_window=settings,
-            config=config,
+            store=store,
         )
         controller.set_user_active_predicate(lambda: is_user_active)
 
@@ -183,7 +185,8 @@ class TestDownloadFinished:
     def test_no_auto_apply_shows_ready_banner() -> None:
         """When auto_apply=False, a successful download should show the ready banner."""
         ctrl, app, client, banner, settings = _make_controller(auto_apply=False)
-        ctrl._on_download_finished(True, '2.0.0')
+        with patch.object(ctrl._store, 'update'):
+            ctrl._on_download_finished(True, '2.0.0')
 
         assert banner.state.name == 'READY'
 
@@ -191,7 +194,8 @@ class TestDownloadFinished:
     def test_no_auto_apply_sets_ready_status() -> None:
         """When auto_apply=False, status should show 'v2.0.0 ready' in green."""
         ctrl, app, client, banner, settings = _make_controller(auto_apply=False)
-        ctrl._on_download_finished(True, '2.0.0')
+        with patch.object(ctrl._store, 'update'):
+            ctrl._on_download_finished(True, '2.0.0')
 
         settings.set_update_status.assert_called_with(
             'v2.0.0 ready',
@@ -202,7 +206,8 @@ class TestDownloadFinished:
     def test_no_auto_apply_shows_restart_button() -> None:
         """When auto_apply=False, the restart button should be shown in settings."""
         ctrl, app, client, banner, settings = _make_controller(auto_apply=False)
-        ctrl._on_download_finished(True, '2.0.0')
+        with patch.object(ctrl._store, 'update'):
+            ctrl._on_download_finished(True, '2.0.0')
 
         settings.show_restart_button.assert_called_once()
 
@@ -348,12 +353,12 @@ class TestApplyUpdate:
 # ---------------------------------------------------------------------------
 
 
-class TestSettingsChanged:
-    """Verify on_settings_changed triggers reinit and immediate check."""
+class TestConfigChanged:
+    """Verify _on_config_changed triggers reinit and immediate check."""
 
     @staticmethod
-    def test_settings_changed_triggers_reinit_and_check() -> None:
-        """Changing settings should reinitialise the updater and check."""
+    def test_config_changed_triggers_reinit_and_check() -> None:
+        """Changing config should reinitialise the updater and check."""
         ctrl, app, client, banner, settings = _make_controller()
 
         new_config = _make_config(update_channel='dev')
@@ -362,14 +367,14 @@ class TestSettingsChanged:
             patch.object(ctrl, '_reinitialize_updater') as mock_reinit,
             patch.object(ctrl, 'check_now') as mock_check,
         ):
-            ctrl.on_settings_changed(new_config)
+            ctrl._on_config_changed(new_config)
 
         mock_reinit.assert_called_once_with(new_config)
         mock_check.assert_called_once_with(silent=True)
 
     @staticmethod
-    def test_settings_changed_updates_auto_apply() -> None:
-        """Changing settings should update the auto_apply flag."""
+    def test_config_changed_updates_auto_apply() -> None:
+        """Changing config should update the auto_apply flag."""
         ctrl, app, client, banner, settings = _make_controller(auto_apply=True)
 
         new_config = _make_config(auto_apply=False)
@@ -378,7 +383,7 @@ class TestSettingsChanged:
             patch.object(ctrl, '_reinitialize_updater'),
             patch.object(ctrl, 'check_now'),
         ):
-            ctrl.on_settings_changed(new_config)
+            ctrl._on_config_changed(new_config)
 
         assert ctrl._auto_apply is False
 
@@ -422,49 +427,39 @@ class TestCheckError:
 
 
 class TestPersistCheckTimestamp:
-    """Verify _persist_check_timestamp syncs the settings config."""
+    """Verify _persist_check_timestamp syncs the settings config via the store."""
 
     @staticmethod
-    def test_persist_updates_settings_config() -> None:
-        """_persist_check_timestamp should call update_config on the settings window."""
+    def test_persist_updates_store() -> None:
+        """_persist_check_timestamp should call store.update with a timestamp."""
         ctrl, _app, _client, _banner, settings = _make_controller()
 
         fake_resolved = _make_config(last_client_update='2026-03-09T00:00:00+00:00')
-        with patch(
-            'synodic_client.application.update_controller.update_user_config',
-            return_value=fake_resolved,
-        ):
+        with patch.object(ctrl._store, 'update', return_value=fake_resolved) as mock_update:
             ctrl._persist_check_timestamp()
+            mock_update.assert_called_once()
 
-        settings.update_config.assert_called_once_with(fake_resolved)
         settings.set_last_checked.assert_called_once()
 
     @staticmethod
-    def test_on_check_finished_success_syncs_config() -> None:
-        """A successful check should persist timestamp AND sync settings config."""
+    def test_on_check_finished_success_syncs_via_store() -> None:
+        """A successful check should persist timestamp via the store."""
         ctrl, _app, _client, _banner, settings = _make_controller()
         result = UpdateInfo(available=False, current_version=Version('1.0.0'))
 
         fake_resolved = _make_config(last_client_update='2026-03-09T00:00:00+00:00')
-        with patch(
-            'synodic_client.application.update_controller.update_user_config',
-            return_value=fake_resolved,
-        ):
+        with patch.object(ctrl._store, 'update', return_value=fake_resolved) as mock_update:
             ctrl._on_check_finished(result, silent=True)
-
-        settings.update_config.assert_called_once_with(fake_resolved)
+            mock_update.assert_called_once()
 
     @staticmethod
-    def test_download_finished_syncs_config_and_label() -> None:
-        """_on_download_finished should sync config and update the label."""
+    def test_download_finished_syncs_via_store() -> None:
+        """_on_download_finished should sync via the store and update the label."""
         ctrl, _app, _client, _banner, settings = _make_controller(auto_apply=False)
 
         fake_resolved = _make_config(last_client_update='2026-03-09T00:00:00+00:00')
-        with patch(
-            'synodic_client.application.update_controller.update_user_config',
-            return_value=fake_resolved,
-        ):
+        with patch.object(ctrl._store, 'update', return_value=fake_resolved) as mock_update:
             ctrl._on_download_finished(True, '2.0.0')
+            mock_update.assert_called_once()
 
-        settings.update_config.assert_called_once_with(fake_resolved)
         settings.set_last_checked.assert_called_once()

@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.data import DataCoordinator
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen.plugin_row import (
@@ -65,7 +66,6 @@ from synodic_client.application.theme import (
     SEARCH_INPUT_STYLE,
     SETTINGS_GEAR_STYLE,
 )
-from synodic_client.resolution import ResolvedConfig, update_user_config
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,7 @@ class ToolsView(QWidget):
     def __init__(
         self,
         porringer: API,
-        config: ResolvedConfig,
+        store: ConfigStore,
         parent: QWidget | None = None,
         *,
         coordinator: DataCoordinator | None = None,
@@ -120,7 +120,7 @@ class ToolsView(QWidget):
 
         Args:
             porringer: The porringer API instance.
-            config: Resolved configuration (for auto-update toggles).
+            store: The centralised :class:`ConfigStore`.
             parent: Optional parent widget.
             coordinator: Shared data coordinator.  When provided, the
                 view delegates plugin/directory fetching to the
@@ -128,7 +128,7 @@ class ToolsView(QWidget):
         """
         super().__init__(parent)
         self._porringer = porringer
-        self._config = config
+        self._store = store
         self._coordinator = coordinator
         self._section_widgets: list[QWidget] = []
         self._filter_chips: dict[str, FilterChip] = {}
@@ -379,7 +379,7 @@ class ToolsView(QWidget):
         """Clear existing widgets and rebuild the tool/package tree."""
         self._clear_section_widgets()
 
-        auto_update_map = self._config.plugin_auto_update or {}
+        auto_update_map = self._store.config.plugin_auto_update or {}
         kind_buckets = self._bucket_by_kind(
             data.plugins,
             data.packages_map,
@@ -446,7 +446,7 @@ class ToolsView(QWidget):
 
         auto_val = auto_update_map.get(plugin.name, True)
         plugin_updates = self._updates_available.get(plugin.name, {})
-        tool_timestamps = self._config.last_tool_updates or {}
+        tool_timestamps = self._store.config.last_tool_updates or {}
         default_exe = data.default_runtime_executable
 
         # Sort: default runtime first, then descending by tag
@@ -534,7 +534,7 @@ class ToolsView(QWidget):
         plugin_manifest = data.manifest_packages.get(plugin.name, set())
         raw_packages = data.packages_map.get(plugin.name, [])
         display_packages = self._build_display_packages(raw_packages, plugin_manifest)
-        tool_timestamps = self._config.last_tool_updates or {}
+        tool_timestamps = self._store.config.last_tool_updates or {}
 
         if display_packages:
             for pkg in display_packages:
@@ -1069,7 +1069,7 @@ class ToolsView(QWidget):
 
     def _on_auto_update_toggled(self, plugin_name: str, enabled: bool) -> None:
         """Persist the plugin-level auto-update toggle change to config."""
-        mapping = dict(self._config.plugin_auto_update or {})
+        mapping = dict(self._store.config.plugin_auto_update or {})
 
         if enabled:
             mapping.pop(plugin_name, None)
@@ -1077,7 +1077,7 @@ class ToolsView(QWidget):
             mapping[plugin_name] = False
 
         new_value = mapping if mapping else None
-        self._config = update_user_config(plugin_auto_update=new_value)
+        self._store.update(plugin_auto_update=new_value)
         logger.info('Auto-update for %s set to %s', plugin_name, enabled)
 
     def _on_package_auto_update_toggled(
@@ -1087,7 +1087,7 @@ class ToolsView(QWidget):
         enabled: bool,
     ) -> None:
         """Persist a per-package auto-update override to the nested config dict."""
-        mapping = dict(self._config.plugin_auto_update or {})
+        mapping = dict(self._store.config.plugin_auto_update or {})
         current = mapping.get(plugin_name)
 
         if isinstance(current, dict):
@@ -1103,7 +1103,7 @@ class ToolsView(QWidget):
             mapping.pop(plugin_name, None)
 
         new_value = mapping if mapping else None
-        self._config = update_user_config(plugin_auto_update=new_value)
+        self._store.update(plugin_auto_update=new_value)
         logger.info(
             'Auto-update for %s/%s set to %s',
             plugin_name,
@@ -1389,17 +1389,17 @@ class MainWindow(QMainWindow):
     def __init__(
         self,
         porringer: API | None = None,
-        config: ResolvedConfig | None = None,
+        store: ConfigStore | None = None,
     ) -> None:
         """Initialize the main window.
 
         Args:
             porringer: Optional porringer API instance for manifest display.
-            config: Resolved configuration for plugin auto-update state.
+            store: The centralised :class:`ConfigStore`.
         """
         super().__init__()
         self._porringer = porringer
-        self._config = config
+        self._store = store
         self._coordinator: DataCoordinator | None = DataCoordinator(porringer) if porringer is not None else None
         self.setWindowTitle('Synodic Client')
         self.setMinimumSize(*MAIN_WINDOW_MIN_SIZE)
@@ -1445,12 +1445,12 @@ class MainWindow(QMainWindow):
 
     def show(self) -> None:
         """Show the window, initializing UI lazily on first show."""
-        if self._tabs is None and self._porringer is not None and self._config is not None:
+        if self._tabs is None and self._porringer is not None and self._store is not None:
             self._tabs = QTabWidget(self)
 
             self._projects_view = ProjectsView(
                 self._porringer,
-                self._config,
+                self._store,
                 self,
                 coordinator=self._coordinator,
             )
@@ -1458,7 +1458,7 @@ class MainWindow(QMainWindow):
 
             self._tools_view = ToolsView(
                 self._porringer,
-                self._config,
+                self._store,
                 self,
                 coordinator=self._coordinator,
             )
@@ -1507,16 +1507,16 @@ class Screen:
     def __init__(
         self,
         porringer: API | None = None,
-        config: ResolvedConfig | None = None,
+        store: ConfigStore | None = None,
     ) -> None:
         """Initialize the screen.
 
         Args:
             porringer: Optional porringer API instance.
-            config: Resolved configuration.
+            store: The centralised :class:`ConfigStore`.
         """
         self._porringer = porringer
-        self._config = config
+        self._store = store
 
     @property
     def window(self) -> MainWindow:
@@ -1526,5 +1526,5 @@ class Screen:
             The MainWindow instance.
         """
         if self._window is None:
-            self._window = MainWindow(self._porringer, self._config)
+            self._window = MainWindow(self._porringer, self._store)
         return self._window

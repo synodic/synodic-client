@@ -6,15 +6,34 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from synodic_client.application.schema import ToolUpdateResult
+from synodic_client.application.config_store import ConfigStore
+from synodic_client.application.schema import ToolUpdateResult, UpdateTarget
 from synodic_client.application.screen.tray import TrayScreen
+from synodic_client.resolution import ResolvedConfig
+from synodic_client.schema import DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES, DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
+
+
+def _make_config() -> ResolvedConfig:
+    return ResolvedConfig(
+        update_source=None,
+        update_channel='stable',
+        auto_update_interval_minutes=DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
+        tool_update_interval_minutes=DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
+        plugin_auto_update=None,
+        detect_updates=True,
+        prerelease_packages=None,
+        auto_apply=True,
+        auto_start=True,
+        debug_logging=False,
+        last_client_update=None,
+        last_tool_updates=None,
+    )
 
 
 @pytest.fixture
 def tray_screen():
     """Build a minimal ``TrayScreen`` with mocked collaborators."""
     with (
-        patch('synodic_client.application.screen.tray.resolve_config'),
         patch('synodic_client.application.screen.tool_update_controller.resolve_update_config') as mock_ucfg,
         patch('synodic_client.application.screen.tray.UpdateController'),
     ):
@@ -27,9 +46,9 @@ def tray_screen():
         app = MagicMock()
         client = MagicMock()
         window = MagicMock()
-        # SettingsWindow expects a ResolvedConfig – pass a mock
+        store = ConfigStore(_make_config())
         with patch('synodic_client.application.screen.tray.SettingsWindow'):
-            ts = TrayScreen(app, client, window)
+            ts = TrayScreen(app, client, window, store=store)
 
         return ts
 
@@ -48,7 +67,7 @@ class TestToolUpdateWindowShow:
     def test_manual_plugin_update_shows_window(tray_screen) -> None:
         """A user-initiated single-plugin update should show the window."""
         result = ToolUpdateResult(manifests_processed=1, updated=1)
-        tray_screen._tool_orchestrator._on_tool_update_finished(result, updating_plugin='pipx', manual=True)
+        tray_screen._tool_orchestrator._on_tool_update_finished(result, UpdateTarget(plugin='pipx'))
         tray_screen._window.show.assert_called_once()
 
     @staticmethod
@@ -57,8 +76,7 @@ class TestToolUpdateWindowShow:
         result = ToolUpdateResult(manifests_processed=1, updated=1)
         tray_screen._tool_orchestrator._on_tool_update_finished(
             result,
-            updating_package=('pipx', 'ruff'),
-            manual=True,
+            UpdateTarget(plugin='pipx', package='ruff'),
         )
         tray_screen._window.show.assert_called_once()
 

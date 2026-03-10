@@ -15,6 +15,7 @@ from porringer.schema import LocalConfiguration
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QWidget
 
+from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.icon import app_icon
 from synodic_client.application.init import run_startup_preamble
 from synodic_client.application.instance import SingleInstance
@@ -216,8 +217,9 @@ def application(*, uri: str | None = None, dev_mode: bool = False, debug: bool =
         sys.exit(0)
     instance.start_server()
 
-    _screen = Screen(porringer, config)
-    _tray = TrayScreen(app, client, _screen.window, config=config)
+    _store = ConfigStore(config)
+    _screen = Screen(porringer, _store)
+    _tray = TrayScreen(app, client, _screen.window, store=_store)
 
     # Keep install preview windows alive until the app exits
     _install_windows: list[InstallPreviewWindow] = []
@@ -227,7 +229,7 @@ def application(*, uri: str | None = None, dev_mode: bool = False, debug: bool =
         window = InstallPreviewWindow(
             porringer,
             manifest_url,
-            config=config,
+            config=_store.config,
         )
         _install_windows.append(window)
         window.show()

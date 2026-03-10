@@ -51,3 +51,24 @@ class ToolUpdateResult:
     failed: int = 0
     updated_packages: set[str] = field(default_factory=set)
     """Package names that were successfully upgraded."""
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateTarget:
+    """Identifies the scope of a manual tool update.
+
+    Passed to the shared completion handler so it can clear the correct
+    updating state and derive timestamp keys.  ``None`` (the default in
+    the handler) means the update was periodic / automatic.
+
+    When *package* is empty the update targeted an entire plugin;
+    otherwise it targeted one specific package within the plugin.
+    *plugin* always carries the signal key (possibly composite
+    ``"plugin:tag"``).
+    """
+
+    plugin: str
+    """Signal key for the plugin (may be composite ``"name:tag"``)."""
+
+    package: str = ''
+    """Package name, or empty when the whole plugin was updated."""

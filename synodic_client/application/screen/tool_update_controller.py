@@ -13,6 +13,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from porringer.api import API
 from porringer.core.schema import PackageRef
@@ -20,21 +21,32 @@ from porringer.schema.execution import SetupActionResult
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QSystemTrayIcon
 
-from synodic_client.application.schema import ToolUpdateResult
+from synodic_client.application.schema import ToolUpdateResult, UpdateTarget
 from synodic_client.application.screen.screen import MainWindow, ToolsView
 from synodic_client.application.workers import (
     run_runtime_package_updates,
     run_tool_updates,
 )
-from synodic_client.config import load_user_config
 from synodic_client.resolution import (
-    ResolvedConfig,
     resolve_auto_update_scope,
     resolve_update_config,
-    update_user_config,
 )
 
+if TYPE_CHECKING:
+    from synodic_client.application.config_store import ConfigStore
+
 logger = logging.getLogger(__name__)
+
+
+def _parse_plugin_key(name: str) -> tuple[str, str | None]:
+    """Split a composite ``'plugin:tag'`` key into ``(bare_name, tag)``.
+
+    Returns ``(name, None)`` when there is no tag component.
+    """
+    if ':' in name:
+        bare, tag = name.split(':', 1)
+        return bare, tag
+    return name, None
 
 
 class ToolUpdateOrchestrator:
@@ -46,14 +58,14 @@ class ToolUpdateOrchestrator:
 
     Args:
         window: The main application window (provides porringer / coordinator).
-        config_resolver: Callable returning the current resolved config.
+        store: The centralised :class:`ConfigStore`.
         tray: System tray icon for displaying notification messages.
     """
 
     def __init__(
         self,
         window: MainWindow,
-        config_resolver: Callable[[], ResolvedConfig],
+        store: ConfigStore,
         tray: QSystemTrayIcon,
         is_user_active: Callable[[], bool] | None = None,
     ) -> None:
@@ -61,14 +73,14 @@ class ToolUpdateOrchestrator:
 
         Args:
             window: The main application window.
-            config_resolver: Callable returning the current resolved config.
+            store: The centralised :class:`ConfigStore`.
             tray: System tray icon for notification messages.
             is_user_active: Predicate returning ``True`` when the user
                 has a visible window.  Periodic tool updates are
                 deferred while active.
         """
         self._window = window
-        self._resolve_config = config_resolver
+        self._store = store
         self._tray = tray
         self._is_user_active = is_user_active or (lambda: False)
         self._tool_task: asyncio.Task[None] | None = None
@@ -120,7 +132,7 @@ class ToolUpdateOrchestrator:
 
     def restart_tool_update_timer(self) -> None:
         """Start (or restart) the periodic tool update timer from config."""
-        config = resolve_update_config(self._resolve_config())
+        config = resolve_update_config(self._store.config)
         self._tool_update_timer = self._restart_timer(
             self._tool_update_timer,
             config.tool_update_interval_minutes,
@@ -144,6 +156,32 @@ class ToolUpdateOrchestrator:
         tools_view.package_update_requested.connect(self.on_single_package_update)
         tools_view.package_remove_requested.connect(self.on_single_package_remove)
 
+    # -- ToolsView error helpers --
+
+    def _fail_plugin_update(self, plugin_name: str, error: str) -> None:
+        """Reset plugin updating state and show an inline error."""
+        tools_view = self._window.tools_view
+        if tools_view is not None:
+            tools_view.set_plugin_updating(plugin_name, False)
+            tools_view.set_plugin_error(plugin_name, error)
+
+    def _fail_package_update(
+        self,
+        plugin_name: str,
+        package_name: str,
+        error: str,
+        *,
+        removing: bool = False,
+    ) -> None:
+        """Reset package updating/removing state and show an inline error."""
+        tools_view = self._window.tools_view
+        if tools_view is not None:
+            if removing:
+                tools_view.set_package_removing(plugin_name, package_name, False)
+            else:
+                tools_view.set_package_updating(plugin_name, package_name, False)
+            tools_view.set_package_error(plugin_name, package_name, error)
+
     # -- Full tool update --
 
     def on_tool_update(self) -> None:
@@ -158,7 +196,7 @@ class ToolUpdateOrchestrator:
 
     async def _do_tool_update(self, porringer: API) -> None:
         """Resolve enabled plugins off-thread, then run the tool update."""
-        config = self._resolve_config()
+        config = self._store.config
         coordinator = self._window.coordinator
 
         if coordinator is not None:
@@ -210,8 +248,8 @@ class ToolUpdateOrchestrator:
         if tools_view is not None:
             tools_view.set_plugin_updating(plugin_name, True)
 
-        if ':' in plugin_name:
-            bare_plugin, runtime_tag = plugin_name.split(':', 1)
+        bare_plugin, runtime_tag = _parse_plugin_key(plugin_name)
+        if runtime_tag is not None:
             self._tool_task = asyncio.create_task(
                 self._async_runtime_plugin_update(porringer, plugin_name, bare_plugin, runtime_tag),
             )
@@ -228,7 +266,7 @@ class ToolUpdateOrchestrator:
         runtime_tag: str,
     ) -> None:
         """Run a runtime-scoped plugin update and route results."""
-        config = self._resolve_config()
+        config = self._store.config
         mapping = config.plugin_auto_update or {}
         pkg_entry = mapping.get(signal_key) or mapping.get(plugin_name)
         coordinator = self._window.coordinator
@@ -250,20 +288,17 @@ class ToolUpdateOrchestrator:
             )
             if coordinator is not None:
                 coordinator.invalidate()
-            self._on_tool_update_finished(result, updating_plugin=signal_key, manual=True)
+            self._on_tool_update_finished(result, UpdateTarget(plugin=signal_key))
         except asyncio.CancelledError:
             logger.debug('Runtime plugin update cancelled (shutdown)')
             raise
         except Exception as exc:
             logger.exception('Runtime tool update failed')
-            tools_view = self._window.tools_view
-            if tools_view is not None:
-                tools_view.set_plugin_updating(signal_key, False)
-                tools_view.set_plugin_error(signal_key, f'Update failed: {exc}')
+            self._fail_plugin_update(signal_key, f'Update failed: {exc}')
 
     async def _async_single_plugin_update(self, porringer: API, plugin_name: str) -> None:
         """Run a single-plugin tool update and route results."""
-        config = self._resolve_config()
+        config = self._store.config
         mapping = config.plugin_auto_update or {}
         pkg_entry = mapping.get(plugin_name)
         coordinator = self._window.coordinator
@@ -285,16 +320,13 @@ class ToolUpdateOrchestrator:
             )
             if coordinator is not None:
                 coordinator.invalidate()
-            self._on_tool_update_finished(result, updating_plugin=plugin_name, manual=True)
+            self._on_tool_update_finished(result, UpdateTarget(plugin=plugin_name))
         except asyncio.CancelledError:
             logger.debug('Single plugin update cancelled (shutdown)')
             raise
         except Exception as exc:
             logger.exception('Tool update failed')
-            tools_view = self._window.tools_view
-            if tools_view is not None:
-                tools_view.set_plugin_updating(plugin_name, False)
-                tools_view.set_plugin_error(plugin_name, f'Update failed: {exc}')
+            self._fail_plugin_update(plugin_name, f'Update failed: {exc}')
 
     # -- Single package update --
 
@@ -328,8 +360,9 @@ class ToolUpdateOrchestrator:
         coordinator = self._window.coordinator
         discovered = coordinator.discovered_plugins if coordinator is not None else None
 
-        if ':' in plugin_name:
-            bare_plugin, runtime_tag = plugin_name.split(':', 1)
+        target = UpdateTarget(plugin=plugin_name, package=package_name)
+        bare_plugin, runtime_tag = _parse_plugin_key(plugin_name)
+        if runtime_tag is not None:
             try:
                 result = await run_runtime_package_updates(
                     porringer,
@@ -340,20 +373,13 @@ class ToolUpdateOrchestrator:
                 )
                 if coordinator is not None:
                     coordinator.invalidate()
-                self._on_tool_update_finished(
-                    result,
-                    updating_package=(plugin_name, package_name),
-                    manual=True,
-                )
+                self._on_tool_update_finished(result, target)
             except asyncio.CancelledError:
                 logger.debug('Runtime package update cancelled (shutdown)')
                 raise
             except Exception as exc:
                 logger.exception('Runtime package update failed')
-                tools_view = self._window.tools_view
-                if tools_view is not None:
-                    tools_view.set_package_updating(plugin_name, package_name, False)
-                    tools_view.set_package_error(plugin_name, package_name, f'Update failed: {exc}')
+                self._fail_package_update(plugin_name, package_name, f'Update failed: {exc}')
             return
 
         try:
@@ -365,32 +391,28 @@ class ToolUpdateOrchestrator:
             )
             if coordinator is not None:
                 coordinator.invalidate()
-            self._on_tool_update_finished(
-                result,
-                updating_package=(plugin_name, package_name),
-                manual=True,
-            )
+            self._on_tool_update_finished(result, target)
         except asyncio.CancelledError:
             logger.debug('Package update cancelled (shutdown)')
             raise
         except Exception as exc:
             logger.exception('Package update failed')
-            tools_view = self._window.tools_view
-            if tools_view is not None:
-                tools_view.set_package_updating(plugin_name, package_name, False)
-                tools_view.set_package_error(plugin_name, package_name, f'Update failed: {exc}')
+            self._fail_package_update(plugin_name, package_name, f'Update failed: {exc}')
 
     # -- Shared completion handler --
 
     def _on_tool_update_finished(
         self,
         result: ToolUpdateResult,
-        *,
-        updating_plugin: str | None = None,
-        updating_package: tuple[str, str] | None = None,
-        manual: bool = False,
+        target: UpdateTarget | None = None,
     ) -> None:
-        """Handle tool update completion."""
+        """Handle tool update completion.
+
+        Args:
+            result: Summary of the update run.
+            target: Which plugin/package was updated.  ``None`` for
+                periodic (automatic) updates.
+        """
         logger.info(
             'Tool update completed: %d manifest(s), %d updated, %d already latest, %d failed',
             result.manifests_processed,
@@ -402,36 +424,25 @@ class ToolUpdateOrchestrator:
         # Persist timestamps for updated packages
         if result.updated_packages:
             now = datetime.now(UTC).isoformat()
-            existing = dict(load_user_config().last_tool_updates or {})
-            plugin_name = updating_plugin or (updating_package[0] if updating_package else '')
+            existing = dict(self._store.config.last_tool_updates or {})
+            plugin_name = target.plugin if target else ''
             for pkg_name in result.updated_packages:
                 key = f'{plugin_name}/{pkg_name}' if plugin_name else pkg_name
                 existing[key] = now
-            resolved = update_user_config(last_tool_updates=existing)
-            # Refresh the config on the tools view so the next rebuild
-            # picks up the updated timestamps instead of stale data.
-            tools_view_ref = self._window.tools_view
-            if tools_view_ref is not None:
-                tools_view_ref._config = resolved
+            self._store.update(last_tool_updates=existing)
 
-        # Clear updating state on widgets
+        # Clear updating state and refresh the tools view.  When the
+        # window is hidden we skip the refresh() cycle because
+        # MainWindow.show() already triggers a full refresh the next
+        # time the user opens the window.  Manual updates (target is
+        # not None) call show() below which triggers the refresh.
         tools_view = self._window.tools_view
-        logger.info(
-            '[DIAG] _on_tool_update_finished: manual=%s, tools_view_exists=%s, window_visible=%s',
-            manual,
-            tools_view is not None,
-            self._window.isVisible(),
-        )
         if tools_view is not None:
-            if updating_plugin is not None:
-                tools_view.set_plugin_updating(updating_plugin, False)
-            if updating_package is not None:
-                tools_view.set_package_updating(*updating_package, False)
-            # Refresh to pick up version changes and re-detect updates
             tools_view._updates_checked = False
-            tools_view.refresh()
+            if self._window.isVisible() and target is None:
+                tools_view.refresh()
 
-        if manual:
+        if target is not None:
             self._window.show()
 
     def _on_tool_update_error(self, error: str) -> None:
@@ -470,10 +481,7 @@ class ToolUpdateOrchestrator:
         coordinator = self._window.coordinator
         discovered = coordinator.discovered_plugins if coordinator is not None else None
 
-        bare_plugin = plugin_name
-        runtime_tag: str | None = None
-        if ':' in plugin_name:
-            bare_plugin, runtime_tag = plugin_name.split(':', 1)
+        bare_plugin, runtime_tag = _parse_plugin_key(plugin_name)
 
         try:
             package_ref = PackageRef(name=package_name)
@@ -500,10 +508,9 @@ class ToolUpdateOrchestrator:
             raise
         except Exception as exc:
             logger.exception('Package removal failed')
-            tools_view = self._window.tools_view
-            if tools_view is not None:
-                tools_view.set_package_removing(plugin_name, package_name, False)
-                tools_view.set_package_error(plugin_name, package_name, f'Failed to remove {package_name}: {exc}')
+            self._fail_package_update(
+                plugin_name, package_name, f'Failed to remove {package_name}: {exc}', removing=True,
+            )
 
     def _on_package_remove_finished(
         self,
@@ -512,18 +519,17 @@ class ToolUpdateOrchestrator:
         package_name: str,
     ) -> None:
         """Handle package removal completion."""
-        tools_view = self._window.tools_view
-
         if not result.success or result.skipped:
             detail = result.message or 'Unknown error'
             logger.warning('Package removal failed for %s/%s: %s', plugin_name, package_name, detail)
-            if tools_view is not None:
-                tools_view.set_package_removing(plugin_name, package_name, False)
-                tools_view.set_package_error(plugin_name, package_name, f'Could not remove {package_name}: {detail}')
+            self._fail_package_update(
+                plugin_name, package_name, f'Could not remove {package_name}: {detail}', removing=True,
+            )
             return
 
         logger.info('Package removal completed for %s/%s', plugin_name, package_name)
 
+        tools_view = self._window.tools_view
         if tools_view is not None:
             tools_view.set_package_removing(plugin_name, package_name, False)
             tools_view._updates_checked = False

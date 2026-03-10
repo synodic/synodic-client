@@ -28,12 +28,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.icon import app_icon
 from synodic_client.application.screen import _format_relative_time
 from synodic_client.application.screen.card import CardFrame
 from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE, UPDATE_STATUS_CHECKING_STYLE
 from synodic_client.logging import log_path, set_debug_level
-from synodic_client.resolution import ResolvedConfig, update_user_config
 from synodic_client.schema import GITHUB_REPO_URL
 from synodic_client.startup import is_startup_registered, register_startup, remove_startup
 
@@ -43,13 +43,10 @@ logger = logging.getLogger(__name__)
 class SettingsWindow(QMainWindow):
     """Application settings window with grouped card sections.
 
-    All controls persist changes immediately via :func:`update_user_config`
-    and emit :attr:`settings_changed` so that the tray and updater can
-    react.  The signal carries the new :class:`ResolvedConfig`.
+    All controls persist changes immediately via the shared
+    :class:`ConfigStore`, which broadcasts the new :class:`ResolvedConfig`
+    to every connected consumer.
     """
-
-    settings_changed = Signal(object)
-    """Emitted with the new ``ResolvedConfig`` whenever a setting is changed and persisted."""
 
     check_updates_requested = Signal()
     """Emitted when the user clicks the *Check for Updates* button."""
@@ -74,19 +71,19 @@ class SettingsWindow(QMainWindow):
 
     def __init__(
         self,
-        config: ResolvedConfig,
+        store: ConfigStore,
         version: str = '',
         parent: QWidget | None = None,
     ) -> None:
         """Initialise the settings window.
 
         Args:
-            config: The current resolved configuration snapshot.
+            store: The centralised configuration store.
             version: The application version string to display.
             parent: Optional parent widget.
         """
         super().__init__(parent)
-        self._config = config
+        self._store = store
         self._version = version
         self.setWindowTitle('Synodic Settings')
         self.setMinimumSize(*SETTINGS_WINDOW_MIN_SIZE)
@@ -254,7 +251,7 @@ class SettingsWindow(QMainWindow):
 
         Signals are blocked during the update to prevent feedback loops.
         """
-        config = self._config
+        config = self._store.config
 
         with self._block_signals():
             # Channel: index 0 = Stable, 1 = Development
@@ -305,15 +302,6 @@ class SettingsWindow(QMainWindow):
         """Re-enable the *Check for Updates* button after a check completes."""
         self._check_updates_btn.setEnabled(True)
 
-    def update_config(self, config: ResolvedConfig) -> None:
-        """Replace the internal config snapshot without emitting signals.
-
-        Called by controllers that persist timestamps so that the next
-        :meth:`sync_from_config` sees fresh data instead of the stale
-        snapshot captured at construction time.
-        """
-        self._config = config
-
     def set_last_checked(self, timestamp: str) -> None:
         """Update the *last updated* label from an ISO 8601 timestamp."""
         relative = _format_relative_time(timestamp)
@@ -353,8 +341,7 @@ class SettingsWindow(QMainWindow):
         Args:
             **changes: Field-name / value pairs to persist.
         """
-        self._config = update_user_config(**changes)
-        self.settings_changed.emit(self._config)
+        self._store.update(**changes)
 
     @contextmanager
     def _block_signals(self) -> Iterator[None]:
@@ -410,13 +397,12 @@ class SettingsWindow(QMainWindow):
         self._persist(auto_apply=checked)
 
     def _on_auto_start_changed(self, checked: bool) -> None:
-        self._config = update_user_config(auto_start=checked)
+        self._store.update(auto_start=checked)
         if getattr(sys, 'frozen', False):
             if checked:
                 register_startup(sys.executable)
             else:
                 remove_startup()
-        self.settings_changed.emit(self._config)
 
     def _on_debug_logging_changed(self, checked: bool) -> None:
         set_debug_level(enabled=checked)

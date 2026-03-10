@@ -27,13 +27,12 @@ from synodic_client.application.theme import (
 from synodic_client.application.workers import check_for_update, download_update
 from synodic_client.resolution import (
     ResolvedConfig,
-    resolve_config,
     resolve_update_config,
-    update_user_config,
 )
 from synodic_client.schema import UpdateInfo
 
 if TYPE_CHECKING:
+    from synodic_client.application.config_store import ConfigStore
     from synodic_client.application.screen.settings import SettingsWindow
     from synodic_client.client import Client
 
@@ -54,8 +53,8 @@ class UpdateController:
         state transitions to (typically ``UpdateBanner`` instances).
     settings_window:
         The ``SettingsWindow`` (check button + last-updated label).
-    config:
-        Optional pre-resolved configuration.  ``None`` resolves from disk.
+    store:
+        The centralised :class:`ConfigStore`.
     """
 
     def __init__(
@@ -65,7 +64,7 @@ class UpdateController:
         views: list[UpdateView],
         *,
         settings_window: SettingsWindow,
-        config: ResolvedConfig | None = None,
+        store: ConfigStore,
     ) -> None:
         """Initialise the controller and start the periodic timer.
 
@@ -74,20 +73,19 @@ class UpdateController:
             client: The Synodic Client service facade.
             views: One or more :class:`UpdateView` implementations.
             settings_window: The settings window (check button + timestamp).
-            config: Optional pre-resolved configuration.
+            store: The centralised :class:`ConfigStore`.
         """
         self._app = app
         self._client = client
         self._views = views
         self._settings_window = settings_window
-        self._config = config
+        self._store = store
         self._is_user_active: Callable[[], bool] = lambda: False
         self._update_task: asyncio.Task[None] | None = None
         self._pending_version: str | None = None
 
         # Derive auto-apply preference from config
-        resolved = self._resolve_config()
-        self._auto_apply: bool = resolved.auto_apply
+        self._auto_apply: bool = store.config.auto_apply
 
         # Periodic auto-update timer
         self._auto_update_timer: QTimer | None = None
@@ -102,6 +100,9 @@ class UpdateController:
         # Wire settings check-updates and restart buttons
         self._settings_window.check_updates_requested.connect(self._on_manual_check)
         self._settings_window.restart_requested.connect(self._apply_update)
+
+        # React to config changes from any source
+        self._store.changed.connect(self._on_config_changed)
 
     def set_user_active_predicate(self, predicate: Callable[[], bool]) -> None:
         """Set the predicate used to defer auto-apply when the user is active.
@@ -125,12 +126,6 @@ class UpdateController:
     # Config helpers
     # ------------------------------------------------------------------
 
-    def _resolve_config(self) -> ResolvedConfig:
-        """Return the injected config or resolve from disk."""
-        if self._config is not None:
-            return self._config
-        return resolve_config()
-
     def _can_auto_apply(self) -> bool:
         """Return whether a downloaded update should be applied automatically.
 
@@ -142,8 +137,7 @@ class UpdateController:
     def _persist_check_timestamp(self) -> None:
         """Persist the current time as *last_client_update* and refresh the label."""
         ts = datetime.now(UTC).isoformat()
-        resolved = update_user_config(last_client_update=ts)
-        self._settings_window.update_config(resolved)
+        self._store.update(last_client_update=ts)
         self._settings_window.set_last_checked(ts)
 
     def _report_error(self, message: str, *, silent: bool) -> None:
@@ -165,7 +159,7 @@ class UpdateController:
 
     def _restart_auto_update_timer(self) -> None:
         """Start (or restart) the periodic auto-update timer from config."""
-        config = resolve_update_config(self._resolve_config())
+        config = resolve_update_config(self._store.config)
 
         if self._auto_update_timer is not None:
             self._auto_update_timer.stop()
@@ -196,13 +190,14 @@ class UpdateController:
         """
         self._do_check(silent=silent)
 
-    def on_settings_changed(self, config: ResolvedConfig) -> None:
-        """React to a settings change — reinitialise the updater and timers.
+    def _on_config_changed(self, config: object) -> None:
+        """React to a config change — reinitialise the updater and timers.
 
         Also triggers an immediate (silent) check so the user gets
         feedback after switching channels.
         """
-        self._config = config
+        if not isinstance(config, ResolvedConfig):
+            return
         self._auto_apply = config.auto_apply
         self._reinitialize_updater(config)
         self.check_now(silent=True)
@@ -247,19 +242,20 @@ class UpdateController:
                     view.show_error('Updater is not initialized.')
             return
 
-        # Preserve the banner state when an update is already pending
-        if self._pending_version is None:
+        # Preserve the banner state when an update is already pending.
+        # Skip the visual "Checking…" transition when the settings
+        # window isn't visible to avoid widget operations on a hidden
+        # QMainWindow (which can cause transient flashes on Windows).
+        if self._pending_version is None and self._settings_window.isVisible():
             self._settings_window.set_checking()
 
         self._update_task = asyncio.create_task(self._async_check(silent=silent))
 
     async def _async_check(self, *, silent: bool) -> None:
         """Run the update check coroutine and route results."""
-        logger.info('[DIAG] Self-update check starting (silent=%s)', silent)
         try:
             result = await check_for_update(self._client)
             self._on_check_finished(result, silent=silent)
-            logger.info('[DIAG] Self-update check completed (silent=%s)', silent)
         except asyncio.CancelledError:
             logger.debug('Update check cancelled (shutdown)')
             raise
@@ -346,8 +342,7 @@ class UpdateController:
 
         # Persist the client-update timestamp (actual update downloaded)
         ts = datetime.now(UTC).isoformat()
-        resolved = update_user_config(last_client_update=ts)
-        self._settings_window.update_config(resolved)
+        self._store.update(last_client_update=ts)
         self._settings_window.set_last_checked(ts)
 
         self._pending_version = version

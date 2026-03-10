@@ -1,6 +1,7 @@
 """Tray screen for the application."""
 
 import logging
+from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
@@ -16,10 +17,9 @@ from synodic_client.application.screen.settings import SettingsWindow
 from synodic_client.application.screen.tool_update_controller import ToolUpdateOrchestrator
 from synodic_client.application.update_controller import UpdateController
 from synodic_client.client import Client
-from synodic_client.resolution import (
-    ResolvedConfig,
-    resolve_config,
-)
+
+if TYPE_CHECKING:
+    from synodic_client.application.config_store import ConfigStore
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,8 @@ class TrayScreen:
         app: QApplication,
         client: Client,
         window: MainWindow,
-        config: ResolvedConfig | None = None,
+        *,
+        store: ConfigStore,
     ) -> None:
         """Initialize the tray icon.
 
@@ -40,13 +41,12 @@ class TrayScreen:
             app: The running ``QApplication``.
             client: The Synodic Client service.
             window: The main application window.
-            config: Optional pre-resolved configuration.  When ``None``,
-                the configuration is resolved from disk on demand.
+            store: The centralised :class:`ConfigStore`.
         """
         self._app = app
         self._client = client
         self._window = window
-        self._config = config
+        self._store = store
 
         self.tray_icon = app_icon()
 
@@ -59,10 +59,9 @@ class TrayScreen:
 
         # Settings window (created once, shown/hidden on demand)
         self._settings_window = SettingsWindow(
-            self._resolve_config(),
+            self._store,
             version=str(self._client.version),
         )
-        self._settings_window.settings_changed.connect(self._on_settings_changed)
 
         # MainWindow gear button -> open settings
         window.settings_requested.connect(self._show_settings)
@@ -74,18 +73,21 @@ class TrayScreen:
             client,
             [self._banner],
             settings_window=self._settings_window,
-            config=config,
+            store=self._store,
         )
         self._update_controller.set_user_active_predicate(self._is_user_active)
 
         # Tool update orchestrator - owns tool/package update lifecycle
         self._tool_orchestrator = ToolUpdateOrchestrator(
             window,
-            self._resolve_config,
+            self._store,
             self.tray,
             is_user_active=self._is_user_active,
         )
         self._tool_orchestrator.restart_tool_update_timer()
+
+        # Restart tool timer when config changes (e.g. interval edited)
+        self._store.changed.connect(lambda _: self._tool_orchestrator.restart_tool_update_timer())
 
         # Connect ToolsView signals - deferred because ToolsView is created lazily
         window.tools_view_created.connect(self._tool_orchestrator.connect_tools_view)
@@ -111,14 +113,6 @@ class TrayScreen:
         self.menu.addAction(self.quit_action)
 
         self.tray.setContextMenu(self.menu)
-
-    # -- Config helpers --
-
-    def _resolve_config(self) -> ResolvedConfig:
-        """Return the injected config or resolve from disk."""
-        if self._config is not None:
-            return self._config
-        return resolve_config()
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         """Handle tray icon activation (e.g. double-click)."""
@@ -146,11 +140,3 @@ class TrayScreen:
         self._update_controller.shutdown()
         self._tool_orchestrator.shutdown()
         logger.info('TrayScreen shut down')
-
-    def _on_settings_changed(self, config: ResolvedConfig) -> None:
-        """React to a change made in the settings window."""
-        self._config = config
-        # Delegate updater reinit + immediate check to the controller
-        self._update_controller.on_settings_changed(config)
-        # Restart tool-update timer with new config
-        self._tool_orchestrator.restart_tool_update_timer()

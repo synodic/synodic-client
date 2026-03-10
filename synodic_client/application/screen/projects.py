@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from porringer.api import API
 from porringer.backend.command.core.discovery import DiscoveredPlugins
@@ -24,7 +25,9 @@ from synodic_client.application.screen.schema import PreviewPhase
 from synodic_client.application.screen.sidebar import ManifestSidebar
 from synodic_client.application.screen.spinner import LoadingIndicator
 from synodic_client.application.theme import COMPACT_MARGINS
-from synodic_client.resolution import ResolvedConfig
+
+if TYPE_CHECKING:
+    from synodic_client.application.config_store import ConfigStore
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +44,7 @@ class ProjectsView(QWidget):
     def __init__(
         self,
         porringer: API,
-        config: ResolvedConfig,
+        store: ConfigStore,
         parent: QWidget | None = None,
         *,
         coordinator: DataCoordinator | None = None,
@@ -50,14 +53,14 @@ class ProjectsView(QWidget):
 
         Args:
             porringer: The porringer API instance.
-            config: Resolved configuration.
+            store: The centralised :class:`ConfigStore`.
             parent: Optional parent widget.
             coordinator: Shared data coordinator for validated directory
                 data.
         """
         super().__init__(parent)
         self._porringer = porringer
-        self._config = config
+        self._store = store
         self._coordinator = coordinator
         self._refresh_in_progress = False
         self._pending_select: Path | None = None
@@ -163,7 +166,7 @@ class ProjectsView(QWidget):
                     widget.load(
                         str(path),
                         project_directory=path if path.is_dir() else path.parent,
-                        detect_updates=self._config.detect_updates,
+                        detect_updates=self._store.config.detect_updates,
                     )
 
         except Exception:
@@ -196,7 +199,7 @@ class ProjectsView(QWidget):
                     self._porringer,
                     self,
                     show_close=False,
-                    config=self._config,
+                    config=self._store.config,
                 )
                 widget._discovered_plugins = discovered
                 widget.install_finished.connect(self._on_install_finished)

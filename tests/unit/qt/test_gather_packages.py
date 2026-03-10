@@ -1,4 +1,4 @@
-"""Tests for ToolsView._gather_packages global + per-directory queries."""
+﻿"""Tests for ToolsView._gather_packages global + per-directory queries."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from porringer.schema.plugin import PluginInfo, PluginKind, RuntimePackageResult
 from porringer.utility.exception import PluginError
 from PySide6.QtWidgets import QLabel, QPushButton
 
+from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.screen.plugin_row import (
     FilterChip,
     PluginKindHeader,
@@ -54,6 +55,11 @@ def _make_config() -> ResolvedConfig:
     )
 
 
+def _make_store(config: ResolvedConfig | None = None) -> ConfigStore:
+    """Build a ConfigStore seeded with *config*."""
+    return ConfigStore(config or _make_config())
+
+
 def _make_porringer() -> MagicMock:
     """Build a MagicMock standing in for the porringer API."""
     mock = MagicMock()
@@ -82,7 +88,7 @@ class TestGatherPackages:
             ],
         )
 
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
         result = asyncio.run(view._gather_packages('pipx', []))
 
         assert {e.name for e in result} == {'pdm', 'cppython'}
@@ -97,7 +103,7 @@ class TestGatherPackages:
             ],
         )
 
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
         result = asyncio.run(view._gather_packages('pipx', []))
 
         matching = [e for e in result if e.name == 'pdm']
@@ -110,7 +116,7 @@ class TestGatherPackages:
         porringer = _make_porringer()
         porringer.package.list = AsyncMock(return_value=[])
 
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
         asyncio.run(view._gather_packages('pipx', []))
 
         # At least one call should have been made with only plugin_name (no path)
@@ -137,7 +143,7 @@ class TestGatherPackages:
         porringer.package.list = AsyncMock(side_effect=_mock_list)
 
         directory = ManifestDirectory(path=Path('/fake/project'))
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
         result = asyncio.run(view._gather_packages('pipx', [directory]))
 
         names = {entry.name for entry in result}
@@ -157,7 +163,7 @@ class TestGatherPackages:
         porringer.package.list = AsyncMock(side_effect=_mock_list)
 
         directory = ManifestDirectory(path=Path('/fake/project'))
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
         result = asyncio.run(view._gather_packages('pipx', [directory]))
 
         matching = [e for e in result if e.name == 'mylib']
@@ -172,7 +178,7 @@ class TestGatherPackages:
             return_value=[Package(name='cppython', version='0.5.0')],
         )
 
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
         result = asyncio.run(view._gather_packages('pipx', []))
 
         matching = [e for e in result if e.name == 'cppython']
@@ -196,7 +202,7 @@ class TestGatherPackages:
         porringer.package.list = AsyncMock(side_effect=_mock_list)
 
         directory = ManifestDirectory(path=Path('/fake/project'))
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
         result = asyncio.run(view._gather_packages('pipx', [directory]))
 
         names = {entry.name for entry in result}
@@ -222,7 +228,7 @@ class TestGatherPackages:
             ],
         )
 
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
         result = asyncio.run(view._gather_packages('pipx', []))
 
         by_name = {entry.name: entry.host_tool for entry in result}
@@ -242,7 +248,7 @@ class TestGatherToolPlugins:
     def test_returns_plugins_keyed_by_host_tool(monkeypatch) -> None:
         """installed_plugins() results are keyed by tool name and returned as PackageEntry."""
         porringer = _make_porringer()
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
 
         # Mock _discover_plugin_managers to return a fake manager
         mock_manager = MagicMock()
@@ -275,7 +281,7 @@ class TestGatherToolPlugins:
     def test_empty_when_no_managers(monkeypatch) -> None:
         """Returns empty dict when no PluginManager instances are discovered."""
         porringer = _make_porringer()
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
         monkeypatch.setattr(
             ToolsView,
             '_discover_plugin_managers',
@@ -289,7 +295,7 @@ class TestGatherToolPlugins:
     def test_manager_failure_does_not_propagate(monkeypatch) -> None:
         """A failing installed_plugins() call produces an empty entry, not an exception."""
         porringer = _make_porringer()
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
 
         mock_manager = MagicMock()
         mock_manager.installed_plugins = AsyncMock(side_effect=RuntimeError('boom'))
@@ -307,7 +313,7 @@ class TestGatherToolPlugins:
     def test_multiple_managers(monkeypatch) -> None:
         """Multiple PluginManager instances are queried in parallel."""
         porringer = _make_porringer()
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
 
         mgr_pdm = MagicMock()
         mgr_pdm.installed_plugins = AsyncMock(
@@ -417,7 +423,7 @@ class TestBuildDisplayPackages:
                 project_path='/projects/periapsis',
             ),
         ]
-        # 'cppython' is NOT in the manifest set → transitive
+        # 'cppython' is NOT in the manifest set â†’ transitive
         result = ToolsView._build_display_packages(entries, set())
         assert result[0].project_instances[0].is_transitive is True
 
@@ -522,7 +528,7 @@ class TestProjectChildRow:
         spy = MagicMock()
         row.navigate_to_project.connect(spy)
 
-        # Find the navigate button (→)
+        # Find the navigate button (â†’)
         nav_btns = [w for w in row.findChildren(QPushButton) if w.text() == '\u2192']
         assert len(nav_btns) == 1
         nav_btns[0].click()
@@ -590,7 +596,7 @@ class TestSearchFilter:
         """Build a ToolsView with a mock porringer."""
         porringer = _make_porringer()
         config = _make_config()
-        return ToolsView(porringer, config)
+        return ToolsView(porringer, _make_store(config))
 
     @staticmethod
     def _populate_section_widgets(view: ToolsView) -> None:
@@ -682,7 +688,7 @@ class TestSearchFilter:
         assert len(visible_rows) == _EXPECTED_VISIBLE_ROWS_ALL
 
     def test_search_plus_chip_filter(self) -> None:
-        """Search and chip filtering compose — only matching rows in active plugins survive."""
+        """Search and chip filtering compose â€” only matching rows in active plugins survive."""
         view = self._make_view()
         self._populate_section_widgets(view)
 
@@ -757,7 +763,7 @@ class TestFilterPanel:
         """Build a ToolsView with a mock porringer."""
         porringer = _make_porringer()
         config = _make_config()
-        return ToolsView(porringer, config)
+        return ToolsView(porringer, _make_store(config))
 
     def test_panel_starts_collapsed(self) -> None:
         """The filter panel is hidden and has zero max-height on init."""
@@ -771,7 +777,7 @@ class TestFilterPanel:
         view = self._make_view()
         view._toggle_filter_panel()
         assert view._filter_panel_open
-        assert view._filter_panel.isVisible()
+        assert not view._filter_panel.isHidden()
 
     def test_toggle_closes_open_panel(self) -> None:
         """Calling _toggle_filter_panel on an open panel closes it."""
@@ -892,7 +898,7 @@ class TestRuntimePluginSupport:
             MagicMock(directory=ManifestDirectory(path=Path('/fake/project'))),
         ]
 
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
         # Use _gather_packages directly with an empty directory list
         # (as _gather_refresh_data would do for RUNTIME plugins)
         result = asyncio.run(view._gather_packages('pim', []))
@@ -964,7 +970,7 @@ class TestPerRuntimeDisplay:
 
     def test_runtime_sections_create_separate_provider_headers(self) -> None:
         """Each RuntimePackageResult produces its own PluginProviderHeader."""
-        view = ToolsView(_make_porringer(), _make_config())
+        view = ToolsView(_make_porringer(), _make_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -984,7 +990,7 @@ class TestPerRuntimeDisplay:
 
     def test_default_runtime_comes_first(self) -> None:
         """The default runtime's provider header is the first one."""
-        view = ToolsView(_make_porringer(), _make_config())
+        view = ToolsView(_make_porringer(), _make_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1006,7 +1012,7 @@ class TestPerRuntimeDisplay:
 
     def test_default_runtime_packages_displayed(self) -> None:
         """Package rows for the default runtime appear after its header."""
-        view = ToolsView(_make_porringer(), _make_config())
+        view = ToolsView(_make_porringer(), _make_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1029,7 +1035,7 @@ class TestPerRuntimeDisplay:
 
     def test_non_default_runtime_packages_displayed(self) -> None:
         """Package rows for the non-default runtime appear after its header."""
-        view = ToolsView(_make_porringer(), _make_config())
+        view = ToolsView(_make_porringer(), _make_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1051,7 +1057,7 @@ class TestPerRuntimeDisplay:
 
     def test_venv_packages_excluded_for_runtime_probed_plugin(self) -> None:
         """Venv packages must not appear in ToolsView for runtime-probed plugins."""
-        view = ToolsView(_make_porringer(), _make_config())
+        view = ToolsView(_make_porringer(), _make_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1077,12 +1083,12 @@ class TestPerRuntimeDisplay:
         view._build_widget_tree(data)
 
         providers = [w for w in view._section_widgets if isinstance(w, PluginProviderHeader)]
-        # Only the 2 runtime providers — no extra venv provider
+        # Only the 2 runtime providers â€” no extra venv provider
         assert len(providers) == _EXPECTED_RUNTIME_PROVIDERS
 
     def test_runtime_tag_uses_default_style(self) -> None:
         """The default runtime tag uses the green highlight style."""
-        view = ToolsView(_make_porringer(), _make_config())
+        view = ToolsView(_make_porringer(), _make_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1105,7 +1111,7 @@ class TestPerRuntimeDisplay:
 
     def test_runtime_tag_uses_normal_style_for_non_default(self) -> None:
         """Non-default runtime tags use the blue style."""
-        view = ToolsView(_make_porringer(), _make_config())
+        view = ToolsView(_make_porringer(), _make_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1129,7 +1135,7 @@ class TestPerRuntimeDisplay:
 
     def test_filter_chips_work_with_runtime_providers(self) -> None:
         """Filter chips are built from runtime provider headers and filter works."""
-        view = ToolsView(_make_porringer(), _make_config())
+        view = ToolsView(_make_porringer(), _make_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1160,7 +1166,7 @@ class TestPerRuntimeDisplay:
             side_effect=PluginError('not a RuntimeConsumer'),
         )
 
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
         result = asyncio.run(view._gather_runtime_packages('pipx', MagicMock()))
         assert result is None
 
@@ -1178,7 +1184,7 @@ class TestPerRuntimeDisplay:
         ]
         porringer.package.list_by_runtime = AsyncMock(return_value=expected)
 
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
         result = asyncio.run(view._gather_runtime_packages('pip', MagicMock()))
         assert result == expected
 
@@ -1197,7 +1203,7 @@ class TestPerRuntimeDisplay:
         porringer.package.list = AsyncMock(side_effect=_mock_list)
 
         directory = ManifestDirectory(path=Path('/fake/project'))
-        view = ToolsView(porringer, _make_config())
+        view = ToolsView(porringer, _make_store())
         result = asyncio.run(view._gather_packages('pip', [directory], skip_global=True))
 
         assert all(p is not None for p in call_paths), 'global query should not be issued'
