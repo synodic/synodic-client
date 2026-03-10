@@ -36,7 +36,7 @@ _applied = False
 def apply() -> None:
     """Activate the subprocess-suppression patch (idempotent, Windows-only)."""
     global _applied  # noqa: PLW0603
-    if _applied or sys.platform != "win32":
+    if _applied or sys.platform != 'win32':
         return
     _applied = True
 
@@ -51,7 +51,7 @@ _CREATE_NO_WINDOW: int = 0
 _STARTF_USESHOWWINDOW: int = 0
 _SW_HIDE: int = 0
 
-if sys.platform == "win32":
+if sys.platform == 'win32':
     _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW  # 0x0800_0000
     _STARTF_USESHOWWINDOW = subprocess.STARTF_USESHOWWINDOW
     _SW_HIDE = 0
@@ -64,12 +64,12 @@ def _inject_hidden_flags(kwargs: dict[str, Any]) -> None:
     preserved.  An existing ``startupinfo`` object is augmented
     rather than overwritten.
     """
-    kwargs["creationflags"] = kwargs.get("creationflags", 0) | _CREATE_NO_WINDOW
+    kwargs['creationflags'] = kwargs.get('creationflags', 0) | _CREATE_NO_WINDOW
 
-    startupinfo = kwargs.get("startupinfo") or subprocess.STARTUPINFO()
+    startupinfo = kwargs.get('startupinfo') or subprocess.STARTUPINFO()
     startupinfo.dwFlags |= _STARTF_USESHOWWINDOW
     startupinfo.wShowWindow = _SW_HIDE
-    kwargs["startupinfo"] = startupinfo
+    kwargs['startupinfo'] = startupinfo
 
 
 def _patch_popen() -> None:

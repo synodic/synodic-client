@@ -440,7 +440,7 @@ class TestUpdateConfig:
     def test_sync_after_update_config_uses_new_timestamp() -> None:
         """sync_from_config after update_config should display the refreshed timestamp."""
         window = _make_window(_make_config(last_client_update=None))
-        assert window._last_client_update_label.text() == ''
+        assert not window._last_client_update_label.text()
 
         new_config = _make_config(last_client_update='2026-03-09T12:00:00+00:00')
         window.update_config(new_config)

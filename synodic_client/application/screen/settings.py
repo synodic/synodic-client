@@ -331,7 +331,11 @@ class SettingsWindow(QMainWindow):
         # adjustSize() only reaches the minimum.  Compute the ideal
         # height from the content widget directly.
         content_hint = self._scroll_content.sizeHint()
-        margins = self._scroll_content.layout().contentsMargins()
+        layout = self._scroll_content.layout()
+        if layout is None:
+            super().show()
+            return
+        margins = layout.contentsMargins()
         ideal_w = max(content_hint.width() + margins.left() + margins.right(), self.minimumWidth())
         ideal_h = max(content_hint.height() + margins.top() + margins.bottom(), self.minimumHeight())
         self.resize(ideal_w, ideal_h)

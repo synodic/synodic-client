@@ -120,20 +120,21 @@ async def run_tool_updates(
                 params,
                 plugins=discovered_plugins,
             ):
-                if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result is not None:
-                    action_result = event.result
-                    if action_result.skipped:
-                        if action_result.skip_reason in {
-                            SkipReason.ALREADY_LATEST,
-                            SkipReason.ALREADY_INSTALLED,
-                        }:
-                            result.already_latest += 1
-                    elif action_result.success:
-                        result.updated += 1
-                        if action_result.action.package:
-                            result.updated_packages.add(str(action_result.action.package.name))
-                    else:
-                        result.failed += 1
+                if event.kind != ProgressEventKind.ACTION_COMPLETED or event.result is None:
+                    continue
+                action_result = event.result
+                if action_result.skipped:
+                    if action_result.skip_reason in {
+                        SkipReason.ALREADY_LATEST,
+                        SkipReason.ALREADY_INSTALLED,
+                    }:
+                        result.already_latest += 1
+                elif action_result.success:
+                    result.updated += 1
+                    if action_result.action.package:
+                        result.updated_packages.add(str(action_result.action.package.name))
+                else:
+                    result.failed += 1
         except asyncio.CancelledError:
             logger.debug('run_tool_updates cancelled during manifest processing')
             raise
