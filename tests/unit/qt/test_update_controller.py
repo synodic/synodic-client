@@ -23,6 +23,26 @@ from synodic_client.schema import (
     UpdateInfo,
 )
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+class ModelSpy:
+    """Records signal emissions from an :class:`UpdateModel`."""
+
+    def __init__(self, model: UpdateModel) -> None:
+        self.status: list[tuple[str, str]] = []
+        self.check_button_enabled: list[bool] = []
+        self.restart_visible: list[bool] = []
+        self.last_checked: list[str] = []
+
+        model.status_text_changed.connect(lambda t, s: self.status.append((t, s)))
+        model.check_button_enabled_changed.connect(self.check_button_enabled.append)
+        model.restart_visible_changed.connect(self.restart_visible.append)
+        model.last_checked_changed.connect(self.last_checked.append)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
