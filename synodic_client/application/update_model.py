@@ -50,6 +50,7 @@ class UpdateModel(QObject):
     last_checked_changed = Signal(str)
 
     def __init__(self, parent: QObject | None = None) -> None:
+        """Initialize the update model."""
         super().__init__(parent)
         self._phase = UpdatePhase.IDLE
         self._version: str = ''

@@ -17,7 +17,6 @@ from PySide6.QtWidgets import QApplication
 from synodic_client.application.screen.action_card import (
     ActionCard,
     ActionCardList,
-    action_key,
     action_sort_key,
 )
 from synodic_client.application.theme import (
@@ -43,7 +42,7 @@ def _make_action(
     *,
     kind: PluginKind | None = PluginKind.PACKAGE,
     description: str = 'Install requests',
-    installer: str = 'pip',
+    installer: str | None = 'pip',
     package: str = 'requests',
     **overrides: Any,
 ) -> SetupAction:
@@ -63,7 +62,6 @@ def _make_action(
     action.package = pkg_mock
     action.package_description = overrides.get('package_description', description)
     action.command = overrides.get('command')
-    action.cli_command = overrides.get('cli_command')
     action.include_prereleases = overrides.get('include_prereleases', False)
     action.plugin_target = overrides.get('plugin_target')
     return action
@@ -80,7 +78,7 @@ def _make_result(
     """Create a SetupActionResult.
 
     Extra keyword arguments (``action``, ``installed_version``,
-    ``available_version``) are forwarded to the constructor.
+    ``available_version``, ``cli_command``) are forwarded to the constructor.
     """
     return SetupActionResult(
         action=overrides.get('action') or _make_action(),
@@ -90,6 +88,7 @@ def _make_result(
         message=message,
         installed_version=overrides.get('installed_version'),
         available_version=overrides.get('available_version'),
+        cli_command=overrides.get('cli_command'),
     )
 
 
@@ -244,7 +243,7 @@ class TestActionCardCheckResult:
 
     @staticmethod
     def test_already_installed_status() -> None:
-        """Skipped ALREADY_INSTALLED shows 'Already installed'."""
+        """Skipped ALREADY_INSTALLED shows '\u2713 Already installed'."""
         card = ActionCard()
         card.populate(_make_action())
         result = _make_result(
@@ -253,7 +252,7 @@ class TestActionCardCheckResult:
             installed_version='3.5.2',
         )
         card.set_check_result(result)
-        assert card.status_text() == 'Already installed'
+        assert card.status_text() == '\u2713 Already installed'
         assert ACTION_CARD_STATUS_SATISFIED in card._status_label.styleSheet()
 
     @staticmethod
@@ -300,6 +299,20 @@ class TestActionCardCheckResult:
         )
         card.set_check_result(result)
         assert card._version_label.text() == '3.5.2'
+
+    @staticmethod
+    def test_available_version_only_shown() -> None:
+        """Version label shows '→ target' when only available_version is set."""
+        card = ActionCard()
+        card.populate(_make_action())
+        result = _make_result(
+            success=True,
+            skipped=False,
+            available_version='1.2.0',
+        )
+        card.set_check_result(result)
+        assert '\u2192 1.2.0' in card._version_label.text()
+        assert 'grey' in card._version_label.styleSheet()
 
     @staticmethod
     def test_finalize_checking_resolves_to_needed() -> None:
@@ -349,8 +362,7 @@ class TestActionCardCheckFailure:
     def test_failed_check_shows_error_tooltip() -> None:
         """A failed check result surfaces the error message as a tooltip."""
         card = ActionCard()
-        action = _make_action(kind=PluginKind.SCM, package='repo')
-        action.installer = None  # Simulate an unresolved deferred action
+        action = _make_action(kind=PluginKind.SCM, package='repo', installer=None)
         card.populate(action)
         msg = "SCM environment 'None' is not available"
         result = _make_result(success=False, skipped=False, message=msg)
@@ -506,8 +518,7 @@ class TestActionCardList:
         """Populate includes actions with kind=None."""
         card_list = ActionCardList()
         a1 = _make_action(package='pkg1')
-        a2 = _make_action(package='pkg2')
-        a2.kind = None  # bare command
+        a2 = _make_action(package='pkg2', kind=None)
         actions = [a1, a2]
         card_list.populate(actions)
         assert card_list.card_count() == len(actions)
@@ -527,21 +538,6 @@ class TestActionCardList:
         assert c1 is not c2
         assert c1._package_label.text() == 'first'
         assert c2._package_label.text() == 'second'
-
-    @staticmethod
-    def test_get_card_cross_instance() -> None:
-        """get_card works with a different object that has the same content."""
-        card_list = ActionCardList()
-        original = _make_action(package='numpy', installer='pip')
-        card_list.populate([original])
-
-        # Create a separate mock with the same content fields
-        duplicate = _make_action(package='numpy', installer='pip')
-        assert original is not duplicate
-
-        card = card_list.get_card(duplicate)
-        assert card is not None
-        assert card._package_label.text() == 'numpy'
 
     @staticmethod
     def test_get_card_returns_none_for_unknown() -> None:
@@ -582,7 +578,7 @@ class TestActionCardList:
 
         card_list.finalize_all_checking()
 
-        assert c1.status_text() == 'Already installed'  # unchanged
+        assert c1.status_text() == '\u2713 Already installed'  # unchanged
         c2 = card_list.get_card(a2)
         assert c2 is not None
         assert c2.status_text() == 'Needed'  # resolved
@@ -613,53 +609,6 @@ class TestActionCardList:
 
 
 # ---------------------------------------------------------------------------
-# action_key — stable identity
-# ---------------------------------------------------------------------------
-
-
-class TestActionKey:
-    """Tests for the action_key function."""
-
-    @staticmethod
-    def test_same_content_same_key() -> None:
-        """Two actions with identical content produce the same key."""
-        a = _make_action(package='numpy', installer='pip')
-        b = _make_action(package='numpy', installer='pip')
-        assert a is not b
-        assert action_key(a) == action_key(b)
-
-    @staticmethod
-    def test_different_package_different_key() -> None:
-        """Actions with different packages produce different keys."""
-        a = _make_action(package='numpy')
-        b = _make_action(package='scipy')
-        assert action_key(a) != action_key(b)
-
-    @staticmethod
-    def test_different_installer_different_key() -> None:
-        """Actions with different installers produce different keys."""
-        a = _make_action(package='numpy', installer='pip')
-        b = _make_action(package='numpy', installer='uv')
-        assert action_key(a) != action_key(b)
-
-    @staticmethod
-    def test_different_kind_different_key() -> None:
-        """Actions with different kinds produce different keys."""
-        a = _make_action(package='ruff', kind=PluginKind.PACKAGE)
-        b = _make_action(package='ruff', kind=PluginKind.TOOL)
-        assert action_key(a) != action_key(b)
-
-    @staticmethod
-    def test_command_action_key() -> None:
-        """Command actions include the command in the key."""
-        a = _make_action(command=['echo', 'hello'])
-        b = _make_action(command=['echo', 'hello'])
-        c = _make_action(command=['echo', 'world'])
-        assert action_key(a) == action_key(b)
-        assert action_key(a) != action_key(c)
-
-
-# ---------------------------------------------------------------------------
 # ActionCard — CLI command label
 # ---------------------------------------------------------------------------
 
@@ -677,11 +626,18 @@ class TestActionCardCommandLabel:
         assert not card._command_row.isHidden()
 
     @staticmethod
-    def test_explicit_cli_command() -> None:
-        """Actions with cli_command show that instead of the default."""
+    def test_explicit_cli_command_from_result() -> None:
+        """set_check_result with cli_command updates the command label."""
         card = ActionCard()
-        action = _make_action(cli_command=['uv', 'tool', 'install', 'ruff'])
+        action = _make_action(package='ruff', installer='pip')
         card.populate(action)
+        assert card._command_label.text() == 'pip install ruff'
+
+        result = _make_result(
+            action=action,
+            cli_command=('uv', 'tool', 'install', 'ruff'),
+        )
+        card.set_check_result(result)
         assert card._command_label.text() == 'uv tool install ruff'
 
     @staticmethod
@@ -694,46 +650,30 @@ class TestActionCardCommandLabel:
         assert flags & Qt.TextInteractionFlag.TextSelectableByMouse
 
     @staticmethod
-    def test_update_command_updates_text() -> None:
-        """update_command replaces the command label text."""
+    def test_set_check_result_updates_command_label() -> None:
+        """set_check_result with result cli_command updates the command label."""
         card = ActionCard()
         action = _make_action(package='ruff', installer='pip')
         card.populate(action)
         assert card._command_label.text() == 'pip install ruff'
 
-        resolved = _make_action(cli_command=['uv', 'tool', 'install', 'ruff'])
-        card.update_command(resolved)
+        result = _make_result(
+            action=action,
+            cli_command=('uv', 'tool', 'install', 'ruff'),
+        )
+        card.set_check_result(result)
         assert card._command_label.text() == 'uv tool install ruff'
         assert not card._command_row.isHidden()
-
-    @staticmethod
-    def test_update_command_hides_label_when_empty() -> None:
-        """update_command hides the row when the resolved action has no command."""
-        card = ActionCard()
-        action = _make_action(package='ruff', installer='pip')
-        card.populate(action)
-        assert not card._command_row.isHidden()
-
-        empty_action = _make_action(kind=PluginKind.RUNTIME)
-        empty_action.cli_command = None
-        empty_action.command = None
-        empty_action.package = None
-        card.update_command(empty_action)
-        assert card._command_row.isHidden()
-
-    @staticmethod
-    def test_update_command_noop_on_skeleton() -> None:
-        """update_command does nothing when card is a skeleton."""
-        card = ActionCard(skeleton=True)
-        action = _make_action(cli_command=['uv', 'tool', 'install', 'ruff'])
-        # Should not raise — skeleton simply returns early
-        card.update_command(action)
 
     @staticmethod
     def test_copy_button_copies_command(monkeypatch: object) -> None:
         """Clicking the copy button copies the command text to the clipboard."""
         card = ActionCard()
-        action = _make_action(cli_command=['uv', 'tool', 'install', 'ruff'])
+        action = _make_action(
+            package='ruff',
+            installer='uv',
+            command=('uv', 'tool', 'install', 'ruff'),
+        )
         card.populate(action)
 
         clipboard = QApplication.clipboard()
@@ -746,7 +686,11 @@ class TestActionCardCommandLabel:
     def test_copy_button_shows_feedback() -> None:
         """Clicking copy shows a check-mark on the button."""
         card = ActionCard()
-        action = _make_action(cli_command=['uv', 'tool', 'install', 'ruff'])
+        action = _make_action(
+            package='ruff',
+            installer='uv',
+            command=('uv', 'tool', 'install', 'ruff'),
+        )
         card.populate(action)
 
         card._copy_btn.click()
@@ -936,7 +880,7 @@ class TestActionCardAlreadyLatest:
                 skip_reason=SkipReason.ALREADY_LATEST,
             )
         )
-        assert card.status_text() == 'Already latest'
+        assert card.status_text() == '\u2713 Already latest'
         assert ACTION_CARD_STATUS_SATISFIED in card._status_label.styleSheet()
 
     @staticmethod
@@ -974,8 +918,8 @@ class TestActionCardAlreadyLatest:
             )
         )
 
-        assert card_installed.status_text() == 'Already installed'
-        assert card_latest.status_text() == 'Already latest'
+        assert card_installed.status_text() == '\u2713 Already installed'
+        assert card_latest.status_text() == '\u2713 Already latest'
         # Both use the satisfied stylesheet
         assert ACTION_CARD_STATUS_SATISFIED in card_installed._status_label.styleSheet()
         assert ACTION_CARD_STATUS_SATISFIED in card_latest._status_label.styleSheet()

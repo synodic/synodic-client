@@ -159,10 +159,9 @@ def _dispatch_preview_event(
 ) -> None:
     """Route a single preview stream event to the appropriate callback.
 
-    Mutates *state* in-place with updated ``action_index`` / ``got_parsed``.
+    Mutates *state* in-place (``got_parsed`` flag).
     """
     if event.kind == ProgressEventKind.MANIFEST_PARSED and event.manifest:
-        state.action_index = {id(a): i for i, a in enumerate(event.manifest.actions)}
         if cb.on_manifest_parsed is not None:
             cb.on_manifest_parsed(event.manifest, manifest_path, temp_dir_str)
         state.got_parsed = True
@@ -176,16 +175,17 @@ def _dispatch_preview_event(
         return
 
     if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
-        if not state.got_parsed:
-            state.action_index = {id(a): i for i, a in enumerate(event.manifest.actions)}
         if cb.on_preview_ready is not None:
             cb.on_preview_ready(event.manifest, manifest_path, temp_dir_str)
         return
 
-    if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result and event.action:
-        row = state.action_index.get(id(event.action))
-        if row is not None and cb.on_action_checked is not None:
-            cb.on_action_checked(row, event.result)
+    if (
+        event.kind == ProgressEventKind.ACTION_COMPLETED
+        and event.result
+        and event.action_index is not None
+        and cb.on_action_checked is not None
+    ):
+        cb.on_action_checked(event.action_index, event.result)
 
 
 # ---------------------------------------------------------------------------

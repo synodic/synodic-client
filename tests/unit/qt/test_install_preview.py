@@ -49,7 +49,6 @@ class TestInstallPreviewWindow:
         action.installer = installer
         action.package = package
         action.command = None
-        action.cli_command = None
         return action
 
     @staticmethod
@@ -85,7 +84,6 @@ class TestFormatCliCommand:
             'description': 'Install test',
             'installer': 'pip',
             'package': 'requests',
-            'cli_command': None,
             'command': None,
         }
         defaults.update(overrides)
@@ -96,19 +94,20 @@ class TestFormatCliCommand:
         action.installer = defaults['installer']
         action.package = defaults['package']
         action.command = defaults['command']
-        action.cli_command = defaults['cli_command']
         return action
 
-    def test_prefers_cli_command(self) -> None:
-        """Verify cli_command takes precedence over command and fallback."""
-        action = self._make_action(cli_command=['uv', 'pip', 'install', 'requests'])
-        assert format_cli_command(action) == 'uv pip install requests'
+    def test_prefers_cli_command_from_result(self) -> None:
+        """Verify result cli_command takes precedence over command and fallback."""
+        action = self._make_action()
+        result = MagicMock()
+        result.cli_command = ('uv', 'pip', 'install', 'requests')
+        assert format_cli_command(action, result=result) == 'uv pip install requests'
 
     def test_falls_back_to_command(self) -> None:
         """Verify command is used when cli_command is absent."""
         action = self._make_action(
             kind='TOOL',
-            command=['echo', 'hello'],
+            command=('echo', 'hello'),
         )
         assert format_cli_command(action) == 'echo hello'
 
@@ -150,6 +149,7 @@ class TestInstallWorker:
             kind=ProgressEventKind.ACTION_COMPLETED,
             action=action,
             result=result,
+            action_index=0,
         )
 
         async def mock_stream(*args, **kwargs):
@@ -389,7 +389,12 @@ class TestPreviewWorkerSignals:
         # Dry-run stream yields manifest loaded then one completed event
         manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
         result = SetupActionResult(action=action, success=True, skipped=False, skip_reason=None)
-        completed_event = ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
+        completed_event = ProgressEvent(
+            kind=ProgressEventKind.ACTION_COMPLETED,
+            action=action,
+            result=result,
+            action_index=0,
+        )
 
         async def mock_stream(*args: Any, **kwargs: Any) -> Any:
             yield manifest_event
@@ -448,7 +453,7 @@ class TestPreviewWorkerSignals:
 
     @staticmethod
     def test_action_checked_maps_correct_rows(tmp_path: Path) -> None:
-        """Verify on_action_checked receives correct row indices via identity matching."""
+        """Verify on_action_checked receives correct row indices via content-based matching."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text('{}')
 
@@ -466,8 +471,18 @@ class TestPreviewWorkerSignals:
         result_a = SetupActionResult(action=action_a, success=True, skipped=False, skip_reason=None)
 
         # Stream returns in execution order (b before a), not preview order
-        event_b = ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action_b, result=result_b)
-        event_a = ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action_a, result=result_a)
+        event_b = ProgressEvent(
+            kind=ProgressEventKind.ACTION_COMPLETED,
+            action=action_b,
+            result=result_b,
+            action_index=1,
+        )
+        event_a = ProgressEvent(
+            kind=ProgressEventKind.ACTION_COMPLETED,
+            action=action_a,
+            result=result_a,
+            action_index=0,
+        )
 
         async def mock_stream(*args: Any, **kwargs: Any) -> Any:
             yield manifest_event
@@ -815,7 +830,6 @@ class TestSCMPreviewActions:
         action.installer = 'git'
         action.package = None
         action.command = None
-        action.cli_command = None
         return action
 
     def test_scm_already_installed_emits_correct_result(self, tmp_path: Path) -> None:
@@ -838,6 +852,7 @@ class TestSCMPreviewActions:
             kind=ProgressEventKind.ACTION_COMPLETED,
             action=action,
             result=result,
+            action_index=0,
         )
 
         async def mock_stream(*args: Any, **kwargs: Any) -> Any:
@@ -884,6 +899,7 @@ class TestSCMPreviewActions:
             kind=ProgressEventKind.ACTION_COMPLETED,
             action=action,
             result=result,
+            action_index=0,
         )
 
         async def mock_stream(*args: Any, **kwargs: Any) -> Any:

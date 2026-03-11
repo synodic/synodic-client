@@ -427,8 +427,8 @@ ACTION_CARD_STATUS_CHECKING = 'color: grey; font-size: 11px;'
 ACTION_CARD_STATUS_NEEDED = 'color: palette(text); font-size: 11px; font-weight: bold;'
 """Status label: Needed."""
 
-ACTION_CARD_STATUS_SATISFIED = 'color: grey; font-size: 11px;'
-"""Status label: Already installed."""
+ACTION_CARD_STATUS_SATISFIED = 'color: #6a9955; font-size: 11px;'
+"""Status label: Already installed (muted green with checkmark)."""
 
 ACTION_CARD_STATUS_UPDATE = 'color: #d7ba7d; font-size: 11px; font-weight: bold;'
 """Status label: Update available (amber)."""

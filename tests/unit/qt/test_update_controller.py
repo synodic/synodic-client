@@ -32,6 +32,7 @@ class ModelSpy:
     """Records signal emissions from an :class:`UpdateModel`."""
 
     def __init__(self, model: UpdateModel) -> None:
+        """Connect to *model* signals and record emissions."""
         self.status: list[tuple[str, str]] = []
         self.check_button_enabled: list[bool] = []
         self.restart_visible: list[bool] = []

@@ -23,7 +23,6 @@ from porringer.schema import (
 )
 from porringer.schema.plugin import RuntimePackageResult
 
-from synodic_client.application.screen.action_card import action_key
 from synodic_client.application.uri import normalize_manifest_key
 
 # ---------------------------------------------------------------------------
@@ -237,7 +236,6 @@ class PreviewModel:
 
     def __init__(self) -> None:
         """Initialise a blank preview model."""
-        self._action_key = action_key
         self._normalize = normalize_manifest_key
 
         self.phase: PreviewPhase = PreviewPhase.IDLE
@@ -248,19 +246,19 @@ class PreviewModel:
         self.plugin_installed: dict[str, bool] = {}
         self.prerelease_overrides: set[str] = set()
         self.action_states: list[ActionState] = []
-        self._action_state_map: dict[tuple[object, ...], ActionState] = {}
+        self._action_state_map: dict[SetupAction, ActionState] = {}
         self._action_state_map_len: int = 0
-        self.upgradable_keys: set[tuple[object, ...]] = set()
+        self.upgradable_keys: set[SetupAction] = set()
         self.checked_count: int = 0
         self.completed_count: int = 0
         self.temp_dir: str | None = None
 
     # -- Computed helpers --------------------------------------------------
 
-    def _ensure_action_state_map(self) -> dict[tuple[object, ...], ActionState]:
-        """Return the action-key → state lookup, rebuilding if stale."""
+    def _ensure_action_state_map(self) -> dict[SetupAction, ActionState]:
+        """Return the action → state lookup, rebuilding if stale."""
         if len(self.action_states) != self._action_state_map_len:
-            self._action_state_map = {self._action_key(s.action): s for s in self.action_states}
+            self._action_state_map = {s.action: s for s in self.action_states}
             self._action_state_map_len = len(self.action_states)
         return self._action_state_map
 
@@ -279,8 +277,8 @@ class PreviewModel:
         return self.actionable_count > 0 or any(s.action.kind is None for s in self.action_states)
 
     def action_state_for(self, act: SetupAction) -> ActionState | None:
-        """Look up :class:`ActionState` by content key (O(1) amortized)."""
-        return self._ensure_action_state_map().get(self._action_key(act))
+        """Look up :class:`ActionState` for *act* (O(1) amortized)."""
+        return self._ensure_action_state_map().get(act)
 
     def has_same_manifest(self, key: str) -> bool:
         """Return ``True`` if *key* matches the current manifest key."""
@@ -339,5 +337,4 @@ class PreviewConfig:
 class _DispatchState:
     """Mutable accumulator for :func:`_dispatch_preview_event`."""
 
-    action_index: dict[int, int] = field(default_factory=dict)
     got_parsed: bool = False

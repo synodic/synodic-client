@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (
 
 from synodic_client.application.package_state import PackageStateStore
 from synodic_client.application.screen import skip_reason_label
-from synodic_client.application.screen.action_card import ActionCardList, action_key
+from synodic_client.application.screen.action_card import ActionCardList
 from synodic_client.application.screen.card import CardFrame
 from synodic_client.application.screen.install_workers import run_install, run_preview
 from synodic_client.application.screen.log_panel import ExecutionLogPanel
@@ -595,11 +595,11 @@ class SetupPreviewWidget(QWidget):
         self._install_btn.setEnabled(True)
 
     def _on_preview_resolved(self, preview: SetupResults, manifest_path: str, temp_dir_path: str) -> None:
-        """Handle the fully-resolved preview (CLI commands populated).
+        """Handle the fully-resolved preview.
 
         Called after ``MANIFEST_LOADED`` — cards are already visible
-        from the earlier ``_on_manifest_parsed`` handler.  This only
-        updates CLI command text and the temp-dir reference.
+        from the earlier ``_on_manifest_parsed`` handler.  This updates
+        the temp-dir reference and emits metadata.
         """
         if self._model.preview is None:
             return
@@ -609,19 +609,13 @@ class SetupPreviewWidget(QWidget):
         if preview.metadata:
             self.metadata_ready.emit(preview)
 
-        for action in preview.actions:
-            if action.cli_command:
-                card = self._card_list.get_card(action)
-                if card is not None:
-                    card.update_command(action)
-
     def _on_action_checked(self, row: int, result: SetupActionResult) -> None:
         """Update the model and action card with a dry-run result."""
         m = self._model
         if result.skipped and result.skip_reason == SkipReason.UPDATE_AVAILABLE:
             label = skip_reason_label(result.skip_reason)
             if 0 <= row < len(m.action_states):
-                m.upgradable_keys.add(action_key(m.action_states[row].action))
+                m.upgradable_keys.add(m.action_states[row].action)
         elif result.skipped:
             label = skip_reason_label(result.skip_reason)
         elif not result.success:

@@ -8,7 +8,6 @@ from unittest.mock import MagicMock
 from porringer.schema import SetupAction
 from porringer.schema.plugin import PluginKind
 
-from synodic_client.application.screen.action_card import action_key
 from synodic_client.application.screen.schema import ActionState, PreviewModel, PreviewPhase
 from synodic_client.application.uri import normalize_manifest_key
 
@@ -36,7 +35,6 @@ def _make_action(
     action.package = pkg_mock
     action.package_description = overrides.get('package_description', description)
     action.command = overrides.get('command')
-    action.cli_command = overrides.get('cli_command')
     action.include_prereleases = overrides.get('include_prereleases', False)
     action.plugin_target = overrides.get('plugin_target')
     return action
@@ -105,7 +103,7 @@ class TestPreviewModel:
         state = ActionState(action=_make_action())
         state.status = 'Already installed'
         model.action_states.append(state)
-        model.upgradable_keys.add(action_key(state.action))
+        model.upgradable_keys.add(state.action)
         assert model.install_enabled is True
 
     @staticmethod
@@ -149,7 +147,7 @@ class TestPreviewModel:
         upgradable = ActionState(action=_make_action(package='c'))
         upgradable.status = 'Update available'
         model.action_states = [needed, satisfied, upgradable]
-        model.upgradable_keys.add(action_key(upgradable.action))
+        model.upgradable_keys.add(upgradable.action)
         expected_actionable = 2  # 1 needed + 1 upgradable
         assert model.actionable_count == expected_actionable
 

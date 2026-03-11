@@ -73,19 +73,6 @@ _SPINNER_INTERVAL = 50
 _KIND_ORDER: dict[PluginKind | None, int] = {kind: i for i, kind in enumerate(PHASE_ORDER)}
 
 
-def action_key(action: SetupAction) -> tuple[object, ...]:
-    """Return a stable identity key for *action*.
-
-    Uses content-based fields (kind, installer, package name, command)
-    so the same logical action from different ``execute_stream`` runs
-    resolves to the same key.
-    """
-    pkg_name = str(action.package.name) if action.package else None
-    pt_name = str(action.plugin_target.name) if action.plugin_target else None
-    cmd = tuple(action.command) if action.command else None
-    return (action.kind, action.installer, pkg_name, pt_name, cmd)
-
-
 def action_sort_key(action: SetupAction) -> int:
     """Return a sort key that groups cards by execution phase.
 
@@ -396,24 +383,6 @@ class ActionCard(QFrame):
         else:
             self._prerelease_cb.hide()
 
-    def update_command(self, action: SetupAction) -> None:
-        """Update the CLI command label after the resolved preview arrives.
-
-        Called from the two-phase display flow once ``MANIFEST_LOADED``
-        provides actions with their ``cli_command`` populated.
-
-        Args:
-            action: The setup action with resolved CLI command.
-        """
-        if self._is_skeleton:
-            return
-        cmd_text = format_cli_command(action, suppress_description=True)
-        if cmd_text:
-            self._command_label.setText(cmd_text)
-            self._command_row.show()
-        else:
-            self._command_row.hide()
-
     def _populate_status(
         self,
         action: SetupAction,
@@ -494,7 +463,7 @@ class ActionCard(QFrame):
             self._status_label.setText(label)
             self._status_label.setStyleSheet(ACTION_CARD_STATUS_UPDATE)
         elif result.skipped:
-            label = skip_reason_label(result.skip_reason)
+            label = '\u2713 ' + skip_reason_label(result.skip_reason)
             self._status_label.setText(label)
             self._status_label.setStyleSheet(ACTION_CARD_STATUS_SATISFIED)
         elif not result.success:
@@ -517,6 +486,13 @@ class ActionCard(QFrame):
         else:
             self._status_label.setToolTip('')
 
+        # CLI command — update with resolved cli_command from result
+        assert self._action is not None
+        cmd_text = format_cli_command(self._action, result=result, suppress_description=True)
+        if cmd_text:
+            self._command_label.setText(cmd_text)
+            self._command_row.show()
+
         # Version column
         self._check_available_version = result.available_version
         if result.installed_version and result.available_version:
@@ -524,6 +500,9 @@ class ActionCard(QFrame):
             self._version_label.setStyleSheet(ACTION_CARD_VERSION_STYLE + ' color: #d7ba7d;')
         elif result.installed_version:
             self._version_label.setText(result.installed_version)
+        elif result.available_version:
+            self._version_label.setText(f'\u2192 {result.available_version}')
+            self._version_label.setStyleSheet(ACTION_CARD_VERSION_STYLE + ' color: grey;')
 
     def finalize_checking(self) -> None:
         """Resolve a still-pending 'Checking\u2026' status to 'Needed'.
@@ -611,9 +590,8 @@ class ActionCard(QFrame):
 class ActionCardList(QWidget):
     """Container of :class:`ActionCard` widgets.
 
-    Cards are keyed by :func:`action_key` (content-based) so that
-    look-ups work across different ``execute_stream`` runs where the
-    ``SetupAction`` objects are different Python instances.
+    Cards are keyed by ``SetupAction`` directly (frozen dataclass) so
+    that look-ups work across different ``execute_stream`` runs.
     """
 
     prerelease_toggled = Signal(str, bool)
@@ -629,7 +607,7 @@ class ActionCardList(QWidget):
         self._layout.addStretch()
 
         self._cards: list[ActionCard] = []
-        self._action_map: dict[tuple[object, ...], ActionCard] = {}
+        self._action_map: dict[SetupAction, ActionCard] = {}
 
     # ------------------------------------------------------------------
     # Skeleton loading
@@ -679,7 +657,7 @@ class ActionCardList(QWidget):
             card.prerelease_toggled.connect(self.prerelease_toggled.emit)
             self._layout.insertWidget(self._layout.count() - 1, card)
             self._cards.append(card)
-            self._action_map[action_key(act)] = card
+            self._action_map[act] = card
 
     # ------------------------------------------------------------------
     # Card lookup
@@ -696,11 +674,10 @@ class ActionCardList(QWidget):
         return len(self._cards)
 
     def get_card(self, action: SetupAction) -> ActionCard | None:
-        """Look up the card for a given action by stable content key.
+        """Look up the card for a given action.
 
-        Works across different ``execute_stream`` runs — the preview
-        and install phases produce different ``SetupAction`` instances
-        but the same logical action maps to the same card.
+        ``SetupAction`` is a frozen dataclass, so the same logical
+        action from different ``execute_stream`` runs hashes equally.
 
         Args:
             action: The setup action to find.
@@ -708,7 +685,7 @@ class ActionCardList(QWidget):
         Returns:
             The card widget, or ``None`` if not found.
         """
-        return self._action_map.get(action_key(action))
+        return self._action_map.get(action)
 
     # ------------------------------------------------------------------
     # Bulk operations

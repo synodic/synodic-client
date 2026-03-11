@@ -61,7 +61,6 @@ def _make_action(
     action.package = pkg_mock
     action.package_description = package_description or description
     action.command = None
-    action.cli_command = None
     action.plugin_target = None
     return action
 

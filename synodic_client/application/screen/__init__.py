@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from porringer.schema import SetupAction, SkipReason
+from porringer.schema import SetupAction, SetupActionResult, SkipReason
 from porringer.schema.plugin import PluginKind
 
 _SECONDS_PER_MINUTE = 60
@@ -63,18 +63,26 @@ def skip_reason_label(reason: SkipReason | None) -> str:
     return SKIP_REASON_LABELS.get(reason, reason.name.replace('_', ' ').capitalize())
 
 
-def format_cli_command(action: SetupAction, *, suppress_description: bool = False) -> str:
+def format_cli_command(
+    action: SetupAction,
+    *,
+    result: SetupActionResult | None = None,
+    suppress_description: bool = False,
+) -> str:
     """Return a human-readable CLI command string for *action*.
 
-    Prefers ``cli_command``, falls back to ``command``, then synthesises
-    an ``installer install <package>`` string for package actions, and
+    Prefers ``result.cli_command`` (populated after dry-run), falls
+    back to ``action.command``, then synthesises an
+    ``installer install <package>`` string for package actions, and
     finally returns the action description as a last resort.
 
     When *suppress_description* is ``True`` the final description
     fallback returns an empty string instead.
     """
-    if parts := (action.cli_command or action.command):
-        return ' '.join(parts)
+    if result is not None and result.cli_command:
+        return ' '.join(result.cli_command)
+    if action.command:
+        return ' '.join(action.command)
     if action.kind == PluginKind.PACKAGE and action.package:
         return f'{action.installer or "pip"} install {action.package}'
     return '' if suppress_description else action.description

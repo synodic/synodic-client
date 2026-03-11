@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
 )
 
 from synodic_client.application.screen import ACTION_KIND_LABELS, skip_reason_label
-from synodic_client.application.screen.action_card import action_key
 from synodic_client.application.screen.card import CHEVRON_DOWN, CHEVRON_RIGHT, ClickableHeader
 from synodic_client.application.theme import (
     LOG_CHEVRON_STYLE,
@@ -186,7 +185,7 @@ class ExecutionLogPanel(QWidget):
         self._layout.addStretch()
 
         # Map action content-key → section widget for quick lookup
-        self._sections: dict[tuple[object, ...], ActionLogSection] = {}
+        self._sections: dict[SetupAction, ActionLogSection] = {}
         self._section_count = 0
 
     # --- Public API ---
@@ -204,7 +203,7 @@ class ExecutionLogPanel(QWidget):
         section = ActionLogSection(action, self._section_count, self)
         # Insert before the stretch
         self._layout.insertWidget(self._layout.count() - 1, section)
-        self._sections[action_key(action)] = section
+        self._sections[action] = section
 
         return section
 
@@ -217,7 +216,7 @@ class ExecutionLogPanel(QWidget):
         Returns:
             The section widget, or ``None`` if not found.
         """
-        return self._sections.get(action_key(action))
+        return self._sections.get(action)
 
     def on_sub_progress(self, action: SetupAction, progress: SubActionProgress) -> None:
         """Handle a sub-action progress event.
