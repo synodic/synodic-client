@@ -13,13 +13,25 @@ Import order matters:
     5. import qt.application — PySide6 / porringer loaded here
 """
 
+import logging
 import sys
+import traceback
 
-from synodic_client.config import set_dev_mode
-from synodic_client.logging import configure_logging
-from synodic_client.protocol import extract_uri_from_args
-from synodic_client.subprocess_patch import apply as _apply_subprocess_patch
-from synodic_client.updater import initialize_velopack
+try:
+    from synodic_client.config import set_dev_mode
+    from synodic_client.logging import configure_logging
+    from synodic_client.protocol import extract_uri_from_args
+    from synodic_client.subprocess_patch import apply as _apply_subprocess_patch
+    from synodic_client.updater import initialize_velopack
+except Exception:
+    # Last-resort crash log when imports fail before logging is configured.
+    import os
+
+    _fallback = os.path.join(os.environ.get('LOCALAPPDATA', '.'), 'Synodic', 'logs', 'bootstrap-crash.log')
+    os.makedirs(os.path.dirname(_fallback), exist_ok=True)
+    with open(_fallback, 'a', encoding='utf-8') as _f:  # noqa: PTH123
+        _f.write(traceback.format_exc())
+    raise
 
 # Parse flags early so logging uses the right filename and level.
 _dev_mode = '--dev' in sys.argv[1:]
@@ -28,6 +40,10 @@ set_dev_mode(_dev_mode)
 _apply_subprocess_patch()
 
 configure_logging(debug=_debug)
+
+_logger = logging.getLogger(__name__)
+_logger.info('Bootstrap started (exe=%s, argv=%s)', sys.executable, sys.argv)
+
 initialize_velopack()
 
 if not _dev_mode:

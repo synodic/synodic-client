@@ -26,8 +26,7 @@ class TestRunStartupPreamble:
             patch(f'{_MODULE}.seed_user_config_from_build') as mock_seed,
             patch(f'{_MODULE}.register_protocol') as mock_proto,
             patch(f'{_MODULE}.resolve_config') as mock_resolve,
-            patch(f'{_MODULE}.register_startup'),
-            patch(f'{_MODULE}.remove_startup'),
+            patch(f'{_MODULE}.sync_startup'),
             patch(f'{_MODULE}.getattr', return_value=True),
         ):
             mock_resolve.return_value = MagicMock(auto_start=True)
@@ -38,38 +37,34 @@ class TestRunStartupPreamble:
         mock_resolve.assert_called_once()
 
     @staticmethod
-    def test_registers_startup_when_auto_start_true() -> None:
-        """register_startup is called when auto_start is True and frozen."""
+    def test_delegates_to_sync_startup_with_auto_start() -> None:
+        """sync_startup is called with the resolved auto_start preference."""
         with (
             patch(f'{_MODULE}.seed_user_config_from_build'),
             patch(f'{_MODULE}.register_protocol'),
             patch(f'{_MODULE}.resolve_config') as mock_resolve,
-            patch(f'{_MODULE}.register_startup') as mock_register,
-            patch(f'{_MODULE}.remove_startup') as mock_remove,
+            patch(f'{_MODULE}.sync_startup') as mock_sync,
             patch(f'{_MODULE}.getattr', return_value=True),
         ):
             mock_resolve.return_value = MagicMock(auto_start=True)
             run_startup_preamble(r'C:\app\synodic.exe')
 
-        mock_register.assert_called_once_with(r'C:\app\synodic.exe')
-        mock_remove.assert_not_called()
+        mock_sync.assert_called_once_with(r'C:\app\synodic.exe', auto_start=True)
 
     @staticmethod
-    def test_removes_startup_when_auto_start_false() -> None:
-        """remove_startup is called when auto_start is False and frozen."""
+    def test_delegates_to_sync_startup_when_auto_start_false() -> None:
+        """sync_startup receives auto_start=False when config says so."""
         with (
             patch(f'{_MODULE}.seed_user_config_from_build'),
             patch(f'{_MODULE}.register_protocol'),
             patch(f'{_MODULE}.resolve_config') as mock_resolve,
-            patch(f'{_MODULE}.register_startup') as mock_register,
-            patch(f'{_MODULE}.remove_startup') as mock_remove,
+            patch(f'{_MODULE}.sync_startup') as mock_sync,
             patch(f'{_MODULE}.getattr', return_value=True),
         ):
             mock_resolve.return_value = MagicMock(auto_start=False)
             run_startup_preamble(r'C:\app\synodic.exe')
 
-        mock_remove.assert_called_once()
-        mock_register.assert_not_called()
+        mock_sync.assert_called_once_with(r'C:\app\synodic.exe', auto_start=False)
 
     @staticmethod
     def test_defaults_exe_path_to_sys_executable() -> None:
@@ -78,8 +73,7 @@ class TestRunStartupPreamble:
             patch(f'{_MODULE}.seed_user_config_from_build'),
             patch(f'{_MODULE}.register_protocol') as mock_proto,
             patch(f'{_MODULE}.resolve_config') as mock_resolve,
-            patch(f'{_MODULE}.register_startup') as mock_register,
-            patch(f'{_MODULE}.remove_startup'),
+            patch(f'{_MODULE}.sync_startup') as mock_sync,
             patch(f'{_MODULE}.sys') as mock_sys,
             patch(f'{_MODULE}.getattr', return_value=True),
         ):
@@ -88,25 +82,24 @@ class TestRunStartupPreamble:
             run_startup_preamble()
 
         mock_proto.assert_called_once_with(r'C:\Python\python.exe')
-        mock_register.assert_called_once_with(r'C:\Python\python.exe')
+        mock_sync.assert_called_once_with(r'C:\Python\python.exe', auto_start=True)
 
     @staticmethod
-    def test_skips_registry_when_not_frozen() -> None:
-        """Protocol and startup registration are skipped in non-frozen builds."""
+    def test_skips_protocol_when_not_frozen() -> None:
+        """Protocol registration is skipped in non-frozen builds."""
         with (
             patch(f'{_MODULE}.seed_user_config_from_build'),
             patch(f'{_MODULE}.register_protocol') as mock_proto,
             patch(f'{_MODULE}.resolve_config') as mock_resolve,
-            patch(f'{_MODULE}.register_startup') as mock_register,
-            patch(f'{_MODULE}.remove_startup') as mock_remove,
+            patch(f'{_MODULE}.sync_startup') as mock_sync,
             patch(f'{_MODULE}.getattr', return_value=False),
         ):
             mock_resolve.return_value = MagicMock(auto_start=True)
             run_startup_preamble(r'C:\Python\python.exe')
 
         mock_proto.assert_not_called()
-        mock_register.assert_not_called()
-        mock_remove.assert_not_called()
+        # sync_startup is still called — it handles the frozen guard internally
+        mock_sync.assert_called_once()
 
     @staticmethod
     def test_idempotent_on_second_call() -> None:
@@ -115,8 +108,7 @@ class TestRunStartupPreamble:
             patch(f'{_MODULE}.seed_user_config_from_build') as mock_seed,
             patch(f'{_MODULE}.register_protocol'),
             patch(f'{_MODULE}.resolve_config') as mock_resolve,
-            patch(f'{_MODULE}.register_startup'),
-            patch(f'{_MODULE}.remove_startup'),
+            patch(f'{_MODULE}.sync_startup'),
         ):
             mock_resolve.return_value = MagicMock(auto_start=True)
             run_startup_preamble(r'C:\app\synodic.exe')

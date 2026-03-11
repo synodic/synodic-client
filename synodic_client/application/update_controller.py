@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -34,6 +35,7 @@ from synodic_client.resolution import (
     resolve_update_config,
 )
 from synodic_client.schema import UpdateInfo
+from synodic_client.startup import sync_startup
 
 if TYPE_CHECKING:
     from synodic_client.application.config_store import ConfigStore
@@ -413,6 +415,14 @@ class UpdateController:
             return
 
         try:
+            # Re-register the startup entry with the current exe path so
+            # the registry value stays valid even if Velopack relocates
+            # the binary during the update.  The relaunched process will
+            # overwrite it again via run_startup_preamble, but this
+            # ensures the entry is never stale between the update and
+            # the next launch.
+            sync_startup(sys.executable, auto_start=self._store.config.auto_start)
+
             self._pending_version = None
             self._client.apply_update_on_exit(restart=True, silent=silent)
             logger.info('Update scheduled — restarting application')

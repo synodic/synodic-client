@@ -36,7 +36,7 @@ from synodic_client.application.theme import SETTINGS_WINDOW_MIN_SIZE
 from synodic_client.application.update_model import UpdateModel
 from synodic_client.logging import log_path, set_debug_level
 from synodic_client.schema import GITHUB_REPO_URL
-from synodic_client.startup import is_startup_registered, register_startup, remove_startup
+from synodic_client.startup import is_startup_registered, sync_startup
 
 logger = logging.getLogger(__name__)
 
@@ -382,11 +382,7 @@ class SettingsWindow(QMainWindow):
 
     def _on_auto_start_changed(self, checked: bool) -> None:
         self._store.update(auto_start=checked)
-        if getattr(sys, 'frozen', False):
-            if checked:
-                register_startup(sys.executable)
-            else:
-                remove_startup()
+        sync_startup(sys.executable, auto_start=checked)
 
     def _on_debug_logging_changed(self, checked: bool) -> None:
         set_debug_level(enabled=checked)

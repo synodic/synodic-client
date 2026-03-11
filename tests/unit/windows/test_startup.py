@@ -3,14 +3,18 @@
 import winreg
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from synodic_client.startup import (
     APPROVED_ENABLED,
     RUN_KEY_PATH,
     STARTUP_APPROVED_KEY_PATH,
     STARTUP_VALUE_NAME,
+    get_registered_startup_path,
     is_startup_registered,
     register_startup,
     remove_startup,
+    sync_startup,
 )
 
 
@@ -238,3 +242,124 @@ class TestIsStartupRegistered:
             patch.object(winreg, 'QueryValueEx', side_effect=FileNotFoundError),
         ):
             assert is_startup_registered() is False
+
+
+class TestGetRegisteredStartupPath:
+    """Tests for get_registered_startup_path."""
+
+    @staticmethod
+    def test_returns_unquoted_path() -> None:
+        """Verify the returned path has surrounding quotes stripped."""
+        mock_key = MagicMock()
+        mock_key.__enter__ = MagicMock(return_value=mock_key)
+        mock_key.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch.object(winreg, 'OpenKey', return_value=mock_key),
+            patch.object(
+                winreg,
+                'QueryValueEx',
+                return_value=(r'"C:\Program Files\Synodic\synodic.exe"', winreg.REG_SZ),
+            ),
+        ):
+            assert get_registered_startup_path() == r'C:\Program Files\Synodic\synodic.exe'
+
+    @staticmethod
+    def test_returns_none_when_missing() -> None:
+        """Verify None when the registry value does not exist."""
+        mock_key = MagicMock()
+        mock_key.__enter__ = MagicMock(return_value=mock_key)
+        mock_key.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch.object(winreg, 'OpenKey', return_value=mock_key),
+            patch.object(winreg, 'QueryValueEx', side_effect=FileNotFoundError),
+        ):
+            assert get_registered_startup_path() is None
+
+    @staticmethod
+    def test_returns_none_on_os_error() -> None:
+        """Verify None when an OSError prevents reading the registry."""
+        mock_key = MagicMock()
+        mock_key.__enter__ = MagicMock(return_value=mock_key)
+        mock_key.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch.object(winreg, 'OpenKey', return_value=mock_key),
+            patch.object(winreg, 'QueryValueEx', side_effect=OSError('access denied')),
+        ):
+            assert get_registered_startup_path() is None
+
+
+_SYNC_MODULE = 'synodic_client.startup'
+
+
+class TestSyncStartup:
+    """Tests for sync_startup."""
+
+    @staticmethod
+    def test_registers_when_auto_start_true() -> None:
+        """sync_startup calls register_startup when auto_start is True."""
+        with (
+            patch(f'{_SYNC_MODULE}.getattr', return_value=True),
+            patch(f'{_SYNC_MODULE}.get_registered_startup_path', return_value=None),
+            patch(f'{_SYNC_MODULE}.register_startup') as mock_reg,
+            patch(f'{_SYNC_MODULE}.remove_startup') as mock_rem,
+        ):
+            sync_startup(r'C:\app\synodic.exe', auto_start=True)
+
+        mock_reg.assert_called_once_with(r'C:\app\synodic.exe')
+        mock_rem.assert_not_called()
+
+    @staticmethod
+    def test_removes_when_auto_start_false() -> None:
+        """sync_startup calls remove_startup when auto_start is False."""
+        with (
+            patch(f'{_SYNC_MODULE}.getattr', return_value=True),
+            patch(f'{_SYNC_MODULE}.get_registered_startup_path', return_value=None),
+            patch(f'{_SYNC_MODULE}.register_startup') as mock_reg,
+            patch(f'{_SYNC_MODULE}.remove_startup') as mock_rem,
+        ):
+            sync_startup(r'C:\app\synodic.exe', auto_start=False)
+
+        mock_rem.assert_called_once()
+        mock_reg.assert_not_called()
+
+    @staticmethod
+    def test_noop_when_not_frozen() -> None:
+        """sync_startup is a no-op when sys.frozen is falsy."""
+        with (
+            patch(f'{_SYNC_MODULE}.getattr', return_value=False),
+            patch(f'{_SYNC_MODULE}.register_startup') as mock_reg,
+            patch(f'{_SYNC_MODULE}.remove_startup') as mock_rem,
+        ):
+            sync_startup(r'C:\app\synodic.exe', auto_start=True)
+
+        mock_reg.assert_not_called()
+        mock_rem.assert_not_called()
+
+    @staticmethod
+    def test_logs_warning_on_path_mismatch(caplog: pytest.LogCaptureFixture) -> None:
+        """A warning is logged when the registered path differs from exe_path."""
+        with (
+            patch(f'{_SYNC_MODULE}.getattr', return_value=True),
+            patch(f'{_SYNC_MODULE}.get_registered_startup_path', return_value=r'C:\old\synodic.exe'),
+            patch(f'{_SYNC_MODULE}.register_startup'),
+            patch(f'{_SYNC_MODULE}.remove_startup'),
+        ):
+            sync_startup(r'C:\new\synodic.exe', auto_start=True)
+
+        assert 'mismatch' in caplog.text.lower()
+
+    @staticmethod
+    def test_no_warning_when_paths_match(caplog: pytest.LogCaptureFixture) -> None:
+        """No warning when the registered path matches exe_path."""
+        with (
+            patch(f'{_SYNC_MODULE}.getattr', return_value=True),
+            patch(f'{_SYNC_MODULE}.get_registered_startup_path', return_value=r'C:\app\synodic.exe'),
+            patch(f'{_SYNC_MODULE}.register_startup'),
+            patch(f'{_SYNC_MODULE}.remove_startup'),
+        ):
+            sync_startup(r'C:\app\synodic.exe', auto_start=True)
+
+        assert 'mismatch' not in caplog.text.lower()

@@ -32,26 +32,6 @@ class ModelSpy:
     """Records signal emissions from an :class:`UpdateModel`."""
 
     def __init__(self, model: UpdateModel) -> None:
-        self.status: list[tuple[str, str]] = []
-        self.check_button_enabled: list[bool] = []
-        self.restart_visible: list[bool] = []
-        self.last_checked: list[str] = []
-
-        model.status_text_changed.connect(lambda t, s: self.status.append((t, s)))
-        model.check_button_enabled_changed.connect(self.check_button_enabled.append)
-        model.restart_visible_changed.connect(self.restart_visible.append)
-        model.last_checked_changed.connect(self.last_checked.append)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-class ModelSpy:
-    """Records signal emissions from an :class:`UpdateModel`."""
-
-    def __init__(self, model: UpdateModel) -> None:
         """Connect to *model* signals and record emissions."""
         self.status: list[tuple[str, str]] = []
         self.check_button_enabled: list[bool] = []
@@ -381,6 +361,22 @@ class TestApplyUpdate:
 
         client.apply_update_on_exit.assert_not_called()
         app.quit.assert_not_called()
+
+    @staticmethod
+    def test_apply_update_refreshes_startup_registry_when_frozen() -> None:
+        """_apply_update should call sync_startup before quitting."""
+        ctrl, app, client, banner, model = _make_controller()
+
+        with (
+            patch('synodic_client.application.update_controller.sync_startup') as mock_sync,
+            patch('synodic_client.application.update_controller.sys') as mock_sys,
+        ):
+            mock_sys.executable = r'C:\app\synodic.exe'
+            ctrl._apply_update()
+
+        mock_sync.assert_called_once_with(r'C:\app\synodic.exe', auto_start=True)
+        client.apply_update_on_exit.assert_called_once()
+        app.quit.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

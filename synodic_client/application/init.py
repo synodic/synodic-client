@@ -19,7 +19,7 @@ import sys
 
 from synodic_client.protocol import register_protocol
 from synodic_client.resolution import resolve_config, seed_user_config_from_build
-from synodic_client.startup import register_startup, remove_startup
+from synodic_client.startup import sync_startup
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +59,6 @@ def run_startup_preamble(exe_path: str | None = None) -> None:
         register_protocol(exe_path)
 
     config = resolve_config()
-    if frozen:
-        if config.auto_start:
-            register_startup(exe_path)
-        else:
-            remove_startup()
+    sync_startup(exe_path, auto_start=config.auto_start)
 
     logger.info('Startup preamble complete (auto_start=%s, frozen=%s)', config.auto_start, frozen)

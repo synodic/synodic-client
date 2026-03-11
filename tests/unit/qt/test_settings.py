@@ -238,24 +238,23 @@ class TestSettingsCallbacks:
 
     @staticmethod
     def test_auto_start_registers_startup_when_frozen() -> None:
-        """Enabling auto-start calls register_startup in frozen builds."""
+        """Enabling auto-start calls sync_startup."""
         config = _make_config()
         window = _make_window(config)
 
         new_config = _make_config(auto_start=True)
         with (
             patch.object(window._store, 'update', return_value=new_config),
-            patch('synodic_client.application.screen.settings.register_startup') as mock_register,
+            patch('synodic_client.application.screen.settings.sync_startup') as mock_sync,
             patch('synodic_client.application.screen.settings.is_startup_registered', return_value=False),
-            patch('synodic_client.application.screen.settings.getattr', return_value=True),
         ):
             window._auto_start_check.setChecked(True)
 
-        mock_register.assert_called_once()
+        mock_sync.assert_called_once()
 
     @staticmethod
     def test_auto_start_removes_startup_when_frozen() -> None:
-        """Disabling auto-start calls remove_startup in frozen builds."""
+        """Disabling auto-start calls sync_startup with auto_start=False."""
         config = _make_config(auto_start=True)
         window = _make_window(config)
         # Manually set initial state without triggering signals
@@ -266,31 +265,28 @@ class TestSettingsCallbacks:
         new_config = _make_config(auto_start=False)
         with (
             patch.object(window._store, 'update', return_value=new_config),
-            patch('synodic_client.application.screen.settings.remove_startup') as mock_remove,
-            patch('synodic_client.application.screen.settings.getattr', return_value=True),
+            patch('synodic_client.application.screen.settings.sync_startup') as mock_sync,
         ):
             window._auto_start_check.setChecked(False)
 
-        mock_remove.assert_called_once()
+        mock_sync.assert_called_once()
 
     @staticmethod
     def test_auto_start_skips_registry_when_not_frozen() -> None:
-        """Auto-start toggle persists config but skips registry in non-frozen builds."""
+        """Auto-start toggle persists config and delegates to sync_startup."""
         config = _make_config()
         window = _make_window(config)
 
         new_config = _make_config(auto_start=True)
         with (
             patch.object(window._store, 'update', return_value=new_config),
-            patch('synodic_client.application.screen.settings.register_startup') as mock_register,
-            patch('synodic_client.application.screen.settings.remove_startup') as mock_remove,
+            patch('synodic_client.application.screen.settings.sync_startup') as mock_sync,
             patch('synodic_client.application.screen.settings.is_startup_registered', return_value=False),
-            patch('synodic_client.application.screen.settings.getattr', return_value=False),
         ):
             window._auto_start_check.setChecked(True)
 
-        mock_register.assert_not_called()
-        mock_remove.assert_not_called()
+        # sync_startup is always called — it handles the frozen guard internally
+        mock_sync.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

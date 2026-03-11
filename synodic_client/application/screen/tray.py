@@ -3,6 +3,7 @@
 import logging
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
@@ -54,7 +55,12 @@ class TrayScreen:
         self.tray = QSystemTrayIcon()
         self.tray.setIcon(self.tray_icon)
         self.tray.activated.connect(self._on_tray_activated)
-        self.tray.setVisible(True)
+
+        # At early Windows login the notification area may not be ready.
+        # Retry with back-off so the icon eventually appears.
+        self._tray_retry_count = 0
+        self._tray_retry_timer: QTimer | None = None
+        self._show_tray_icon()
 
         self._build_menu(app, window)
 
@@ -126,6 +132,37 @@ class TrayScreen:
         self.menu.addAction(self.quit_action)
 
         self.tray.setContextMenu(self.menu)
+
+    # Maximum number of tray-visibility retries at startup.
+    _TRAY_MAX_RETRIES = 5
+    # Delay between retries in milliseconds.
+    _TRAY_RETRY_DELAY_MS = 2000
+
+    def _show_tray_icon(self) -> None:
+        """Show the tray icon, retrying if the system tray is not ready."""
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray.setVisible(True)
+            logger.debug('System tray icon shown')
+            return
+
+        if self._tray_retry_count < self._TRAY_MAX_RETRIES:
+            self._tray_retry_count += 1
+            logger.warning(
+                'System tray not available, retrying (%d/%d)',
+                self._tray_retry_count,
+                self._TRAY_MAX_RETRIES,
+            )
+            self._tray_retry_timer = QTimer()
+            self._tray_retry_timer.setSingleShot(True)
+            self._tray_retry_timer.timeout.connect(self._show_tray_icon)
+            self._tray_retry_timer.start(self._TRAY_RETRY_DELAY_MS)
+        else:
+            # Exhausted retries — show anyway as a best-effort fallback.
+            logger.warning(
+                'System tray still not available after %d retries, forcing visibility',
+                self._TRAY_MAX_RETRIES,
+            )
+            self.tray.setVisible(True)
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         """Handle tray icon activation (e.g. double-click)."""

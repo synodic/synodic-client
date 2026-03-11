@@ -96,6 +96,24 @@ if sys.platform == 'win32':
         except OSError:
             logger.exception('Failed to remove StartupApproved flag')
 
+    def get_registered_startup_path() -> str | None:
+        r"""Return the executable path stored in the ``Run`` registry key.
+
+        Returns:
+            The unquoted path string, or ``None`` when the value does
+            not exist or cannot be read.
+        """
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY_PATH, 0, winreg.KEY_QUERY_VALUE) as key:
+                value, _ = winreg.QueryValueEx(key, STARTUP_VALUE_NAME)
+                # The value is stored as '"<path>"'; strip the quotes.
+                return value.strip('"') if isinstance(value, str) else None
+        except FileNotFoundError:
+            return None
+        except OSError:
+            logger.exception('Failed to read auto-startup path from registry')
+            return None
+
     def is_startup_registered() -> bool:
         r"""Check whether auto-startup is both present **and** enabled.
 
@@ -147,6 +165,14 @@ else:
         """Remove auto-startup registration (no-op on non-Windows)."""
         logger.warning('Auto-startup removal is only supported on Windows (current: %s)', sys.platform)
 
+    def get_registered_startup_path() -> str | None:
+        """Return the registered startup path (always ``None`` on non-Windows).
+
+        Returns:
+            ``None``.
+        """
+        return None
+
     def is_startup_registered() -> bool:
         """Check auto-startup registration (always ``False`` on non-Windows).
 
@@ -154,3 +180,34 @@ else:
             ``False``.
         """
         return False
+
+
+def sync_startup(exe_path: str, *, auto_start: bool) -> None:
+    """Synchronise the auto-startup registry state with the given preference.
+
+    Registers or removes the startup entry and logs a warning when
+    the previously registered path differs from *exe_path* (stale
+    path after a Velopack update, for example).
+
+    This is a no-op when ``sys.frozen`` is falsy (non-installed
+    builds never touch the registry).
+
+    Args:
+        exe_path: Absolute path to the application executable.
+        auto_start: Whether auto-startup should be enabled.
+    """
+    if not getattr(sys, 'frozen', False):
+        return
+
+    registered_path = get_registered_startup_path()
+    if registered_path and registered_path != exe_path:
+        logger.warning(
+            'Startup registry path mismatch: registered=%s, current=%s',
+            registered_path,
+            exe_path,
+        )
+
+    if auto_start:
+        register_startup(exe_path)
+    else:
+        remove_startup()
