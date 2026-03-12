@@ -8,7 +8,7 @@ Updates* button with inline status feedback.
 import logging
 import sys
 import traceback
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 from PySide6.QtCore import Qt, QUrl, Signal
@@ -334,7 +334,7 @@ class SettingsWindow(QMainWindow):
         self._store.update(**changes)
 
     @contextmanager
-    def _block_signals(self) -> Iterator[None]:
+    def _block_signals(self) -> Generator[None]:
         """Temporarily block signals on all settings controls."""
         widgets = (
             self._channel_combo,

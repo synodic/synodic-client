@@ -75,8 +75,8 @@ def _inject_hidden_flags(kwargs: dict[str, Any]) -> None:
 def _patch_popen() -> None:
     _original_init = subprocess.Popen.__init__
 
-    def _patched_init(self: subprocess.Popen, *args: Any, **kwargs: Any) -> None:  # type: ignore[type-arg]
+    def _patched_init(self: subprocess.Popen, *args: Any, **kwargs: Any) -> None:
         _inject_hidden_flags(kwargs)
         _original_init(self, *args, **kwargs)
 
-    subprocess.Popen.__init__ = _patched_init  # type: ignore[method-assign]
+    subprocess.Popen.__init__ = _patched_init
