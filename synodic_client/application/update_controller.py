@@ -236,7 +236,17 @@ class UpdateController:
         )
 
     def _reinitialize_updater(self, config: ResolvedConfig) -> None:
-        """Re-derive update settings and restart the updater and timer."""
+        """Re-derive update settings and restart the updater and timer.
+
+        Cancels any in-flight check/download task and clears cached
+        state so the new updater starts with a clean slate.
+        """
+        if self._update_task is not None and not self._update_task.done():
+            self._update_task.cancel()
+            self._update_task = None
+        self._pending_version = None
+        self._failed_version = None
+
         update_cfg = resolve_update_config(config)
         self._client.initialize_updater(update_cfg)
         self._restart_auto_update_timer()
@@ -412,6 +422,10 @@ class UpdateController:
                 by using ``wait_exit_then_apply_updates``.
         """
         if self._client.updater is None:
+            return
+
+        if self._pending_version is None:
+            self._report_error('No downloaded update to apply — please check for updates again.', silent=silent)
             return
 
         try:

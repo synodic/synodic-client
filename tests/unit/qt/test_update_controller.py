@@ -347,6 +347,7 @@ class TestApplyUpdate:
     def test_apply_update_calls_client_and_quits() -> None:
         """_apply_update should call client.apply_update_on_exit and app.quit."""
         ctrl, app, client, banner, model = _make_controller()
+        ctrl._pending_version = '2.0.0'
         ctrl._apply_update()
 
         client.apply_update_on_exit.assert_called_once_with(restart=True, silent=False)
@@ -366,6 +367,7 @@ class TestApplyUpdate:
     def test_apply_update_refreshes_startup_registry_when_frozen() -> None:
         """_apply_update should call sync_startup before quitting."""
         ctrl, app, client, banner, model = _make_controller()
+        ctrl._pending_version = '2.0.0'
 
         with (
             patch('synodic_client.application.update_controller.sync_startup') as mock_sync,
@@ -497,3 +499,89 @@ class TestPersistCheckTimestamp:
             mock_update.assert_called_once()
 
         assert len(spy.last_checked) == 1
+
+
+# ---------------------------------------------------------------------------
+# Reinitialise updater — stale state cleared
+# ---------------------------------------------------------------------------
+
+
+class TestReinitializeUpdater:
+    """Verify _reinitialize_updater clears stale state."""
+
+    @staticmethod
+    def test_reinit_resets_state_and_cancels_task() -> None:
+        """Reinitialising should clear pending/failed versions and cancel in-flight tasks."""
+        ctrl, _app, _client, _banner, _model = _make_controller()
+        ctrl._pending_version = '1.0.0'
+        ctrl._failed_version = '1.0.0'
+        fake_task = MagicMock()
+        fake_task.done.return_value = False
+        ctrl._update_task = fake_task
+
+        new_config = _make_config(update_channel='dev')
+        with patch('synodic_client.application.update_controller.resolve_update_config') as mock_ucfg:
+            mock_ucfg.return_value = MagicMock(
+                auto_update_interval_minutes=0,
+                channel=MagicMock(name='DEVELOPMENT'),
+                repo_url='https://example.com',
+            )
+            ctrl._reinitialize_updater(new_config)
+
+        assert ctrl._pending_version is None  # pyrefly: ignore
+        assert ctrl._failed_version is None  # pyrefly: ignore
+        fake_task.cancel.assert_called_once()
+
+    @staticmethod
+    def test_reinit_then_check_redownloads_same_version() -> None:
+        """After reinit, a check for the same version should download instead of showing ready."""
+        ctrl, _app, _client, _banner, _model = _make_controller(auto_apply=False)
+        ctrl._pending_version = '2.0.0'
+
+        new_config = _make_config(update_channel='dev')
+        with patch('synodic_client.application.update_controller.resolve_update_config') as mock_ucfg:
+            mock_ucfg.return_value = MagicMock(
+                auto_update_interval_minutes=0,
+                channel=MagicMock(name='DEVELOPMENT'),
+                repo_url='https://example.com',
+            )
+            ctrl._reinitialize_updater(new_config)
+
+        result = UpdateInfo(available=True, current_version=Version('1.0.0'), latest_version=Version('2.0.0'))
+        with patch.object(ctrl, '_start_download') as mock_dl:
+            ctrl._on_check_finished(result, silent=True)
+
+        mock_dl.assert_called_once_with('2.0.0', silent=True)
+
+
+# ---------------------------------------------------------------------------
+# Apply without pending download — guard
+# ---------------------------------------------------------------------------
+
+
+class TestApplyGuard:
+    """Verify _apply_update rejects apply when no download is pending."""
+
+    @staticmethod
+    def test_apply_without_pending_shows_error() -> None:
+        """Applying with no pending version should show an error, not crash."""
+        ctrl, app, client, banner, model = _make_controller()
+        ctrl._pending_version = None
+
+        ctrl._apply_update(silent=False)
+
+        assert banner.state.name == 'ERROR'
+        client.apply_update_on_exit.assert_not_called()
+        app.quit.assert_not_called()
+
+    @staticmethod
+    def test_apply_without_pending_silent_logs_only() -> None:
+        """Applying silently with no pending version should not show the banner."""
+        ctrl, app, client, banner, model = _make_controller()
+        ctrl._pending_version = None
+
+        ctrl._apply_update(silent=True)
+
+        assert banner.state.name == 'HIDDEN'
+        client.apply_update_on_exit.assert_not_called()
+        app.quit.assert_not_called()
