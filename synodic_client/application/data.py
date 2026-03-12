@@ -177,6 +177,13 @@ class DataCoordinator:
         # need path + name (e.g. _gather_packages).
         directories = [r.directory for r in validated]
 
+        logger.info(
+            'Discovery complete: %d plugin(s), %d directory(ies), %d plugin manager(s)',
+            len(plugins),
+            len(directories),
+            len(managers),
+        )
+
         return Snapshot(
             plugins=plugins,
             directories=directories,

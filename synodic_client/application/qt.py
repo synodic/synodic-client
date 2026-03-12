@@ -2,6 +2,7 @@
 
 import asyncio
 import ctypes
+import importlib.metadata
 import logging
 import signal
 import sys
@@ -25,7 +26,7 @@ from synodic_client.application.screen.tray import TrayScreen
 from synodic_client.application.uri import parse_uri
 from synodic_client.client import Client
 from synodic_client.config import set_dev_mode
-from synodic_client.logging import configure_logging, set_debug_level
+from synodic_client.logging import configure_logging, log_path, set_debug_level
 from synodic_client.protocol import extract_uri_from_args
 from synodic_client.resolution import (
     ResolvedConfig,
@@ -59,6 +60,19 @@ def _init_services(logger: logging.Logger) -> tuple[Client, API, ResolvedConfig]
         update_config.channel.name,
         update_config.repo_url,
         len(cached_dirs),
+    )
+    logger.debug(
+        'Resolved config: update_source=%s update_channel=%s auto_update=%dm tool_update=%dm '
+        'auto_apply=%s auto_start=%s debug_logging=%s prerelease_packages=%s plugin_auto_update=%s',
+        config.update_source,
+        config.update_channel,
+        config.auto_update_interval_minutes,
+        config.tool_update_interval_minutes,
+        config.auto_apply,
+        config.auto_start,
+        config.debug_logging,
+        config.prerelease_packages,
+        config.plugin_auto_update,
     )
 
     return client, porringer, config
@@ -188,6 +202,17 @@ def application(*, uri: str | None = None, dev_mode: bool = False, debug: bool =
     # first-run diagnostics are captured in the log file.
     configure_logging(debug=debug)
     logger = logging.getLogger('synodic_client')
+
+    logger.info('Log file: %s', log_path())
+    logger.info(
+        'Environment: Python %s | PySide6 %s | porringer %s | platform=%s | frozen=%s',
+        sys.version.split()[0],
+        importlib.metadata.version('PySide6'),
+        importlib.metadata.version('porringer'),
+        sys.platform,
+        getattr(sys, 'frozen', False),
+    )
+
     _install_exception_hook(logger)
 
     if not dev_mode:
