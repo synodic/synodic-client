@@ -11,16 +11,16 @@ from porringer.backend.builder import Builder
 from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.schema import (
+    ActionCompletedEvent,
     ManifestDirectory,
+    ManifestParsedEvent,
     PluginInfo,
-    ProgressEventKind,
     SetupAction,
     SetupParameters,
     SkipReason,
     SyncStrategy,
 )
 from porringer.schema.plugin import PluginKind, RuntimePackageResult
-from porringer.utility.exception import PluginError
 from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent, QKeySequence, QShortcut, QShowEvent
 from PySide6.QtWidgets import (
@@ -946,8 +946,6 @@ class ToolsView(QWidget):
                 plugin_name,
                 plugins=discovered,
             )
-        except PluginError:
-            return None
         except Exception:
             logger.debug(
                 'Per-runtime probe failed for %s',
@@ -1066,7 +1064,7 @@ class ToolsView(QWidget):
                     project_directory=path,
                 )
                 async for event in self._porringer.sync.execute_stream(params):
-                    if event.kind == ProgressEventKind.MANIFEST_PARSED and event.manifest:
+                    if isinstance(event, ManifestParsedEvent):
                         actions.extend(event.manifest.actions)
                         break
         except Exception:
@@ -1244,11 +1242,7 @@ class ToolsView(QWidget):
                 project_directory=path,
             )
             async for event in self._porringer.sync.execute_stream(params):
-                if (
-                    event.kind == ProgressEventKind.ACTION_COMPLETED
-                    and event.result is not None
-                    and event.result.skip_reason == SkipReason.UPDATE_AVAILABLE
-                ):
+                if isinstance(event, ActionCompletedEvent) and event.result.skip_reason == SkipReason.UPDATE_AVAILABLE:
                     action = event.result.action
                     if action.installer and action.package:
                         pkg_name = str(action.package.name)

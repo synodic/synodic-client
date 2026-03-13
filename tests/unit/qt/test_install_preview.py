@@ -9,9 +9,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from porringer.schema import (
+    ActionCompletedEvent,
+    DiscoveredPluginEntry,
     DownloadResult,
-    ProgressEvent,
-    ProgressEventKind,
+    ManifestLoadedEvent,
+    ManifestParsedEvent,
+    PluginsDiscoveredEvent,
     SetupActionResult,
     SetupResults,
     SkipReason,
@@ -142,11 +145,10 @@ class TestInstallWorker:
 
         action = MagicMock()
         manifest = SetupResults(actions=[action])
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=manifest)
+        manifest_event = ManifestLoadedEvent(manifest=manifest)
 
         result = MagicMock(spec=SetupActionResult)
-        completed_event = ProgressEvent(
-            kind=ProgressEventKind.ACTION_COMPLETED,
+        completed_event = ActionCompletedEvent(
             action=action,
             result=result,
             action_index=0,
@@ -186,7 +188,7 @@ class TestInstallWorker:
         manifest_path = Path('/tmp/test/porringer.json')
 
         manifest = SetupResults(actions=[])
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=manifest)
+        manifest_event = ManifestLoadedEvent(manifest=manifest)
 
         captured_params: list[Any] = []
 
@@ -214,7 +216,7 @@ class TestInstallWorker:
         manifest_path = Path('/tmp/test/porringer.json')
 
         manifest = SetupResults(actions=[])
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=manifest)
+        manifest_event = ManifestLoadedEvent(manifest=manifest)
 
         captured_params: list[Any] = []
 
@@ -273,7 +275,7 @@ class TestPreviewWorkerLocal:
 
         porringer = MagicMock()
         expected = SetupResults(actions=[])
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=expected)
+        manifest_event = ManifestLoadedEvent(manifest=expected)
 
         async def mock_stream(*args: Any, **kwargs: Any) -> Any:
             yield manifest_event
@@ -349,7 +351,7 @@ class TestPreviewWorker:
         monkeypatch.setattr(_DOWNLOAD_PATCH, _mock_download)
 
         expected = SetupResults(actions=[])
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=expected)
+        manifest_event = ManifestLoadedEvent(manifest=expected)
 
         async def mock_stream(*args: Any, **kwargs: Any) -> Any:
             yield manifest_event
@@ -387,10 +389,9 @@ class TestPreviewWorkerSignals:
         preview = SetupResults(actions=[action])
 
         # Dry-run stream yields manifest loaded then one completed event
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        manifest_event = ManifestLoadedEvent(manifest=preview)
         result = SetupActionResult(action=action, success=True, skipped=False, skip_reason=None)
-        completed_event = ProgressEvent(
-            kind=ProgressEventKind.ACTION_COMPLETED,
+        completed_event = ActionCompletedEvent(
             action=action,
             result=result,
             action_index=0,
@@ -434,7 +435,7 @@ class TestPreviewWorkerSignals:
 
         porringer = MagicMock()
         preview = SetupResults(actions=[])
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        manifest_event = ManifestLoadedEvent(manifest=preview)
 
         async def mock_stream(*args: Any, **kwargs: Any) -> Any:
             yield manifest_event
@@ -464,21 +465,19 @@ class TestPreviewWorkerSignals:
         action_b.kind = PluginKind.PACKAGE
         preview = SetupResults(actions=[action_a, action_b])
 
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        manifest_event = ManifestLoadedEvent(manifest=preview)
         result_b = SetupActionResult(
             action=action_b, success=True, skipped=True, skip_reason=SkipReason.ALREADY_INSTALLED
         )
         result_a = SetupActionResult(action=action_a, success=True, skipped=False, skip_reason=None)
 
         # Stream returns in execution order (b before a), not preview order
-        event_b = ProgressEvent(
-            kind=ProgressEventKind.ACTION_COMPLETED,
+        event_b = ActionCompletedEvent(
             action=action_b,
             result=result_b,
             action_index=1,
         )
-        event_a = ProgressEvent(
-            kind=ProgressEventKind.ACTION_COMPLETED,
+        event_a = ActionCompletedEvent(
             action=action_a,
             result=result_a,
             action_index=0,
@@ -536,11 +535,13 @@ class TestPreviewWorkerSignals:
         porringer = MagicMock()
 
         preview = SetupResults(actions=[])
-        plugins_event = ProgressEvent(
-            kind=ProgressEventKind.PLUGINS_DISCOVERED,
-            plugin_availability={'pip': True, 'uv': False},
+        plugins_event = PluginsDiscoveredEvent(
+            discovered_plugins=(
+                DiscoveredPluginEntry(name='pip', available=True, capabilities=frozenset(), kind=PluginKind.PACKAGE),
+                DiscoveredPluginEntry(name='uv', available=False, capabilities=frozenset(), kind=PluginKind.PACKAGE),
+            ),
         )
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        manifest_event = ManifestLoadedEvent(manifest=preview)
 
         async def mock_stream(*args: Any, **kwargs: Any) -> Any:
             yield plugins_event
@@ -572,11 +573,10 @@ class TestPreviewWorkerSignals:
         porringer = MagicMock()
 
         preview = SetupResults(actions=[])
-        plugins_event = ProgressEvent(
-            kind=ProgressEventKind.PLUGINS_DISCOVERED,
-            plugin_availability={},
+        plugins_event = PluginsDiscoveredEvent(
+            discovered_plugins=(),
         )
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        manifest_event = ManifestLoadedEvent(manifest=preview)
 
         async def mock_stream(*args: Any, **kwargs: Any) -> Any:
             yield plugins_event
@@ -608,11 +608,10 @@ class TestPreviewWorkerSignals:
         porringer = MagicMock()
 
         preview = SetupResults(actions=[])
-        parsed_event = ProgressEvent(
-            kind=ProgressEventKind.MANIFEST_PARSED,
+        parsed_event = ManifestParsedEvent(
             manifest=preview,
         )
-        loaded_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        loaded_event = ManifestLoadedEvent(manifest=preview)
 
         async def mock_stream(*args: Any, **kwargs: Any) -> Any:
             yield parsed_event
@@ -643,15 +642,15 @@ class TestPreviewWorkerSignals:
         porringer = MagicMock()
 
         preview = SetupResults(actions=[])
-        parsed_event = ProgressEvent(
-            kind=ProgressEventKind.MANIFEST_PARSED,
+        parsed_event = ManifestParsedEvent(
             manifest=preview,
         )
-        plugins_event = ProgressEvent(
-            kind=ProgressEventKind.PLUGINS_DISCOVERED,
-            plugin_availability={'pip': True},
+        plugins_event = PluginsDiscoveredEvent(
+            discovered_plugins=(
+                DiscoveredPluginEntry(name='pip', available=True, capabilities=frozenset(), kind=PluginKind.PACKAGE),
+            ),
         )
-        loaded_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        loaded_event = ManifestLoadedEvent(manifest=preview)
 
         async def mock_stream(*args: Any, **kwargs: Any) -> Any:
             yield parsed_event
@@ -688,7 +687,7 @@ class TestPreviewWorkerPrerelease:
 
         porringer = MagicMock()
         preview = SetupResults(actions=[])
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        manifest_event = ManifestLoadedEvent(manifest=preview)
 
         captured_params: list[Any] = []
 
@@ -719,7 +718,7 @@ class TestPreviewWorkerPrerelease:
 
         porringer = MagicMock()
         preview = SetupResults(actions=[])
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        manifest_event = ManifestLoadedEvent(manifest=preview)
 
         captured_params: list[Any] = []
 
@@ -768,7 +767,7 @@ class TestPreviewWorkerProjectDirectory:
 
         porringer = MagicMock()
         preview = SetupResults(actions=[])
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        manifest_event = ManifestLoadedEvent(manifest=preview)
 
         captured_params: list[Any] = []
 
@@ -797,7 +796,7 @@ class TestPreviewWorkerProjectDirectory:
 
         porringer = MagicMock()
         preview = SetupResults(actions=[])
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        manifest_event = ManifestLoadedEvent(manifest=preview)
 
         captured_params: list[Any] = []
 
@@ -841,15 +840,14 @@ class TestSCMPreviewActions:
         action = self._make_scm_action()
         preview = SetupResults(actions=[action])
 
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        manifest_event = ManifestLoadedEvent(manifest=preview)
         result = SetupActionResult(
             action=action,
             success=True,
             skipped=True,
             skip_reason=SkipReason.ALREADY_INSTALLED,
         )
-        completed_event = ProgressEvent(
-            kind=ProgressEventKind.ACTION_COMPLETED,
+        completed_event = ActionCompletedEvent(
             action=action,
             result=result,
             action_index=0,
@@ -888,15 +886,14 @@ class TestSCMPreviewActions:
         action = self._make_scm_action()
         preview = SetupResults(actions=[action])
 
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=preview)
+        manifest_event = ManifestLoadedEvent(manifest=preview)
         result = SetupActionResult(
             action=action,
             success=True,
             skipped=False,
             skip_reason=None,
         )
-        completed_event = ProgressEvent(
-            kind=ProgressEventKind.ACTION_COMPLETED,
+        completed_event = ActionCompletedEvent(
             action=action,
             result=result,
             action_index=0,

@@ -3,9 +3,13 @@
 Ensures only one instance of Synodic Client runs at a time.  When a second
 instance is launched (e.g. by clicking a ``synodic://`` URI), it sends the
 URI to the already-running instance and exits.
+
+Debug commands (prefixed with ``debug:``) receive a JSON response on the
+same connection before it is closed.
 """
 
 import logging
+from collections.abc import Callable
 
 from PySide6.QtCore import QByteArray, QObject, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -17,6 +21,13 @@ logger = logging.getLogger(__name__)
 
 _SERVER_NAME = 'synodic-client'
 _SERVER_NAME_DEV = 'synodic-client-dev'
+
+_DEBUG_PREFIX = 'debug:'
+
+
+def _decode(raw: bytes | bytearray | memoryview) -> str:
+    """Decode raw socket data to a UTF-8 string."""
+    return bytes(raw).decode('utf-8')
 
 
 def _server_name() -> str:
@@ -41,6 +52,16 @@ class SingleInstance(QObject):
         """
         super().__init__(parent)
         self._server: QLocalServer | None = None
+        self._debug_handler: Callable[[str], str] | None = None
+
+    def set_debug_handler(self, handler: Callable[[str], str]) -> None:
+        """Register a handler for ``debug:`` IPC commands.
+
+        Args:
+            handler: Callable that accepts a command string (without the
+                ``debug:`` prefix) and returns a JSON response string.
+        """
+        self._debug_handler = handler
 
     @staticmethod
     def try_send_to_existing(message: str) -> bool:
@@ -64,6 +85,34 @@ class SingleInstance(QObject):
             return True
 
         return False
+
+    @staticmethod
+    def send_debug_command(command: str) -> str:
+        """Send a debug command to the running instance and return its response.
+
+        Args:
+            command: The debug command (without the ``debug:`` prefix).
+
+        Returns:
+            The JSON response string from the running instance, or an
+            error JSON string if the connection failed.
+        """
+        socket = QLocalSocket()
+        socket.connectToServer(_server_name())
+
+        if not socket.waitForConnected(SOCKET_TIMEOUT_MS):
+            return '{"error": "No running instance found"}'
+
+        socket.write(QByteArray(f'{_DEBUG_PREFIX}{command}'.encode()))
+        socket.waitForBytesWritten(SOCKET_TIMEOUT_MS)
+
+        if not socket.waitForReadyRead(SOCKET_TIMEOUT_MS):
+            socket.disconnectFromServer()
+            return '{"error": "Timed out waiting for response"}'
+
+        raw = socket.readAll().data()
+        socket.disconnectFromServer()
+        return _decode(raw)
 
     def start_server(self) -> bool:
         """Start the local socket server to listen for incoming messages.
@@ -98,8 +147,17 @@ class SingleInstance(QObject):
 
         if socket.waitForReadyRead(SOCKET_TIMEOUT_MS):
             raw = socket.readAll().data()
-            data = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else str(raw)
-            if data:
+            data = _decode(raw)
+
+            if data.startswith(_DEBUG_PREFIX):
+                command = data[len(_DEBUG_PREFIX) :]
+                if self._debug_handler is not None:
+                    response = self._debug_handler(command)
+                else:
+                    response = '{"error": "debug handler not registered"}'
+                socket.write(QByteArray(response.encode('utf-8')))
+                socket.waitForBytesWritten(SOCKET_TIMEOUT_MS)
+            elif data:
                 logger.info('Received message from another instance: %s', data)
                 self.uri_received.emit(data)
             else:

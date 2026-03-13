@@ -17,41 +17,47 @@ import logging
 import sys
 import traceback
 
-try:
-    from synodic_client.config import set_dev_mode
-    from synodic_client.logging import configure_logging
-    from synodic_client.protocol import extract_uri_from_args
-    from synodic_client.subprocess_patch import apply as _apply_subprocess_patch
-    from synodic_client.updater import initialize_velopack
-except Exception:
-    # Last-resort crash log when imports fail before logging is configured.
-    import os
 
-    _fallback = os.path.join(os.environ.get('LOCALAPPDATA', '.'), 'Synodic', 'logs', 'bootstrap-crash.log')
-    os.makedirs(os.path.dirname(_fallback), exist_ok=True)
-    with open(_fallback, 'a', encoding='utf-8') as _f:  # noqa: PTH123
-        _f.write(traceback.format_exc())
-    raise
+def bootstrap() -> None:
+    """Execute the ordered bootstrap sequence."""
+    try:
+        from synodic_client.config import set_dev_mode  # noqa: PLC0415
+        from synodic_client.logging import configure_logging  # noqa: PLC0415
+        from synodic_client.protocol import extract_uri_from_args  # noqa: PLC0415
+        from synodic_client.subprocess_patch import apply as _apply_subprocess_patch  # noqa: PLC0415
+        from synodic_client.updater import initialize_velopack  # noqa: PLC0415
+    except Exception:
+        # Last-resort crash log when imports fail before logging is configured.
+        import os  # noqa: PLC0415
 
-# Parse flags early so logging uses the right filename and level.
-_dev_mode = '--dev' in sys.argv[1:]
-_debug = '--debug' in sys.argv[1:]
-set_dev_mode(_dev_mode)
-_apply_subprocess_patch()
+        _fallback = os.path.join(os.environ.get('LOCALAPPDATA', '.'), 'Synodic', 'logs', 'bootstrap-crash.log')
+        os.makedirs(os.path.dirname(_fallback), exist_ok=True)
+        with open(_fallback, 'a', encoding='utf-8') as _f:  # noqa: PTH123
+            _f.write(traceback.format_exc())
+        raise
 
-configure_logging(debug=_debug)
+    # Parse flags early so logging uses the right filename and level.
+    dev_mode = '--dev' in sys.argv[1:]
+    debug = '--debug' in sys.argv[1:]
+    set_dev_mode(dev_mode)
+    _apply_subprocess_patch()
 
-_logger = logging.getLogger(__name__)
-_logger.info('Bootstrap started (exe=%s, argv=%s)', sys.executable, sys.argv)
+    configure_logging(debug=debug)
 
-initialize_velopack()
+    logger = logging.getLogger(__name__)
+    logger.info('Bootstrap started (exe=%s, argv=%s)', sys.executable, sys.argv)
 
-if not _dev_mode:
-    from synodic_client.application.init import run_startup_preamble
+    initialize_velopack()
 
-    run_startup_preamble(sys.executable)
+    if not dev_mode:
+        from synodic_client.application.init import run_startup_preamble  # noqa: PLC0415
 
-# Heavy imports happen here — PySide6, porringer, etc.
-from synodic_client.application.qt import application
+        run_startup_preamble(sys.executable)
 
-application(uri=extract_uri_from_args(), dev_mode=_dev_mode, debug=_debug)
+    # Heavy imports happen here — PySide6, porringer, etc.
+    from synodic_client.application.qt import application  # noqa: PLC0415
+
+    application(uri=extract_uri_from_args(), dev_mode=dev_mode, debug=debug)
+
+
+bootstrap()

@@ -10,7 +10,6 @@ from packaging.version import Version
 from porringer.core.schema import Package, PackageRelation, PackageRelationKind
 from porringer.schema import ManifestDirectory
 from porringer.schema.plugin import PluginInfo, PluginKind, RuntimePackageResult
-from porringer.utility.exception import PluginError
 from PySide6.QtWidgets import QLabel, QPushButton
 
 from synodic_client.application.config_store import ConfigStore
@@ -1162,7 +1161,7 @@ class TestPerRuntimeDisplay:
         """_gather_runtime_packages returns None when plugin is not a RuntimeConsumer."""
         porringer = _make_porringer()
         porringer.package.list_by_runtime = AsyncMock(
-            side_effect=PluginError('not a RuntimeConsumer'),
+            return_value=None,
         )
 
         view = ToolsView(porringer, _make_store())

@@ -17,6 +17,7 @@ from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QWidget
 
 from synodic_client.application.config_store import ConfigStore
+from synodic_client.application.debug import DebugHandler, DebugServices
 from synodic_client.application.icon import app_icon
 from synodic_client.application.init import run_startup_preamble
 from synodic_client.application.instance import SingleInstance
@@ -166,9 +167,12 @@ def _init_app() -> QApplication:
     app.setWindowIcon(app_icon())
     app.setAttribute(Qt.ApplicationAttribute.AA_CompressHighFrequencyEvents)
 
-    # [DIAG] Install a global event filter to log every top-level window show.
-    diag_filter = _TopLevelShowFilter(app)  # parented to app, prevented from GC
-    app.installEventFilter(diag_filter)
+    # Install the diagnostic event filter only when debug-level logging is
+    # active — it calls traceback.format_stack() on every top-level Show
+    # event, which is measurable overhead in normal operation.
+    if logging.getLogger('synodic_client').isEnabledFor(logging.DEBUG):
+        diag_filter = _TopLevelShowFilter(app)  # parented to app, prevented from GC
+        app.installEventFilter(diag_filter)
 
     # Allow Ctrl+C in the terminal to terminate the application.
     # Qt's event loop blocks Python's default SIGINT handling, so we
@@ -261,6 +265,21 @@ def application(*, uri: str | None = None, dev_mode: bool = False, debug: bool =
         window.raise_()
         window.activateWindow()
         window.start()
+
+    _debug_handler = DebugHandler(
+        DebugServices(
+            client=client,
+            porringer=porringer,
+            coordinator=_screen.window.coordinator,
+            config_store=_store,
+            update_controller=_tray.update_controller,
+            update_model=_tray.update_model,
+            tool_orchestrator=_tray.tool_orchestrator,
+            main_window=_screen.window,
+            settings_window=_tray.settings_window,
+        )
+    )
+    instance.set_debug_handler(_debug_handler.handle)
 
     instance.uri_received.connect(lambda received_uri: _process_uri(received_uri, _handle_install_uri))
 

@@ -336,7 +336,7 @@ class UpdateController:
 
         # New update available — download it
         self._model.set_status(f'v{version} available', UPDATE_STATUS_AVAILABLE_STYLE)
-        self._model.begin_download(version)
+        self._model.set_downloading(version)
         self._start_download(version, silent=silent)
 
     def _on_check_error(self, error: str, *, silent: bool = False) -> None:
@@ -382,10 +382,7 @@ class UpdateController:
                 logger.warning('Download failed for %s (silent)', version)
             return
 
-        # Persist the client-update timestamp (actual update downloaded)
-        ts = datetime.now(UTC).isoformat()
-        self._store.update(last_client_update=ts)
-        self._model.set_last_checked(ts)
+        self._persist_check_timestamp()
 
         self._pending_version = version
 

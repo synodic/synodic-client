@@ -528,8 +528,10 @@ class TestReinitializeUpdater:
             )
             ctrl._reinitialize_updater(new_config)
 
-        assert ctrl._pending_version is None  # pyrefly: ignore
-        assert ctrl._failed_version is None  # pyrefly: ignore
+        pending: str | None = ctrl._pending_version
+        failed: str | None = ctrl._failed_version
+        assert pending is None
+        assert failed is None
         fake_task.cancel.assert_called_once()
 
     @staticmethod

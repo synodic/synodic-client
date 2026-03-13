@@ -64,6 +64,11 @@ class DataCoordinator:
         """Shortcut to the current ``DiscoveredPlugins`` instance."""
         return self._snapshot.discovered
 
+    @property
+    def is_stale(self) -> bool:
+        """Whether the cached data needs refreshing."""
+        return self._stale
+
     def invalidate(self) -> None:
         """Mark the cached data as stale.
 

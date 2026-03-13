@@ -50,10 +50,8 @@ class TrayScreen:
         self._window = window
         self._store = store
 
-        self.tray_icon = app_icon()
-
         self.tray = QSystemTrayIcon()
-        self.tray.setIcon(self.tray_icon)
+        self.tray.setIcon(app_icon())
         self.tray.activated.connect(self._on_tray_activated)
 
         # At early Windows login the notification area may not be ready.
@@ -113,25 +111,25 @@ class TrayScreen:
 
     def _build_menu(self, app: QApplication, window: MainWindow) -> None:
         """Build the tray context menu."""
-        self.menu = QMenu()
+        self._menu = QMenu()
 
-        self.open_action = QAction('Open', self.menu)
-        self.menu.addAction(self.open_action)
-        self.open_action.triggered.connect(window.show)
+        self._open_action = QAction('Open', self._menu)
+        self._menu.addAction(self._open_action)
+        self._open_action.triggered.connect(window.show)
 
-        self.menu.addSeparator()
+        self._menu.addSeparator()
 
-        self.settings_action = QAction('Settings\u2026', self.menu)
-        self.settings_action.triggered.connect(self._show_settings)
-        self.menu.addAction(self.settings_action)
+        self._settings_action = QAction('Settings\u2026', self._menu)
+        self._settings_action.triggered.connect(self._show_settings)
+        self._menu.addAction(self._settings_action)
 
-        self.menu.addSeparator()
+        self._menu.addSeparator()
 
-        self.quit_action = QAction('Quit', self.menu)
-        self.quit_action.triggered.connect(app.quit)
-        self.menu.addAction(self.quit_action)
+        self._quit_action = QAction('Quit', self._menu)
+        self._quit_action.triggered.connect(app.quit)
+        self._menu.addAction(self._quit_action)
 
-        self.tray.setContextMenu(self.menu)
+        self.tray.setContextMenu(self._menu)
 
     # Maximum number of tray-visibility retries at startup.
     _TRAY_MAX_RETRIES = 5
@@ -184,6 +182,26 @@ class TrayScreen:
         whenever *any* window is open.
         """
         return any(w.isVisible() for w in QApplication.topLevelWidgets() if isinstance(w, QMainWindow))
+
+    @property
+    def update_controller(self) -> UpdateController:
+        """Return the self-update controller."""
+        return self._update_controller
+
+    @property
+    def update_model(self) -> UpdateModel:
+        """Return the self-update observable model."""
+        return self._update_model
+
+    @property
+    def tool_orchestrator(self) -> ToolUpdateOrchestrator:
+        """Return the tool-update orchestrator."""
+        return self._tool_orchestrator
+
+    @property
+    def settings_window(self) -> SettingsWindow:
+        """Return the settings window."""
+        return self._settings_window
 
     def shutdown(self) -> None:
         """Stop all timers and cancel in-flight tasks for a clean exit."""

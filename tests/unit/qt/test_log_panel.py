@@ -7,13 +7,15 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from porringer.schema import (
-    ProgressEvent,
-    ProgressEventKind,
+    ActionCompletedEvent,
+    ActionStartedEvent,
+    ManifestLoadedEvent,
     SetupAction,
     SetupActionResult,
     SetupResults,
     SkipReason,
     SubActionProgress,
+    SubActionProgressEvent,
 )
 from porringer.schema.plugin import PluginKind
 
@@ -463,11 +465,10 @@ class TestRunInstallCallbackSignals:
         action = _make_action()
         manifest = SetupResults(actions=[action])
 
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=manifest)
-        started_event = ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action)
+        manifest_event = ManifestLoadedEvent(manifest=manifest)
+        started_event = ActionStartedEvent(action=action)
         result = _make_result(action)
-        completed_event = ProgressEvent(
-            kind=ProgressEventKind.ACTION_COMPLETED,
+        completed_event = ActionCompletedEvent(
             action=action,
             result=result,
         )
@@ -507,15 +508,13 @@ class TestRunInstallCallbackSignals:
             stream='stderr',
         )
 
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=manifest)
-        sub_event = ProgressEvent(
-            kind=ProgressEventKind.SUB_ACTION_PROGRESS,
+        manifest_event = ManifestLoadedEvent(manifest=manifest)
+        sub_event = SubActionProgressEvent(
             action=action,
             sub_action=sub,
         )
         result = _make_result(action)
-        completed_event = ProgressEvent(
-            kind=ProgressEventKind.ACTION_COMPLETED,
+        completed_event = ActionCompletedEvent(
             action=action,
             result=result,
         )
@@ -544,30 +543,26 @@ class TestRunInstallCallbackSignals:
         assert received[0][1] is sub
 
     @staticmethod
-    def test_sub_progress_requires_action_and_sub_action() -> None:
-        """Verify SUB_ACTION_PROGRESS events without action or sub_action are ignored."""
+    def test_non_sub_progress_events_ignored_by_sub_callback() -> None:
+        """Verify non-SubActionProgressEvent events don't trigger sub_progress callback."""
         porringer = MagicMock()
         manifest_path = Path('/tmp/test/porringer.json')
 
         action = _make_action()
         manifest = SetupResults(actions=[action])
 
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=manifest)
-        # Missing action
-        bad_event_1 = ProgressEvent(kind=ProgressEventKind.SUB_ACTION_PROGRESS, action=None, sub_action=None)
-        # Missing sub_action
-        bad_event_2 = ProgressEvent(kind=ProgressEventKind.SUB_ACTION_PROGRESS, action=action, sub_action=None)
+        manifest_event = ManifestLoadedEvent(manifest=manifest)
+        # ActionStartedEvent should not trigger sub_progress callback
+        started_event = ActionStartedEvent(action=action)
         result = _make_result(action)
-        completed_event = ProgressEvent(
-            kind=ProgressEventKind.ACTION_COMPLETED,
+        completed_event = ActionCompletedEvent(
             action=action,
             result=result,
         )
 
         async def mock_stream(*args, **kwargs):
             yield manifest_event
-            yield bad_event_1
-            yield bad_event_2
+            yield started_event
             yield completed_event
 
         porringer.sync.execute_stream = mock_stream
@@ -587,26 +582,23 @@ class TestRunInstallCallbackSignals:
         assert len(received) == 0
 
     @staticmethod
-    def test_action_started_requires_action() -> None:
-        """Verify ACTION_STARTED events without action are ignored."""
+    def test_non_started_events_ignored_by_started_callback() -> None:
+        """Verify non-ActionStartedEvent events don't trigger action_started callback."""
         porringer = MagicMock()
         manifest_path = Path('/tmp/test/porringer.json')
 
         action = _make_action()
         manifest = SetupResults(actions=[action])
 
-        manifest_event = ProgressEvent(kind=ProgressEventKind.MANIFEST_LOADED, manifest=manifest)
-        bad_event = ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=None)
+        manifest_event = ManifestLoadedEvent(manifest=manifest)
         result = _make_result(action)
-        completed_event = ProgressEvent(
-            kind=ProgressEventKind.ACTION_COMPLETED,
+        completed_event = ActionCompletedEvent(
             action=action,
             result=result,
         )
 
         async def mock_stream(*args, **kwargs):
             yield manifest_event
-            yield bad_event
             yield completed_event
 
         porringer.sync.execute_stream = mock_stream

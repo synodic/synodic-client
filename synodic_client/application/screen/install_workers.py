@@ -14,13 +14,18 @@ from pathlib import Path
 from porringer.api import API
 from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.schema import (
+    ActionCompletedEvent,
+    ActionStartedEvent,
     DownloadParameters,
+    ManifestLoadedEvent,
+    ManifestParsedEvent,
+    PluginsDiscoveredEvent,
     ProgressEvent,
-    ProgressEventKind,
     SetupAction,
     SetupActionResult,
     SetupParameters,
     SetupResults,
+    SubActionProgressEvent,
 )
 
 from synodic_client.application.screen.schema import (
@@ -79,22 +84,17 @@ async def run_install(
     manifest_result: SetupResults | None = None
 
     async for event in porringer.sync.execute_stream(params, plugins=plugins):
-        if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
+        if isinstance(event, ManifestLoadedEvent):
             manifest_result = event.manifest
             actions = list(event.manifest.actions)
 
-        if event.kind == ProgressEventKind.ACTION_STARTED and event.action and cb.on_action_started is not None:
+        elif isinstance(event, ActionStartedEvent) and cb.on_action_started is not None:
             cb.on_action_started(event.action)
 
-        if (
-            event.kind == ProgressEventKind.SUB_ACTION_PROGRESS
-            and event.action
-            and event.sub_action
-            and cb.on_sub_progress is not None
-        ):
+        elif isinstance(event, SubActionProgressEvent) and cb.on_sub_progress is not None:
             cb.on_sub_progress(event.action, event.sub_action)
 
-        if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result and event.action:
+        elif isinstance(event, ActionCompletedEvent):
             collected.append(event.result)
             if cb.on_progress is not None:
                 cb.on_progress(event.action, event.result)
@@ -161,30 +161,23 @@ def _dispatch_preview_event(
 
     Mutates *state* in-place (``got_parsed`` flag).
     """
-    if event.kind == ProgressEventKind.MANIFEST_PARSED and event.manifest:
+    if isinstance(event, ManifestParsedEvent):
         if cb.on_manifest_parsed is not None:
             cb.on_manifest_parsed(event.manifest, manifest_path, temp_dir_str)
         state.got_parsed = True
         return
 
-    if event.kind == ProgressEventKind.PLUGINS_DISCOVERED and cb.on_plugins_queried is not None:
-        if event.plugin_availability is not None:
-            cb.on_plugins_queried(event.plugin_availability)
-        elif event.plugin_names is not None:
-            cb.on_plugins_queried({name: True for name in event.plugin_names})
+    if isinstance(event, PluginsDiscoveredEvent) and cb.on_plugins_queried is not None:
+        availability = {entry.name: entry.available for entry in event.discovered_plugins}
+        cb.on_plugins_queried(availability)
         return
 
-    if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
+    if isinstance(event, ManifestLoadedEvent):
         if cb.on_preview_ready is not None:
             cb.on_preview_ready(event.manifest, manifest_path, temp_dir_str)
         return
 
-    if (
-        event.kind == ProgressEventKind.ACTION_COMPLETED
-        and event.result
-        and event.action_index is not None
-        and cb.on_action_checked is not None
-    ):
+    if isinstance(event, ActionCompletedEvent) and event.action_index is not None and cb.on_action_checked is not None:
         cb.on_action_checked(event.action_index, event.result)
 
 

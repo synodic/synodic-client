@@ -75,7 +75,7 @@ class UpdateModel(QObject):
 
     # --- Lifecycle transitions (controller writes) ---
 
-    def begin_download(self, version: str) -> None:
+    def set_downloading(self, version: str) -> None:
         """Enter the *DOWNLOADING* phase for *version*."""
         self._version = version
         self._phase = UpdatePhase.DOWNLOADING

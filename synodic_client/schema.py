@@ -184,7 +184,7 @@ class UpdateConfig:
     """Configuration for the updater."""
 
     # GitHub repository URL for Velopack to discover releases
-    repo_url: str = 'https://github.com/synodic/synodic-client'
+    repo_url: str = GITHUB_REPO_URL
 
     # Channel determines whether to use dev or stable releases
     channel: UpdateChannel = UpdateChannel.STABLE

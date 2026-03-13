@@ -42,7 +42,7 @@ if sys.platform == 'win32':
 
             command_path = f'{key_path}\\shell\\open\\command'
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, command_path) as key:
-                winreg.SetValueEx(key, '', 0, winreg.REG_SZ, f'"{exe_path}" "%1"')
+                winreg.SetValueEx(key, '', 0, winreg.REG_SZ, f'"{exe_path}" --uri "%1"')
 
             logger.info('Registered synodic:// protocol handler -> %s', exe_path)
         except OSError:

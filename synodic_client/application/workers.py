@@ -14,7 +14,7 @@ from pathlib import Path
 from porringer.api import API
 from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.core.schema import PackageRef
-from porringer.schema import ProgressEventKind, SetupParameters, SkipReason, SyncStrategy
+from porringer.schema import ActionCompletedEvent, SetupParameters, SkipReason, SyncStrategy
 from porringer.schema.execution import SetupActionResult
 
 from synodic_client.application.schema import ToolUpdateResult
@@ -120,7 +120,7 @@ async def run_tool_updates(
                 params,
                 plugins=discovered_plugins,
             ):
-                if event.kind != ProgressEventKind.ACTION_COMPLETED or event.result is None:
+                if not isinstance(event, ActionCompletedEvent):
                     continue
                 action_result = event.result
                 if action_result.skipped:
@@ -187,6 +187,8 @@ async def run_runtime_package_updates(
     """
     result = ToolUpdateResult()
     packages = await porringer.package.list_by_runtime(plugin_name, plugins=discovered_plugins)
+    if packages is None:
+        return result
     for rt in packages:
         if rt.tag != runtime_tag:
             continue
