@@ -227,6 +227,38 @@ class TestUpdaterCheckForUpdate:
         assert info.available is False
         assert updater.state == UpdateState.FAILED
 
+    @staticmethod
+    def test_check_preserves_downloaded_state(updater: Updater) -> None:
+        """Re-checking after download must not regress DOWNLOADED → UPDATE_AVAILABLE.
+
+        Regression test: when the periodic auto-check timer fires between
+        download completion and the user clicking "Restart Now", the state
+        was incorrectly reset to UPDATE_AVAILABLE, causing apply_update_on_exit
+        to reject the update with "No downloaded update to apply".
+        """
+        mock_target = MagicMock(spec=velopack.VelopackAsset)
+        mock_target.Version = '2.0.0'
+        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
+        mock_velopack_info.TargetFullRelease = mock_target
+
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
+        mock_manager.check_for_updates.return_value = mock_velopack_info
+
+        # Simulate: download already completed
+        updater._state = UpdateState.DOWNLOADED
+        updater._update_info = UpdateInfo(
+            available=True,
+            current_version=Version('1.0.0'),
+            latest_version=Version('2.0.0'),
+            _velopack_info=mock_velopack_info,
+        )
+
+        with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
+            info = updater.check_for_update()
+
+        assert info.available is True
+        assert updater.state == UpdateState.DOWNLOADED
+
 
 class TestUpdaterDownloadUpdate:
     """Tests for download_update method."""

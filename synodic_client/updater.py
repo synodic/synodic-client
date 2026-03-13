@@ -184,7 +184,12 @@ class Updater:
                     latest_version=latest,
                     _velopack_info=velopack_info,
                 )
-                self._state = UpdateState.UPDATE_AVAILABLE
+                # Only advance to UPDATE_AVAILABLE if we haven't already
+                # moved past it.  A periodic re-check that discovers the
+                # same release must not regress DOWNLOADED → UPDATE_AVAILABLE,
+                # which would cause apply_update_on_exit() to reject the update.
+                if self._state not in (UpdateState.DOWNLOADED, UpdateState.APPLYING, UpdateState.APPLIED):
+                    self._state = UpdateState.UPDATE_AVAILABLE
                 logger.info('Update available: %s -> %s', self._current_version, latest)
             else:
                 self._update_info = UpdateInfo(

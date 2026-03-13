@@ -440,8 +440,8 @@ class UpdateController:
             # the next launch.
             sync_startup(sys.executable, auto_start=self._store.config.auto_start)
 
-            self._pending_version = None
             self._client.apply_update_on_exit(restart=True, silent=silent)
+            self._pending_version = None
             logger.info('Update scheduled — restarting application')
             self._app.quit()
         except Exception as e:
