@@ -6,6 +6,7 @@ execution log panel live here to avoid circular imports.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from porringer.schema import SetupAction, SetupActionResult, SkipReason
@@ -113,3 +114,15 @@ def _format_relative_time(iso_timestamp: str) -> str:
         return f'{days}d ago'
     except ValueError, TypeError:
         return ''
+
+
+def is_version_specifier(value: str) -> bool:
+    """Return whether *value* looks like a PEP 440 version specifier.
+
+    Returns ``True`` when the string contains comparison operators
+    (``>=``, ``<=``, ``!=``, ``~=``, ``==``, ``>``, ``<``) or
+    caret/tilde shorthand (``^``, ``~`` not followed by ``=``).
+    This distinguishes constraint strings like ``">=0.8.0"`` from
+    resolved version numbers like ``"0.9.1"``.
+    """
+    return bool(re.search(r'[><=!~^]', value))

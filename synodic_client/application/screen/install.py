@@ -27,6 +27,7 @@ from porringer.schema import (
     SubActionProgress,
     SyncStrategy,
 )
+from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
@@ -621,10 +622,30 @@ class SetupPreviewWidget(QWidget):
         elif not result.success:
             label = 'Failed'
         else:
-            label = 'Needed'
+            # Bare commands (kind=None) and PROJECT actions always return
+            # success=True from porringer's dry_run_action.  Don't
+            # overwrite their initial status to "Needed".
+            action = m.action_states[row].action if 0 <= row < len(m.action_states) else None
+            if action is not None and action.kind is None:
+                label = 'Pending'
+            elif action is not None and action.kind == PluginKind.PROJECT:
+                label = 'Ready'
+            else:
+                label = 'Needed'
 
         if 0 <= row < len(m.action_states):
             m.action_states[row].status = label
+
+        logger.debug(
+            'Action checked [%d]: status=%s success=%s skipped=%s skip_reason=%s installed=%s available=%s',
+            row,
+            label,
+            result.success,
+            result.skipped,
+            result.skip_reason,
+            result.installed_version,
+            result.available_version,
+        )
 
         # Update the card widget
         if m.preview and 0 <= row < len(m.preview.actions):
@@ -658,9 +679,17 @@ class SetupPreviewWidget(QWidget):
 
         self._card_list.finalize_all_checking()
 
+        finalized: list[str] = []
         for state in m.action_states:
             if state.status == 'Checking\u2026':
+                finalized.append(state.action.description)
                 state.status = 'Needed'
+        if finalized:
+            logger.warning(
+                'Finalized %d action(s) from Checking to Needed (no dry-run result received): %s',
+                len(finalized),
+                finalized,
+            )
 
         # Compute summary
         total = len(m.action_states)
@@ -668,19 +697,23 @@ class SetupPreviewWidget(QWidget):
         upgradable = len(m.upgradable_keys)
         unavailable = sum(1 for s in m.action_states if s.status == 'Not installed')
         failed = sum(1 for s in m.action_states if s.status == 'Failed')
-        satisfied = total - needed - upgradable - unavailable - failed
+        pending = sum(1 for s in m.action_states if s.status == 'Pending')
+        ready = sum(1 for s in m.action_states if s.status == 'Ready')
+        satisfied = total - needed - upgradable - unavailable - failed - pending - ready
 
         parts: list[str] = []
-        if needed:
-            parts.append(f'{needed} needed')
-        if upgradable:
-            parts.append(f'{upgradable} upgradable')
-        if satisfied:
-            parts.append(f'{satisfied} already satisfied')
-        if unavailable:
-            parts.append(f'{unavailable} unavailable (plugin not installed)')
-        if failed:
-            parts.append(f'{failed} failed')
+        _counts: list[tuple[int, str]] = [
+            (needed, 'needed'),
+            (upgradable, 'upgradable'),
+            (satisfied, 'already satisfied'),
+            (ready, 'ready'),
+            (pending, 'pending'),
+            (unavailable, 'unavailable (plugin not installed)'),
+            (failed, 'failed'),
+        ]
+        for count, label in _counts:
+            if count:
+                parts.append(f'{count} {label}')
 
         actionable = needed + upgradable
         if actionable == 0 and unavailable == 0 and failed == 0:
@@ -692,11 +725,14 @@ class SetupPreviewWidget(QWidget):
         self._set_phase(PreviewPhase.READY)
 
         logger.info(
-            'Preview complete: %d total, %d needed, %d upgradable, %d satisfied, %d unavailable, %d failed',
+            'Preview complete: %d total, %d needed, %d upgradable, %d satisfied, '
+            '%d ready, %d pending, %d unavailable, %d failed',
             total,
             needed,
             upgradable,
             satisfied,
+            ready,
+            pending,
             unavailable,
             failed,
         )
@@ -895,7 +931,7 @@ class InstallPreviewWindow(QMainWindow):
 
         self._init_ui()
 
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+    def showEvent(self, event: QShowEvent) -> None:
         """[DIAG] Log every show event with a stack trace."""
         geo = self.geometry()
         stack = ''.join(traceback.format_stack(limit=10))

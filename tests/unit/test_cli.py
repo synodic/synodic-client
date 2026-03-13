@@ -194,7 +194,7 @@ class TestConfigCli:
     @staticmethod
     def test_config_get_unknown_key() -> None:
         """Config get with unknown key exits code 1."""
-        from synodic_client.schema import ResolvedConfig  # noqa: PLC0415
+        from synodic_client.schema import ResolvedConfig
 
         mock_config = ResolvedConfig.__new__(ResolvedConfig)
         with patch('synodic_client.operations.config.get_config', return_value=mock_config):

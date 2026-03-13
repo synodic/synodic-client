@@ -28,8 +28,8 @@ def project_list(
     ] = False,
 ) -> None:
     """List all cached project directories."""
-    from synodic_client.cli.context import get_services  # noqa: PLC0415
-    from synodic_client.operations.project import list_projects  # noqa: PLC0415
+    from synodic_client.cli.context import get_services
+    from synodic_client.operations.project import list_projects
 
     _, porringer, _ = get_services()
     projects = list_projects(porringer)
@@ -49,8 +49,8 @@ def project_add(
     ] = False,
 ) -> None:
     """Add a directory to the porringer project cache."""
-    from synodic_client.cli.context import get_services  # noqa: PLC0415
-    from synodic_client.operations.project import add_project  # noqa: PLC0415
+    from synodic_client.cli.context import get_services
+    from synodic_client.operations.project import add_project
 
     _, porringer, _ = get_services()
     try:
@@ -69,8 +69,8 @@ def project_remove(
     ],
 ) -> None:
     """Remove a directory from the porringer project cache."""
-    from synodic_client.cli.context import get_services  # noqa: PLC0415
-    from synodic_client.operations.project import remove_project  # noqa: PLC0415
+    from synodic_client.cli.context import get_services
+    from synodic_client.operations.project import remove_project
 
     _, porringer, _ = get_services()
     remove_project(porringer, path)

@@ -30,15 +30,14 @@ import subprocess
 import sys
 from typing import Any
 
-_applied = False
+_applied: list[bool] = []
 
 
 def apply() -> None:
     """Activate the subprocess-suppression patch (idempotent, Windows-only)."""
-    global _applied  # noqa: PLW0603
     if _applied or sys.platform != 'win32':
         return
-    _applied = True
+    _applied.append(True)
 
     _patch_popen()
 

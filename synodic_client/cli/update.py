@@ -29,8 +29,8 @@ def update_check(
     ] = False,
 ) -> None:
     """Check whether a newer version of synodic-client is available."""
-    from synodic_client.cli.context import get_services  # noqa: PLC0415
-    from synodic_client.operations.update import check_self_update  # noqa: PLC0415
+    from synodic_client.cli.context import get_services
+    from synodic_client.operations.update import check_self_update
 
     client, _, _ = get_services()
     result = asyncio.run(check_self_update(client))
@@ -46,8 +46,8 @@ def update_download(
     ] = False,
 ) -> None:
     """Download a self-update."""
-    from synodic_client.cli.context import get_services  # noqa: PLC0415
-    from synodic_client.operations.update import download_self_update  # noqa: PLC0415
+    from synodic_client.cli.context import get_services
+    from synodic_client.operations.update import download_self_update
 
     client, _, _ = get_services()
 
@@ -73,8 +73,8 @@ def update_apply(
     ] = False,
 ) -> None:
     """Apply a downloaded self-update."""
-    from synodic_client.cli.context import get_services  # noqa: PLC0415
-    from synodic_client.operations.update import apply_self_update  # noqa: PLC0415
+    from synodic_client.cli.context import get_services
+    from synodic_client.operations.update import apply_self_update
 
     client, _, _ = get_services()
     apply_self_update(client, restart=not no_restart, silent=silent)

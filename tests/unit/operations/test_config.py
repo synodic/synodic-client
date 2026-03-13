@@ -37,7 +37,7 @@ class TestSetConfig:
             mock_config = object()
             mock.return_value = mock_config
             # Use a known field from ResolvedConfig
-            from synodic_client.schema import ResolvedConfig  # noqa: PLC0415
+            from synodic_client.schema import ResolvedConfig
 
             field_names = [f.name for f in dataclasses.fields(ResolvedConfig)]
             if field_names:
@@ -53,7 +53,7 @@ class TestListConfigKeys:
     @staticmethod
     def test_returns_all_fields() -> None:
         """Returns a ConfigKeyInfo entry for each ResolvedConfig field."""
-        from synodic_client.schema import ResolvedConfig  # noqa: PLC0415
+        from synodic_client.schema import ResolvedConfig
 
         with patch('synodic_client.operations.config.resolve_config') as mock:
             mock.return_value = ResolvedConfig(

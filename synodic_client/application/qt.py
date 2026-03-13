@@ -130,7 +130,7 @@ class _TopLevelShowFilter(QObject):
 
     _diag_logger = logging.getLogger('synodic_client.diag.window')
 
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if (
             event.type() in {QEvent.Type.Show, QEvent.Type.WindowActivate}
             and isinstance(obj, QWidget)

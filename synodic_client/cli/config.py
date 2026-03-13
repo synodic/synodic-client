@@ -32,9 +32,9 @@ def config_get(
     ] = False,
 ) -> None:
     """Print the current value of a config key."""
-    import dataclasses  # noqa: PLC0415
+    import dataclasses
 
-    from synodic_client.operations.config import get_config  # noqa: PLC0415
+    from synodic_client.operations.config import get_config
 
     config = get_config()
     fields = {f.name for f in dataclasses.fields(config)}
@@ -63,7 +63,7 @@ def config_set(
     ] = False,
 ) -> None:
     """Update a single configuration key."""
-    from synodic_client.operations.config import set_config  # noqa: PLC0415
+    from synodic_client.operations.config import set_config
 
     try:
         updated = set_config(key, value)
@@ -82,7 +82,7 @@ def config_list(
     ] = False,
 ) -> None:
     """List all configuration keys and their current values."""
-    from synodic_client.operations.config import list_config_keys  # noqa: PLC0415
+    from synodic_client.operations.config import list_config_keys
 
     keys = list_config_keys()
     if json_output:

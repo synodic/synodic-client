@@ -1429,7 +1429,7 @@ class MainWindow(QMainWindow):
         # Update banner â€” always available, starts hidden.
         self._update_banner = UpdateBanner(self)
 
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+    def showEvent(self, event: QShowEvent) -> None:
         """[DIAG] Log every show event with a stack trace."""
         geo = self.geometry()
         stack = ''.join(traceback.format_stack(limit=10))

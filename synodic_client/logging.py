@@ -108,3 +108,8 @@ def set_debug_level(*, enabled: bool) -> None:
     for h in app_logger.handlers:
         if isinstance(h, EagerRotatingFileHandler):
             h.setLevel(level)
+
+    # Also toggle porringer logger so resolution-level diagnostics
+    # (is_package_installed, _apply_strategy) appear in --debug output.
+    porringer_logger = logging.getLogger('porringer')
+    porringer_logger.setLevel(level)

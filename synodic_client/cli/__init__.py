@@ -60,7 +60,7 @@ def main(
     if ctx.invoked_subcommand is not None:
         return
 
-    from synodic_client.application.qt import application  # noqa: PLC0415
+    from synodic_client.application.qt import application
 
     application(uri=uri, dev_mode=dev, debug=debug)
 

@@ -104,7 +104,7 @@ async def preview_manifest(
 # ---------------------------------------------------------------------------
 
 
-async def execute_install(  # noqa: PLR0913
+async def execute_install(
     porringer: API,
     manifest_path: Path,
     *,

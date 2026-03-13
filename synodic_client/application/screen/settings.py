@@ -55,7 +55,7 @@ class SettingsWindow(QMainWindow):
     restart_requested = Signal()
     """Emitted when the user clicks the *Restart & Update* button."""
 
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+    def showEvent(self, event: QShowEvent) -> None:
         """[DIAG] Log every show event with a stack trace."""
         geo = self.geometry()
         stack = ''.join(traceback.format_stack(limit=10))

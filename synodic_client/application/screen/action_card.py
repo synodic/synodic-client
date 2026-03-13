@@ -29,7 +29,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from synodic_client.application.screen import ACTION_KIND_LABELS, format_cli_command, skip_reason_label
+from synodic_client.application.screen import (
+    ACTION_KIND_LABELS,
+    format_cli_command,
+    is_version_specifier,
+    skip_reason_label,
+)
 from synodic_client.application.screen.spinner import SpinnerCanvas
 from synodic_client.application.theme import (
     ACTION_CARD_COMMAND_STYLE,
@@ -441,13 +446,13 @@ class ActionCard(QFrame):
     def set_check_result(self, result: SetupActionResult) -> None:
         """Update the card with a dry-run check result.
 
-        Handles four cases:
+        Handles these cases:
 
         * **Skipped (update available)** — amber "Update available" badge.
         * **Skipped (other)** — muted satisfied badge.
         * **Failed** — red "Failed" badge with diagnostic tooltip.
-          This covers backend failures surfaced during the dry-run
-          (e.g. missing SCM plugin, unresolvable deferred action).
+        * **Bare command** (kind=None, success=True) — keeps "Pending".
+        * **Project sync** (kind=PROJECT, success=True) — "Ready".
         * **Needed** — default blue badge.
 
         Args:
@@ -475,6 +480,15 @@ class ActionCard(QFrame):
                 self._action.description if self._action else '(unknown)',
                 result.message or 'unknown error',
             )
+        elif self._action is not None and self._action.kind is None:
+            # Bare command — porringer returns success=True; keep Pending.
+            label = 'Pending'
+            self._status_label.setText(label)
+            self._status_label.setStyleSheet(ACTION_CARD_STATUS_PENDING)
+        elif self._action is not None and self._action.kind == PluginKind.PROJECT:
+            label = 'Ready'
+            self._status_label.setText(label)
+            self._status_label.setStyleSheet(ACTION_CARD_STATUS_SATISFIED)
         else:
             label = 'Needed'
             self._status_label.setText(label)
@@ -494,12 +508,27 @@ class ActionCard(QFrame):
             self._command_row.show()
 
         # Version column
+        self._update_version_column(result)
+
+    def _update_version_column(self, result: SetupActionResult) -> None:
+        """Update the version label and tooltip from a dry-run result."""
         self._check_available_version = result.available_version
+        assert self._action is not None
+        constraint = (
+            str(self._action.package.constraint)
+            if self._action.package and getattr(self._action.package, 'constraint', None)
+            else ''
+        )
         if result.installed_version and result.available_version:
             self._version_label.setText(f'{result.installed_version} \u2192 {result.available_version}')
             self._version_label.setStyleSheet(ACTION_CARD_VERSION_STYLE + ' color: #d7ba7d;')
         elif result.installed_version:
             self._version_label.setText(result.installed_version)
+            if constraint:
+                self._version_label.setToolTip(f'satisfies {constraint}')
+        elif result.available_version and is_version_specifier(result.available_version):
+            self._version_label.setText(f'requires {result.available_version}')
+            self._version_label.setStyleSheet(ACTION_CARD_VERSION_STYLE + ' color: grey;')
         elif result.available_version:
             self._version_label.setText(f'\u2192 {result.available_version}')
             self._version_label.setStyleSheet(ACTION_CARD_VERSION_STYLE + ' color: grey;')
@@ -514,6 +543,10 @@ class ActionCard(QFrame):
             return
         if self._checking:
             self._stop_spinner()
+            logger.warning(
+                'Finalizing card with no dry-run result: %s',
+                self._action.description if self._action else '(unknown)',
+            )
             self._status_label.setText('Needed')
             self._status_label.setStyleSheet(ACTION_CARD_STATUS_NEEDED)
 

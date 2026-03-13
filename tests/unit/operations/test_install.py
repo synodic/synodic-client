@@ -18,7 +18,7 @@ from synodic_client.operations.schema import ActionInfo, PreviewResult
 
 def _make_manifest_parsed_event(*, name: str = '', description: str = '', manifest_path: str = '') -> MagicMock:
     """Build a mock ManifestParsedEvent."""
-    from porringer.schema import ManifestMetadata, ManifestParsedEvent  # noqa: PLC0415
+    from porringer.schema import ManifestMetadata, ManifestParsedEvent
 
     event = MagicMock(spec=ManifestParsedEvent)
     event.manifest.metadata = ManifestMetadata(name=name, description=description)
@@ -28,7 +28,7 @@ def _make_manifest_parsed_event(*, name: str = '', description: str = '', manife
 
 def _make_manifest_loaded_event(actions: list[MagicMock] | None = None) -> MagicMock:
     """Build a mock ManifestLoadedEvent."""
-    from porringer.schema import ManifestLoadedEvent  # noqa: PLC0415
+    from porringer.schema import ManifestLoadedEvent
 
     event = MagicMock(spec=ManifestLoadedEvent)
     event.manifest.actions = actions or []
@@ -71,9 +71,9 @@ class TestPreviewManifest:
         """No events → empty PreviewResult."""
         api = MagicMock()
 
-        async def _empty_stream(*_a: object, **_kw: object):  # noqa: ANN202
+        async def _empty_stream(*_a: object, **_kw: object):
             return
-            yield  # make it an async generator  # noqa: RET503
+            yield  # make it an async generator
 
         api.sync.execute_stream = _empty_stream
 
@@ -101,7 +101,7 @@ class TestPreviewManifest:
 
         api = MagicMock()
 
-        async def _stream(*_a: object, **_kw: object):  # noqa: ANN202
+        async def _stream(*_a: object, **_kw: object):
             yield parsed_event
             yield loaded_event
 
@@ -126,10 +126,10 @@ class TestPreviewManifest:
         api = MagicMock()
         captured_params: list[SetupParameters] = []
 
-        async def _capture_stream(params: SetupParameters, **_kw: object):  # noqa: ANN202
+        async def _capture_stream(params: SetupParameters, **_kw: object):
             captured_params.append(params)
             return
-            yield  # noqa: RET503
+            yield
 
         api.sync.execute_stream = _capture_stream
 
@@ -161,7 +161,7 @@ class TestExecuteInstall:
     @staticmethod
     def test_yields_stage_event_tuples() -> None:
         """Yields (stage, event) tuples for different event types."""
-        from porringer.schema import (  # noqa: PLC0415
+        from porringer.schema import (
             ActionCompletedEvent,
             ActionStartedEvent,
             ManifestLoadedEvent,
@@ -176,7 +176,7 @@ class TestExecuteInstall:
 
         api = MagicMock()
 
-        async def _stream(*_a: object, **_kw: object):  # noqa: ANN202
+        async def _stream(*_a: object, **_kw: object):
             yield loaded
             yield started
             yield progress
@@ -205,9 +205,9 @@ class TestExecuteInstall:
         """No events → no yields."""
         api = MagicMock()
 
-        async def _empty(*_a: object, **_kw: object):  # noqa: ANN202
+        async def _empty(*_a: object, **_kw: object):
             return
-            yield  # noqa: RET503
+            yield
 
         api.sync.execute_stream = _empty
 

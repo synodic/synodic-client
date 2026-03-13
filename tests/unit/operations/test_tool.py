@@ -60,7 +60,7 @@ class TestCheckToolUpdates:
     @staticmethod
     def test_detects_update_available(tmp_path: Path) -> None:
         """Finds packages with UPDATE_AVAILABLE skip reason."""
-        from porringer.schema import ActionCompletedEvent, SkipReason  # noqa: PLC0415
+        from porringer.schema import ActionCompletedEvent, SkipReason
 
         # Create a real manifest file so the path check succeeds
         manifest_dir = tmp_path / 'proj'
@@ -79,7 +79,7 @@ class TestCheckToolUpdates:
         # Make the event pass isinstance check
         event.__class__ = ActionCompletedEvent
 
-        async def _stream(*_a: object, **_kw: object):  # noqa: ANN202
+        async def _stream(*_a: object, **_kw: object):
             yield event
 
         api.sync.execute_stream = _stream

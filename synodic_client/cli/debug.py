@@ -23,8 +23,8 @@ debug_app = typer.Typer(
 
 def _send_debug(command: str, *, dev: bool) -> None:
     """Send a debug command to the running instance and print the response."""
-    from synodic_client.application.instance import SingleInstance  # noqa: PLC0415
-    from synodic_client.config import set_dev_mode  # noqa: PLC0415
+    from synodic_client.application.instance import SingleInstance
+    from synodic_client.config import set_dev_mode
 
     set_dev_mode(dev)
     response = SingleInstance.send_debug_command(command)
@@ -33,7 +33,7 @@ def _send_debug(command: str, *, dev: bool) -> None:
         data = json.loads(response)
     except json.JSONDecodeError:
         typer.echo(response)
-        raise typer.Exit(code=1)  # noqa: B904
+        raise typer.Exit(code=1) from None
 
     typer.echo(json.dumps(data, indent=2))
     if 'error' in data:

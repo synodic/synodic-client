@@ -24,6 +24,6 @@ def get_services() -> tuple[Client, API, ResolvedConfig]:
     The result is cached so subsequent calls in the same process reuse
     the same instances.
     """
-    from synodic_client.operations.bootstrap import init_services  # noqa: PLC0415
+    from synodic_client.operations.bootstrap import init_services
 
     return init_services()

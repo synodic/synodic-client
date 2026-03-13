@@ -14,6 +14,7 @@ from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
+from synodic_client.application.screen import is_version_specifier
 from synodic_client.application.screen.action_card import (
     ActionCard,
     ActionCardList,
@@ -58,6 +59,7 @@ def _make_action(
     action.installer = installer
     pkg_mock = MagicMock()
     pkg_mock.name = package
+    pkg_mock.constraint = overrides.get('constraint')
     pkg_mock.configure_mock(**{'__str__': MagicMock(return_value=package)})
     action.package = pkg_mock
     action.package_description = overrides.get('package_description', description)
@@ -599,6 +601,149 @@ class TestActionCardList:
 
         assert len(received) == 1
         assert received[0] == ('requests', True)
+
+
+# ---------------------------------------------------------------------------
+# ActionCard — PROJECT and bare-command status (Bug B fix)
+# ---------------------------------------------------------------------------
+
+
+class TestActionCardKindStatus:
+    """Tests for PROJECT and bare-command actions getting correct status."""
+
+    @staticmethod
+    def test_bare_command_shows_pending_after_check() -> None:
+        """Bare command (kind=None) keeps 'Pending' after dry-run check."""
+        card = ActionCard()
+        action = _make_action(kind=None, package='post_sync', installer=None, command=('echo', 'done'))
+        card.populate(action)
+        assert card.status_text() == 'Pending'
+
+        result = _make_result(success=True, skipped=False)
+        card.set_check_result(result)
+        assert card.status_text() == 'Pending'
+        assert ACTION_CARD_STATUS_PENDING in card._status_label.styleSheet()
+
+    @staticmethod
+    def test_project_shows_ready_after_check() -> None:
+        """PROJECT action shows 'Ready' after dry-run check."""
+        card = ActionCard()
+        action = _make_action(kind=PluginKind.PROJECT, package='myproject')
+        card.populate(action)
+
+        result = _make_result(success=True, skipped=False)
+        card.set_check_result(result)
+        assert card.status_text() == 'Ready'
+        assert ACTION_CARD_STATUS_SATISFIED in card._status_label.styleSheet()
+
+    @staticmethod
+    def test_package_still_shows_needed() -> None:
+        """A PACKAGE action with success=True still shows 'Needed'."""
+        card = ActionCard()
+        card.populate(_make_action(kind=PluginKind.PACKAGE))
+        result = _make_result(success=True, skipped=False)
+        card.set_check_result(result)
+        assert card.status_text() == 'Needed'
+
+
+# ---------------------------------------------------------------------------
+# ActionCard — version specifier display (Phase 3)
+# ---------------------------------------------------------------------------
+
+
+class TestActionCardVersionSpecifier:
+    """Tests for constraint-aware version column display."""
+
+    @staticmethod
+    def test_specifier_available_version_shows_requires() -> None:
+        """available_version with a specifier shows 'requires …'."""
+        card = ActionCard()
+        card.populate(_make_action())
+        result = _make_result(
+            success=True,
+            skipped=False,
+            available_version='>=0.8.0',
+        )
+        card.set_check_result(result)
+        assert card._version_label.text() == 'requires >=0.8.0'
+        assert 'grey' in card._version_label.styleSheet()
+
+    @staticmethod
+    def test_resolved_available_version_shows_arrow() -> None:
+        """available_version with a plain version shows '→ X.Y.Z'."""
+        card = ActionCard()
+        card.populate(_make_action())
+        result = _make_result(
+            success=True,
+            skipped=False,
+            available_version='1.2.0',
+        )
+        card.set_check_result(result)
+        assert '\u2192 1.2.0' in card._version_label.text()
+
+    @staticmethod
+    def test_satisfied_with_constraint_shows_tooltip() -> None:
+        """Satisfied action with constraint shows 'satisfies ...' tooltip."""
+        card = ActionCard()
+        action = _make_action(constraint='>=0.8.0')
+        card.populate(action)
+        result = _make_result(
+            skipped=True,
+            skip_reason=SkipReason.ALREADY_INSTALLED,
+            installed_version='0.9.1',
+        )
+        card.set_check_result(result)
+        assert card._version_label.text() == '0.9.1'
+        assert 'satisfies >=0.8.0' in card._version_label.toolTip()
+
+    @staticmethod
+    def test_satisfied_without_constraint_no_tooltip() -> None:
+        """Satisfied action without constraint has no version tooltip."""
+        card = ActionCard()
+        action = _make_action()
+        card.populate(action)
+        result = _make_result(
+            skipped=True,
+            skip_reason=SkipReason.ALREADY_INSTALLED,
+            installed_version='0.9.1',
+        )
+        card.set_check_result(result)
+        assert card._version_label.text() == '0.9.1'
+        # No constraint tooltip — only message tooltip may have been set
+        assert 'satisfies' not in (card._version_label.toolTip() or '')
+
+
+# ---------------------------------------------------------------------------
+# is_version_specifier helper
+# ---------------------------------------------------------------------------
+
+
+class TestIsVersionSpecifier:
+    """Tests for the is_version_specifier helper."""
+
+    @staticmethod
+    def test_pep440_operators() -> None:
+        """PEP 440 operators are detected."""
+        assert is_version_specifier('>=0.8.0')
+        assert is_version_specifier('==1.0.0')
+        assert is_version_specifier('~=2.0')
+        assert is_version_specifier('!=1.5.0')
+        assert is_version_specifier('>3.0')
+        assert is_version_specifier('<4.0')
+        assert is_version_specifier('<=2.0')
+
+    @staticmethod
+    def test_caret_tilde() -> None:
+        """Caret and tilde shorthand are detected."""
+        assert is_version_specifier('^1.0')
+        assert is_version_specifier('~1.0')
+
+    @staticmethod
+    def test_plain_versions_not_specifiers() -> None:
+        """Plain version strings are not specifiers."""
+        assert not is_version_specifier('1.2.3')
+        assert not is_version_specifier('0.8.0')
+        assert not is_version_specifier('2024.1')
 
     @staticmethod
     def test_card_at_out_of_range() -> None:

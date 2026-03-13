@@ -13,7 +13,7 @@ from typing import Any
 import typer
 
 
-def render(data: Any, *, as_json: bool = False) -> None:  # noqa: ANN401
+def render(data: Any, *, as_json: bool = False) -> None:
     """Render *data* to stdout.
 
     Args:
@@ -34,7 +34,7 @@ def render(data: Any, *, as_json: bool = False) -> None:  # noqa: ANN401
         typer.echo(str(data))
 
 
-def _serialise(obj: Any) -> Any:  # noqa: ANN401
+def _serialise(obj: Any) -> Any:
     """Recursively convert dataclass instances to dicts."""
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return dataclasses.asdict(obj)
@@ -45,7 +45,7 @@ def _serialise(obj: Any) -> Any:  # noqa: ANN401
     return obj
 
 
-def _print_record(item: Any) -> None:  # noqa: ANN401
+def _print_record(item: Any) -> None:
     """Print a single record (dataclass or dict) as key: value lines."""
     if dataclasses.is_dataclass(item) and not isinstance(item, type):
         fields = dataclasses.asdict(item)

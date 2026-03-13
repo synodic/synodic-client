@@ -164,7 +164,7 @@ class DebugHandler:
 
     def _handle_list_projects(self) -> str:
         """List all cached project directories with validation status."""
-        from synodic_client.operations.project import list_projects  # noqa: PLC0415
+        from synodic_client.operations.project import list_projects
 
         projects = list_projects(self._s.porringer)
         return json.dumps({'projects': [dataclasses.asdict(p) for p in projects]})
@@ -174,7 +174,7 @@ class DebugHandler:
         if not arg:
             return json.dumps({'error': 'add_project requires a path argument'})
 
-        from synodic_client.operations.project import add_project  # noqa: PLC0415
+        from synodic_client.operations.project import add_project
 
         try:
             add_project(self._s.porringer, arg)
@@ -184,7 +184,7 @@ class DebugHandler:
         if self._s.coordinator is not None:
             self._s.coordinator.invalidate()
 
-        projects_view = self._s.main_window._projects_view  # noqa: SLF001
+        projects_view = self._s.main_window._projects_view
         if projects_view is not None:
             projects_view.refresh()
 
@@ -195,14 +195,14 @@ class DebugHandler:
         if not arg:
             return json.dumps({'error': 'remove_project requires a path argument'})
 
-        from synodic_client.operations.project import remove_project  # noqa: PLC0415
+        from synodic_client.operations.project import remove_project
 
         remove_project(self._s.porringer, arg)
 
         if self._s.coordinator is not None:
             self._s.coordinator.invalidate()
 
-        projects_view = self._s.main_window._projects_view  # noqa: SLF001
+        projects_view = self._s.main_window._projects_view
         if projects_view is not None:
             projects_view.refresh()
 
@@ -210,20 +210,20 @@ class DebugHandler:
 
     def _handle_project_status(self, arg: str | None) -> str:
         """Dump per-action preview status for a project."""
-        projects_view = self._s.main_window._projects_view  # noqa: SLF001
+        projects_view = self._s.main_window._projects_view
         if projects_view is None:
             return json.dumps({'error': 'projects view not initialised — run show_main first'})
 
         if arg:
             target = Path(arg)
         else:
-            target = projects_view._sidebar.selected_path  # noqa: SLF001
+            target = projects_view._sidebar.selected_path
             if target is None:
                 return json.dumps({'error': 'no project selected and no path argument provided'})
 
-        widget = projects_view._widgets.get(target)  # noqa: SLF001
+        widget = projects_view._widgets.get(target)
         if widget is None:
-            available = [str(p) for p in projects_view._widgets]  # noqa: SLF001
+            available = [str(p) for p in projects_view._widgets]
             return json.dumps({'error': f'no widget for path: {target}', 'available_paths': available})
 
         model = widget.model
@@ -267,5 +267,5 @@ class DebugHandler:
         if not arg:
             return json.dumps({'error': 'select_project requires a path argument'})
 
-        self._s.main_window._navigate_to_project(arg)  # noqa: SLF001
+        self._s.main_window._navigate_to_project(arg)
         return json.dumps({'ok': True, 'action': 'select_project', 'path': arg})

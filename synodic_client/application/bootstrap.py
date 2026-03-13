@@ -21,18 +21,18 @@ import traceback
 def bootstrap() -> None:
     """Execute the ordered bootstrap sequence."""
     try:
-        from synodic_client.config import set_dev_mode  # noqa: PLC0415
-        from synodic_client.logging import configure_logging  # noqa: PLC0415
-        from synodic_client.protocol import extract_uri_from_args  # noqa: PLC0415
-        from synodic_client.subprocess_patch import apply as _apply_subprocess_patch  # noqa: PLC0415
-        from synodic_client.updater import initialize_velopack  # noqa: PLC0415
+        from synodic_client.config import set_dev_mode
+        from synodic_client.logging import configure_logging
+        from synodic_client.protocol import extract_uri_from_args
+        from synodic_client.subprocess_patch import apply as _apply_subprocess_patch
+        from synodic_client.updater import initialize_velopack
     except Exception:
         # Last-resort crash log when imports fail before logging is configured.
-        import os  # noqa: PLC0415
+        import os
 
         _fallback = os.path.join(os.environ.get('LOCALAPPDATA', '.'), 'Synodic', 'logs', 'bootstrap-crash.log')
         os.makedirs(os.path.dirname(_fallback), exist_ok=True)
-        with open(_fallback, 'a', encoding='utf-8') as _f:  # noqa: PTH123
+        with open(_fallback, 'a', encoding='utf-8') as _f:
             _f.write(traceback.format_exc())
         raise
 
@@ -50,12 +50,12 @@ def bootstrap() -> None:
     initialize_velopack()
 
     if not dev_mode:
-        from synodic_client.application.init import run_startup_preamble  # noqa: PLC0415
+        from synodic_client.application.init import run_startup_preamble
 
         run_startup_preamble(sys.executable)
 
     # Heavy imports happen here — PySide6, porringer, etc.
-    from synodic_client.application.qt import application  # noqa: PLC0415
+    from synodic_client.application.qt import application
 
     application(uri=extract_uri_from_args(), dev_mode=dev_mode, debug=debug)
 

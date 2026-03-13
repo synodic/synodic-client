@@ -29,8 +29,8 @@ def tool_check(
     ] = False,
 ) -> None:
     """Check for available tool/package updates."""
-    from synodic_client.cli.context import get_services  # noqa: PLC0415
-    from synodic_client.operations.tool import check_tool_updates  # noqa: PLC0415
+    from synodic_client.cli.context import get_services
+    from synodic_client.operations.tool import check_tool_updates
 
     _, porringer, _ = get_services()
     directories = porringer.cache.list_directories(validate=True, check_manifest=True)
@@ -60,8 +60,8 @@ def tool_update(
     ] = False,
 ) -> None:
     """Update a tool plugin or a specific package within it."""
-    from synodic_client.cli.context import get_services  # noqa: PLC0415
-    from synodic_client.operations.tool import update_tool as _update_tool  # noqa: PLC0415
+    from synodic_client.cli.context import get_services
+    from synodic_client.operations.tool import update_tool as _update_tool
 
     _, porringer, _ = get_services()
     result = asyncio.run(_update_tool(porringer, plugin, package, runtime_tag=runtime_tag))
@@ -85,8 +85,8 @@ def tool_remove(
     ] = False,
 ) -> None:
     """Remove a single installed package."""
-    from synodic_client.cli.context import get_services  # noqa: PLC0415
-    from synodic_client.operations.tool import remove_package as _remove_package  # noqa: PLC0415
+    from synodic_client.cli.context import get_services
+    from synodic_client.operations.tool import remove_package as _remove_package
 
     _, porringer, _ = get_services()
     success = asyncio.run(_remove_package(porringer, plugin, package))
