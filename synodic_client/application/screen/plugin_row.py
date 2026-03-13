@@ -8,7 +8,7 @@ package rows, project child rows, and filter chips.
 from __future__ import annotations
 
 from porringer.schema import PluginInfo
-from porringer.schema.plugin import PluginKind
+from porringer.schema.plugin import PluginCapability, PluginKind
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame,
@@ -133,6 +133,7 @@ class PluginProviderHeader(QFrame):
         plugin: PluginInfo,
         auto_update: bool = True,
         *,
+        capabilities: frozenset[PluginCapability] = frozenset(),
         show_controls: bool = False,
         has_updates: bool = False,
         parent: QWidget | None = None,
@@ -173,7 +174,12 @@ class PluginProviderHeader(QFrame):
         status_label.setStyleSheet(
             PLUGIN_PROVIDER_STATUS_INSTALLED_STYLE if plugin.installed else PLUGIN_PROVIDER_STATUS_MISSING_STYLE
         )
-        status_label.setToolTip('Installed' if plugin.installed else 'Not installed')
+        base_tip = 'Installed' if plugin.installed else 'Not installed'
+        if capabilities:
+            cap_names = ', '.join(c.name.replace('_', ' ').title() for c in sorted(capabilities, key=lambda c: c.name))
+            status_label.setToolTip(f'{base_tip} \u00b7 {cap_names}')
+        else:
+            status_label.setToolTip(base_tip)
         self._layout.addWidget(status_label)
 
         self._layout.addStretch()

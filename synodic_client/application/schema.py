@@ -13,6 +13,7 @@ from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.schema import (
     DirectoryValidationResult,
     ManifestDirectory,
+    PluginCapability,
     PluginInfo,
 )
 
@@ -39,6 +40,9 @@ class Snapshot:
 
     plugin_managers: dict[str, PluginManager] = field(default_factory=dict)
     """Project-environment plugins implementing the ``PluginManager`` protocol."""
+
+    plugin_capabilities: dict[str, frozenset[PluginCapability]] = field(default_factory=dict)
+    """Protocol capabilities reported for each discovered plugin."""
 
 
 @dataclass(slots=True)

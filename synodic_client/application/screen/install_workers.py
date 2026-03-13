@@ -169,7 +169,8 @@ def _dispatch_preview_event(
 
     if isinstance(event, PluginsDiscoveredEvent) and cb.on_plugins_queried is not None:
         availability = {entry.name: entry.available for entry in event.discovered_plugins}
-        cb.on_plugins_queried(availability)
+        capabilities = {entry.name: entry.capabilities for entry in event.discovered_plugins}
+        cb.on_plugins_queried(availability, capabilities)
         return
 
     if isinstance(event, ManifestLoadedEvent):

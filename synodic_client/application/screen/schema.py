@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from porringer.schema import (
+    PluginCapability,
     PluginInfo,
     SetupAction,
     SetupActionResult,
@@ -244,6 +245,7 @@ class PreviewModel:
         self.manifest_key: str | None = None
         self.project_directory: Path | None = None
         self.plugin_installed: dict[str, bool] = {}
+        self.plugin_capabilities: dict[str, frozenset[PluginCapability]] = {}
         self.prerelease_overrides: set[str] = set()
         self.action_states: list[ActionState] = []
         self._action_state_map: dict[SetupAction, ActionState] = {}
@@ -315,8 +317,8 @@ class PreviewCallbacks:
     on_manifest_parsed: Callable[[SetupResults, str, str], None] | None = None
     """``(SetupResults, manifest_path, temp_dir)`` — after JSON load."""
 
-    on_plugins_queried: Callable[[dict[str, bool]], None] | None = None
-    """``(dict[str, bool])`` — plugin → installed mapping."""
+    on_plugins_queried: Callable[[dict[str, bool], dict[str, frozenset[PluginCapability]]], None] | None = None
+    """``(dict[str, bool], dict[str, frozenset[PluginCapability]])`` — plugin → installed + capabilities mappings."""
 
     on_preview_ready: Callable[[SetupResults, str, str], None] | None = None
     """``(SetupResults, manifest_path, temp_dir)`` — CLI commands resolved."""

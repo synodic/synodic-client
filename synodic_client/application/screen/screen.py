@@ -477,6 +477,11 @@ class ToolsView(QWidget):
             provider = PluginProviderHeader(
                 plugin,
                 auto_val is not False,
+                capabilities=(
+                    self._coordinator.snapshot.plugin_capabilities.get(plugin.name, frozenset())
+                    if self._coordinator is not None
+                    else frozenset()
+                ),
                 show_controls=True,
                 has_updates=bool(rt_updates),
                 parent=self._container,
@@ -531,10 +536,16 @@ class ToolsView(QWidget):
         """
         auto_val = auto_update_map.get(plugin.name, True)
         plugin_updates = self._get_plugin_updates(plugin.name)
+        caps = (
+            self._coordinator.snapshot.plugin_capabilities.get(plugin.name, frozenset())
+            if self._coordinator is not None
+            else frozenset()
+        )
 
         provider = PluginProviderHeader(
             plugin,
             auto_val is not False,
+            capabilities=caps,
             show_controls=True,
             has_updates=bool(plugin_updates),
             parent=self._container,

@@ -185,7 +185,7 @@ class TestPorringerLogLevel:
         had_frozen = hasattr(sys, 'frozen')
         old_frozen = getattr(sys, 'frozen', None)
         if had_frozen:
-            delattr(sys, 'frozen')
+            sys.__dict__.pop('frozen')
 
         try:
             with patch('synodic_client.logging.log_path', return_value=tmp_path / 'synodic.log'):

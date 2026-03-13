@@ -178,6 +178,11 @@ class DataCoordinator:
             if isinstance(env, PluginManager) and env.is_available():
                 managers[env.tool_name()] = env
 
+        # Step 5: collect protocol capabilities for each plugin
+        capabilities: dict[str, frozenset] = {
+            plugin.name: frozenset(discovered.capabilities(plugin.name)) for plugin in plugins
+        }
+
         # Derive the un-validated directory list for callers that only
         # need path + name (e.g. _gather_packages).
         directories = [r.directory for r in validated]
@@ -195,4 +200,5 @@ class DataCoordinator:
             validated_directories=validated,
             discovered=discovered,
             plugin_managers=managers,
+            plugin_capabilities=capabilities,
         )

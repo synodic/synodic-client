@@ -538,9 +538,14 @@ class SetupPreviewWidget(QWidget):
 
         self._on_preview_ready(preview, manifest_path, temp_dir_path)
 
-    def _on_plugins_queried(self, mapping: dict[str, bool]) -> None:
-        """Store plugin presence data for annotating the action cards."""
+    def _on_plugins_queried(
+        self,
+        mapping: dict[str, bool],
+        capabilities: dict[str, frozenset],
+    ) -> None:
+        """Store plugin presence and capability data for annotating the action cards."""
         self._model.plugin_installed = mapping
+        self._model.plugin_capabilities = capabilities
 
     def _on_preview_ready(self, preview: SetupResults, manifest_path: str, temp_dir_path: str) -> None:
         """Handle a successful preview — populate action cards."""

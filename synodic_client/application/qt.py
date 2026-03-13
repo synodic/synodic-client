@@ -206,6 +206,40 @@ def _init_app() -> QApplication:
     return app
 
 
+def _configure_startup(
+    logger: logging.Logger,
+    *,
+    uri: str | None,
+    dev_mode: bool,
+    debug: bool,
+) -> None:
+    """Run the early startup sequence: Velopack, logging banner, URI log."""
+    logger.info('Log file: %s', log_path())
+    logger.info(
+        'Environment: Python %s | PySide6 %s | porringer %s | platform=%s | frozen=%s',
+        sys.version.split()[0],
+        importlib.metadata.version('PySide6'),
+        importlib.metadata.version('porringer'),
+        sys.platform,
+        getattr(sys, 'frozen', False),
+    )
+
+    _install_exception_hook(logger)
+
+    if not dev_mode:
+        # All three functions are idempotent — safe to call even when
+        # bootstrap.py has already executed them before heavy imports.
+        initialize_velopack()
+        run_startup_preamble(sys.executable)
+
+    if uri:
+        logger.info('Received URI: %s', uri)
+
+    if not debug and logging.getLogger('synodic_client').level > logging.DEBUG:
+        # Will be re-evaluated after config is loaded; this is just the banner.
+        pass
+
+
 def application(*, uri: str | None = None, dev_mode: bool = False, debug: bool = False) -> None:
     """Application entry point.
 
@@ -227,26 +261,7 @@ def application(*, uri: str | None = None, dev_mode: bool = False, debug: bool =
     configure_logging(debug=debug)
     logger = logging.getLogger('synodic_client')
 
-    logger.info('Log file: %s', log_path())
-    logger.info(
-        'Environment: Python %s | PySide6 %s | porringer %s | platform=%s | frozen=%s',
-        sys.version.split()[0],
-        importlib.metadata.version('PySide6'),
-        importlib.metadata.version('porringer'),
-        sys.platform,
-        getattr(sys, 'frozen', False),
-    )
-
-    _install_exception_hook(logger)
-
-    if not dev_mode:
-        # All three functions are idempotent — safe to call even when
-        # bootstrap.py has already executed them before heavy imports.
-        initialize_velopack()
-        run_startup_preamble(sys.executable)
-
-    if uri:
-        logger.info('Received URI: %s', uri)
+    _configure_startup(logger, uri=uri, dev_mode=dev_mode, debug=debug)
 
     client, porringer, config = _init_services(logger)
 

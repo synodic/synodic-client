@@ -549,20 +549,20 @@ class TestPreviewWorkerSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        plugin_data: list[dict[str, bool]] = []
+        captured: list[tuple[dict[str, bool], dict[str, frozenset]]] = []
 
         asyncio.run(
             run_preview(
                 porringer,
                 str(manifest),
                 callbacks=PreviewCallbacks(
-                    on_plugins_queried=plugin_data.append,
+                    on_plugins_queried=lambda avail, caps: captured.append((avail, caps)),
                 ),
             ),
         )
 
-        assert len(plugin_data) == 1
-        assert plugin_data[0] == {'pip': True, 'uv': False}
+        assert len(captured) == 1
+        assert captured[0][0] == {'pip': True, 'uv': False}
 
     @staticmethod
     def test_plugins_queried_emitted_before_preview_ready(tmp_path: Path) -> None:
@@ -591,7 +591,7 @@ class TestPreviewWorkerSignals:
                 porringer,
                 str(manifest),
                 callbacks=PreviewCallbacks(
-                    on_plugins_queried=lambda _: order.append('plugins'),
+                    on_plugins_queried=lambda _avail, _caps: order.append('plugins'),
                     on_preview_ready=lambda *_: order.append('preview'),
                 ),
             ),
@@ -667,7 +667,7 @@ class TestPreviewWorkerSignals:
                 str(manifest),
                 callbacks=PreviewCallbacks(
                     on_manifest_parsed=lambda *_: order.append('parsed'),
-                    on_plugins_queried=lambda _: order.append('plugins'),
+                    on_plugins_queried=lambda _avail, _caps: order.append('plugins'),
                     on_preview_ready=lambda *_: order.append('ready'),
                 ),
             ),
