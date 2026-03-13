@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from porringer.api import API
 from porringer.core.schema import PackageRef
@@ -95,6 +95,12 @@ class ToolUpdateOrchestrator:
             self._tool_task.cancel()
             self._tool_task = None
         logger.info('ToolUpdateOrchestrator shut down')
+
+    def _set_task(self, coro: Coroutine[Any, Any, None]) -> None:
+        """Cancel any in-flight task and start *coro* as the active task."""
+        if self._tool_task is not None and not self._tool_task.done():
+            self._tool_task.cancel()
+        self._tool_task = asyncio.create_task(coro)
 
     # -- Timer management --
 
@@ -192,7 +198,7 @@ class ToolUpdateOrchestrator:
             return
 
         logger.info('Starting periodic tool update check')
-        self._tool_task = asyncio.create_task(self._do_tool_update(porringer))
+        self._set_task(self._do_tool_update(porringer))
 
     async def _do_tool_update(self, porringer: API) -> None:
         """Resolve enabled plugins off-thread, then run the tool update."""
@@ -250,11 +256,11 @@ class ToolUpdateOrchestrator:
 
         bare_plugin, runtime_tag = _parse_plugin_key(plugin_name)
         if runtime_tag is not None:
-            self._tool_task = asyncio.create_task(
+            self._set_task(
                 self._async_runtime_plugin_update(porringer, plugin_name, bare_plugin, runtime_tag),
             )
         else:
-            self._tool_task = asyncio.create_task(
+            self._set_task(
                 self._async_single_plugin_update(porringer, plugin_name),
             )
 
@@ -341,7 +347,7 @@ class ToolUpdateOrchestrator:
         tools_view = self._window.tools_view
         if tools_view is not None:
             tools_view.set_package_updating(plugin_name, package_name, True)
-        self._tool_task = asyncio.create_task(
+        self._set_task(
             self._async_single_package_update(porringer, plugin_name, package_name),
         )
 
@@ -467,7 +473,7 @@ class ToolUpdateOrchestrator:
         tools_view = self._window.tools_view
         if tools_view is not None:
             tools_view.set_package_removing(plugin_name, package_name, True)
-        self._tool_task = asyncio.create_task(
+        self._set_task(
             self._async_single_package_remove(porringer, plugin_name, package_name),
         )
 

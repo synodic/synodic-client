@@ -4,6 +4,7 @@ import asyncio
 import ctypes
 import importlib.metadata
 import logging
+import os
 import signal
 import sys
 import traceback
@@ -89,21 +90,40 @@ def _process_uri(uri: str, handler: Callable[[str], None]) -> None:
             handler(manifests[0])
 
 
-def _cancel_all_tasks(loop: asyncio.AbstractEventLoop) -> None:
-    """Cancel every pending asyncio task on *loop*.
+_SHUTDOWN_TIMEOUT: float = 3.0
 
-    Called synchronously from the ``aboutToQuit`` handler.  Each task
-    receives a cancellation request; when the event loop processes its
-    remaining iterations the ``CancelledError`` propagates and the
-    tasks finish cleanly.
+
+async def _async_shutdown(
+    loop: asyncio.AbstractEventLoop,
+    *,
+    timeout: float = _SHUTDOWN_TIMEOUT,
+) -> None:
+    """Cancel remaining async tasks and wait for cleanup to finish.
+
+    Runs after the Qt event loop exits.  Tasks blocked in
+    ``run_in_executor`` threads (network / subprocess I/O) cannot be
+    interrupted, so if any are still alive after *timeout* seconds
+    the process is force-exited via ``os._exit(0)`` to avoid blocking
+    on non-daemon thread joins during interpreter shutdown.
     """
     _logger = logging.getLogger(__name__)
-    pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+    current = asyncio.current_task()
+    pending = [t for t in asyncio.all_tasks(loop) if t is not current and not t.done()]
     if not pending:
         return
+
     _logger.info('Cancelling %d pending async task(s)', len(pending))
     for task in pending:
         task.cancel()
+
+    _, still_pending = await asyncio.wait(pending, timeout=timeout)
+    if still_pending:
+        _logger.warning(
+            '%d task(s) did not finish within %.1fs — forcing exit',
+            len(still_pending),
+            timeout,
+        )
+        os._exit(0)
 
 
 def _install_exception_hook(logger: logging.Logger) -> None:
@@ -287,14 +307,14 @@ def application(*, uri: str | None = None, dev_mode: bool = False, debug: bool =
         _process_uri(uri, _handle_install_uri)
 
     # --- Graceful shutdown ---
-    # aboutToQuit fires synchronously when app.quit() is called but
-    # before the event loop stops, giving us a window to cancel
-    # in-flight async tasks and stop timers.
+    # aboutToQuit fires while the Qt event loop is still running —
+    # stop timers and issue task cancellations here.  The actual await
+    # of those cancellations runs after run_forever() returns (see
+    # _async_shutdown below).
 
     def _on_about_to_quit() -> None:
-        logger.info('Application shutting down — cancelling async tasks')
+        logger.info('Application shutting down')
         _tray.shutdown()
-        _cancel_all_tasks(loop)
 
     app.aboutToQuit.connect(_on_about_to_quit)
 
@@ -302,6 +322,15 @@ def application(*, uri: str | None = None, dev_mode: bool = False, debug: bool =
     # enabling async/await usage in the GUI layer without dedicated threads.
     with loop:
         loop.run_forever()
+        # The Qt event loop has exited.  Give cancelled tasks a window
+        # to handle CancelledError, run finally blocks, and release
+        # resources.  If any tasks are stuck in executor threads,
+        # _async_shutdown force-exits after the timeout.
+        try:
+            loop.run_until_complete(_async_shutdown(loop))
+        except Exception:
+            logger.exception('Async shutdown failed — forcing exit')
+            os._exit(0)
 
 
 if __name__ == '__main__':
