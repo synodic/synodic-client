@@ -33,6 +33,7 @@ from synodic_client.application.theme import (
     ACTION_CARD_STATUS_UPDATE,
     ACTION_CARD_STYLE,
 )
+from synodic_client.operations.schema import resolve_action_status
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -94,6 +95,13 @@ def _make_result(
     )
 
 
+def _check(card: ActionCard, result: SetupActionResult) -> None:
+    """Call set_check_result with the status resolved from the result."""
+    assert card._action is not None
+    status = resolve_action_status(result, card._action)
+    card.set_check_result(result, status)
+
+
 # ---------------------------------------------------------------------------
 # ActionCard — skeleton
 # ---------------------------------------------------------------------------
@@ -127,7 +135,7 @@ class TestActionCardSkeleton:
         """set_check_result on skeleton is a no-op."""
         card = ActionCard(skeleton=True)
         result = _make_result()
-        card.set_check_result(result)
+        card.set_check_result(result, 'Needed')
         assert not card.status_text()
 
     @staticmethod
@@ -239,7 +247,7 @@ class TestActionCardCheckResult:
         card = ActionCard()
         card.populate(_make_action())
         result = _make_result(success=True, skipped=False)
-        card.set_check_result(result)
+        _check(card, result)
         assert card.status_text() == 'Needed'
         assert ACTION_CARD_STATUS_NEEDED in card._status_label.styleSheet()
 
@@ -253,7 +261,7 @@ class TestActionCardCheckResult:
             skip_reason=SkipReason.ALREADY_INSTALLED,
             installed_version='3.5.2',
         )
-        card.set_check_result(result)
+        _check(card, result)
         assert card.status_text() == '\u2713 Already installed'
         assert ACTION_CARD_STATUS_SATISFIED in card._status_label.styleSheet()
 
@@ -268,7 +276,7 @@ class TestActionCardCheckResult:
             installed_version='1.0.0',
             available_version='2.0.0',
         )
-        card.set_check_result(result)
+        _check(card, result)
         assert card.status_text() == 'Update available'
         assert card.is_update_available()
         assert ACTION_CARD_STATUS_UPDATE in card._status_label.styleSheet()
@@ -284,7 +292,7 @@ class TestActionCardCheckResult:
             installed_version='1.0.0',
             available_version='2.0.0',
         )
-        card.set_check_result(result)
+        _check(card, result)
         assert '1.0.0' in card._version_label.text()
         assert '2.0.0' in card._version_label.text()
         assert '\u2192' in card._version_label.text()
@@ -299,7 +307,7 @@ class TestActionCardCheckResult:
             skip_reason=SkipReason.ALREADY_INSTALLED,
             installed_version='3.5.2',
         )
-        card.set_check_result(result)
+        _check(card, result)
         assert card._version_label.text() == '3.5.2'
 
     @staticmethod
@@ -312,7 +320,7 @@ class TestActionCardCheckResult:
             skipped=False,
             available_version='1.2.0',
         )
-        card.set_check_result(result)
+        _check(card, result)
         assert '\u2192 1.2.0' in card._version_label.text()
         assert 'grey' in card._version_label.styleSheet()
 
@@ -356,7 +364,7 @@ class TestActionCardCheckFailure:
             skipped=False,
             message="No SCM plugin was found for ecosystem 'git'.",
         )
-        card.set_check_result(result)
+        _check(card, result)
         assert card.status_text() == 'Failed'
         assert ACTION_CARD_STATUS_FAILED in card._status_label.styleSheet()
 
@@ -368,7 +376,7 @@ class TestActionCardCheckFailure:
         card.populate(action)
         msg = "SCM environment 'None' is not available"
         result = _make_result(success=False, skipped=False, message=msg)
-        card.set_check_result(result)
+        _check(card, result)
         assert card._status_label.toolTip() == msg
 
     @staticmethod
@@ -378,7 +386,7 @@ class TestActionCardCheckFailure:
         card.populate(_make_action())
         assert card._checking
         result = _make_result(success=False, skipped=False, message='error')
-        card.set_check_result(result)
+        _check(card, result)
         assert not card._checking
         assert not card._spinner_timer.isActive()
 
@@ -388,7 +396,7 @@ class TestActionCardCheckFailure:
         card = ActionCard()
         card.populate(_make_action())
         result = _make_result(success=False, skipped=False, message='backend missing')
-        card.set_check_result(result)
+        _check(card, result)
         assert not card.is_update_available()
 
     @staticmethod
@@ -397,7 +405,7 @@ class TestActionCardCheckFailure:
         card = ActionCard()
         card.populate(_make_action())
         result = _make_result(success=True, skipped=False)
-        card.set_check_result(result)
+        _check(card, result)
         assert card.status_text() == 'Needed'
         assert ACTION_CARD_STATUS_NEEDED in card._status_label.styleSheet()
 
@@ -571,11 +579,12 @@ class TestActionCardList:
         # Simulate: a1 gets a check result, a2 stays as 'Checking…'
         c1 = card_list.get_card(a1)
         assert c1 is not None
-        c1.set_check_result(
+        _check(
+            c1,
             _make_result(
                 skipped=True,
                 skip_reason=SkipReason.ALREADY_INSTALLED,
-            )
+            ),
         )
 
         card_list.finalize_all_checking()
@@ -620,7 +629,7 @@ class TestActionCardKindStatus:
         assert card.status_text() == 'Pending'
 
         result = _make_result(success=True, skipped=False)
-        card.set_check_result(result)
+        _check(card, result)
         assert card.status_text() == 'Pending'
         assert ACTION_CARD_STATUS_PENDING in card._status_label.styleSheet()
 
@@ -632,7 +641,7 @@ class TestActionCardKindStatus:
         card.populate(action)
 
         result = _make_result(success=True, skipped=False)
-        card.set_check_result(result)
+        _check(card, result)
         assert card.status_text() == 'Ready'
         assert ACTION_CARD_STATUS_SATISFIED in card._status_label.styleSheet()
 
@@ -642,7 +651,7 @@ class TestActionCardKindStatus:
         card = ActionCard()
         card.populate(_make_action(kind=PluginKind.PACKAGE))
         result = _make_result(success=True, skipped=False)
-        card.set_check_result(result)
+        _check(card, result)
         assert card.status_text() == 'Needed'
 
 
@@ -664,7 +673,7 @@ class TestActionCardVersionSpecifier:
             skipped=False,
             available_version='>=0.8.0',
         )
-        card.set_check_result(result)
+        _check(card, result)
         assert card._version_label.text() == 'requires >=0.8.0'
         assert 'grey' in card._version_label.styleSheet()
 
@@ -678,7 +687,7 @@ class TestActionCardVersionSpecifier:
             skipped=False,
             available_version='1.2.0',
         )
-        card.set_check_result(result)
+        _check(card, result)
         assert '\u2192 1.2.0' in card._version_label.text()
 
     @staticmethod
@@ -692,7 +701,7 @@ class TestActionCardVersionSpecifier:
             skip_reason=SkipReason.ALREADY_INSTALLED,
             installed_version='0.9.1',
         )
-        card.set_check_result(result)
+        _check(card, result)
         assert card._version_label.text() == '0.9.1'
         assert 'satisfies >=0.8.0' in card._version_label.toolTip()
 
@@ -707,7 +716,7 @@ class TestActionCardVersionSpecifier:
             skip_reason=SkipReason.ALREADY_INSTALLED,
             installed_version='0.9.1',
         )
-        card.set_check_result(result)
+        _check(card, result)
         assert card._version_label.text() == '0.9.1'
         # No constraint tooltip — only message tooltip may have been set
         assert 'satisfies' not in (card._version_label.toolTip() or '')
@@ -782,7 +791,7 @@ class TestActionCardCommandLabel:
             action=action,
             cli_command=('uv', 'tool', 'install', 'ruff'),
         )
-        card.set_check_result(result)
+        _check(card, result)
         assert card._command_label.text() == 'uv tool install ruff'
 
     @staticmethod
@@ -806,7 +815,7 @@ class TestActionCardCommandLabel:
             action=action,
             cli_command=('uv', 'tool', 'install', 'ruff'),
         )
-        card.set_check_result(result)
+        _check(card, result)
         assert card._command_label.text() == 'uv tool install ruff'
         assert not card._command_row.isHidden()
 
@@ -864,7 +873,7 @@ class TestActionCardSpinner:
         card = ActionCard()
         card.populate(_make_action())
         assert card._checking
-        card.set_check_result(_make_result())
+        _check(card, _make_result())
         assert not card._checking
         assert not card._spinner_timer.isActive()
         assert card._spinner_canvas.isHidden()
@@ -1019,11 +1028,12 @@ class TestActionCardAlreadyLatest:
         """ALREADY_LATEST check result uses the satisfied style."""
         card = ActionCard()
         card.populate(_make_action())
-        card.set_check_result(
+        _check(
+            card,
             _make_result(
                 skipped=True,
                 skip_reason=SkipReason.ALREADY_LATEST,
-            )
+            ),
         )
         assert card.status_text() == '\u2713 Already latest'
         assert ACTION_CARD_STATUS_SATISFIED in card._status_label.styleSheet()
@@ -1033,12 +1043,13 @@ class TestActionCardAlreadyLatest:
         """ALREADY_LATEST preserves the installed version label."""
         card = ActionCard()
         card.populate(_make_action())
-        card.set_check_result(
+        _check(
+            card,
             _make_result(
                 skipped=True,
                 skip_reason=SkipReason.ALREADY_LATEST,
                 installed_version='1.2.0',
-            )
+            ),
         )
         assert card._version_label.text() == '1.2.0'
 
@@ -1047,20 +1058,22 @@ class TestActionCardAlreadyLatest:
         """ALREADY_INSTALLED and ALREADY_LATEST both use satisfied style."""
         card_installed = ActionCard()
         card_installed.populate(_make_action(package='a'))
-        card_installed.set_check_result(
+        _check(
+            card_installed,
             _make_result(
                 skipped=True,
                 skip_reason=SkipReason.ALREADY_INSTALLED,
-            )
+            ),
         )
 
         card_latest = ActionCard()
         card_latest.populate(_make_action(package='b'))
-        card_latest.set_check_result(
+        _check(
+            card_latest,
             _make_result(
                 skipped=True,
                 skip_reason=SkipReason.ALREADY_LATEST,
-            )
+            ),
         )
 
         assert card_installed.status_text() == '\u2713 Already installed'

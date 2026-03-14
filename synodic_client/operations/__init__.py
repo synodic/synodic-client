@@ -17,13 +17,24 @@ Modules:
 
 from synodic_client.operations.bootstrap import init_services
 from synodic_client.operations.config import get_config, list_config_keys, set_config
-from synodic_client.operations.install import execute_install, preview_manifest
+from synodic_client.operations.install import (
+    execute_install,
+    preview_manifest,
+    preview_manifest_stream,
+    resolve_manifest_path,
+)
 from synodic_client.operations.project import add_project, list_projects, remove_project
 from synodic_client.operations.schema import (
+    SKIP_REASON_LABELS,
     ActionInfo,
     ConfigKeyInfo,
     DownloadResult,
     PackageInfo,
+    PreviewActionChecked,
+    PreviewEvent,
+    PreviewManifestParsed,
+    PreviewPluginsQueried,
+    PreviewReady,
     PreviewResult,
     ProjectInfo,
     ProjectStatus,
@@ -33,6 +44,8 @@ from synodic_client.operations.schema import (
     ToolSection,
     UpdateCheckResult,
     UpdateResult,
+    resolve_action_status,
+    skip_reason_label,
 )
 from synodic_client.operations.tool import (
     check_tool_updates,
@@ -53,6 +66,8 @@ __all__ = [
     # install
     'execute_install',
     'preview_manifest',
+    'preview_manifest_stream',
+    'resolve_manifest_path',
     # project
     'add_project',
     'list_projects',
@@ -62,15 +77,23 @@ __all__ = [
     'ConfigKeyInfo',
     'DownloadResult',
     'PackageInfo',
+    'PreviewActionChecked',
+    'PreviewEvent',
+    'PreviewManifestParsed',
+    'PreviewPluginsQueried',
+    'PreviewReady',
     'PreviewResult',
     'ProjectInfo',
     'ProjectStatus',
     'ProviderInfo',
+    'SKIP_REASON_LABELS',
     'StatusSummary',
     'TagInfo',
     'ToolSection',
     'UpdateCheckResult',
     'UpdateResult',
+    'resolve_action_status',
+    'skip_reason_label',
     # tool
     'check_tool_updates',
     'remove_package',

@@ -27,7 +27,6 @@ from porringer.schema import (
     SubActionProgress,
     SyncStrategy,
 )
-from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
@@ -45,7 +44,6 @@ from PySide6.QtWidgets import (
 )
 
 from synodic_client.application.package_state import PackageStateStore
-from synodic_client.application.screen import skip_reason_label
 from synodic_client.application.screen.action_card import ActionCardList
 from synodic_client.application.screen.card import CardFrame
 from synodic_client.application.screen.install_workers import run_install, run_preview
@@ -615,28 +613,13 @@ class SetupPreviewWidget(QWidget):
         if preview.metadata:
             self.metadata_ready.emit(preview)
 
-    def _on_action_checked(self, row: int, result: SetupActionResult) -> None:
+    def _on_action_checked(self, row: int, result: SetupActionResult, status: str) -> None:
         """Update the model and action card with a dry-run result."""
         m = self._model
-        if result.skipped and result.skip_reason == SkipReason.UPDATE_AVAILABLE:
-            label = skip_reason_label(result.skip_reason)
-            if 0 <= row < len(m.action_states):
-                m.upgradable_keys.add(m.action_states[row].action)
-        elif result.skipped:
-            label = skip_reason_label(result.skip_reason)
-        elif not result.success:
-            label = 'Failed'
-        else:
-            # Bare commands (kind=None) and PROJECT actions always return
-            # success=True from porringer's dry_run_action.  Don't
-            # overwrite their initial status to "Needed".
-            action = m.action_states[row].action if 0 <= row < len(m.action_states) else None
-            if action is not None and action.kind is None:
-                label = 'Pending'
-            elif action is not None and action.kind == PluginKind.PROJECT:
-                label = 'Ready'
-            else:
-                label = 'Needed'
+        label = status
+
+        if result.skipped and result.skip_reason == SkipReason.UPDATE_AVAILABLE and 0 <= row < len(m.action_states):
+            m.upgradable_keys.add(m.action_states[row].action)
 
         if 0 <= row < len(m.action_states):
             m.action_states[row].status = label
@@ -657,7 +640,7 @@ class SetupPreviewWidget(QWidget):
             action = m.preview.actions[row]
             card = self._card_list.get_card(action)
             if card is not None:
-                card.set_check_result(result)
+                card.set_check_result(result, status)
 
             # Record in shared store so ToolsView can reflect the update
             if self._package_store is not None and action.installer and action.package:

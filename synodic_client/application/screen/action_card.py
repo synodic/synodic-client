@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 
 from porringer.backend.command.core.action_builder import PHASE_ORDER
-from porringer.schema import SetupAction, SetupActionResult, SkipReason
+from porringer.schema import SetupAction, SetupActionResult
 from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor
@@ -443,56 +443,47 @@ class ActionCard(QFrame):
     # Public API — dry-run check result
     # ------------------------------------------------------------------
 
-    def set_check_result(self, result: SetupActionResult) -> None:
+    def set_check_result(self, result: SetupActionResult, status: str) -> None:
         """Update the card with a dry-run check result.
 
-        Handles these cases:
-
-        * **Skipped (update available)** — amber "Update available" badge.
-        * **Skipped (other)** — muted satisfied badge.
-        * **Failed** — red "Failed" badge with diagnostic tooltip.
-        * **Bare command** (kind=None, success=True) — keeps "Pending".
-        * **Project sync** (kind=PROJECT, success=True) — "Ready".
-        * **Needed** — default blue badge.
+        The *status* string is pre-resolved by the operations layer via
+        :func:`resolve_action_status`.  This method maps it to the
+        appropriate style and updates the version / tooltip columns.
 
         Args:
             result: The action check result from the preview worker.
+            status: Pre-resolved human-readable status label.
         """
         if self._is_skeleton:
             return
 
         self._stop_spinner()
 
-        if result.skipped and result.skip_reason == SkipReason.UPDATE_AVAILABLE:
-            label = skip_reason_label(result.skip_reason)
-            self._status_label.setText(label)
-            self._status_label.setStyleSheet(ACTION_CARD_STATUS_UPDATE)
-        elif result.skipped:
-            label = '\u2713 ' + skip_reason_label(result.skip_reason)
-            self._status_label.setText(label)
-            self._status_label.setStyleSheet(ACTION_CARD_STATUS_SATISFIED)
-        elif not result.success:
-            label = 'Failed'
-            self._status_label.setText(label)
-            self._status_label.setStyleSheet(ACTION_CARD_STATUS_FAILED)
+        # Status-to-style mapping
+        _STATUS_STYLES: dict[str, str] = {
+            'Update available': ACTION_CARD_STATUS_UPDATE,
+            'Failed': ACTION_CARD_STATUS_FAILED,
+            'Pending': ACTION_CARD_STATUS_PENDING,
+            'Ready': ACTION_CARD_STATUS_SATISFIED,
+            'Needed': ACTION_CARD_STATUS_NEEDED,
+        }
+
+        style = _STATUS_STYLES.get(status, ACTION_CARD_STATUS_SATISFIED)
+        display = status
+
+        # Satisfied (skipped) statuses get a checkmark prefix
+        if result.skipped and status not in _STATUS_STYLES:
+            display = f'\u2713 {status}'
+
+        if not result.success and status == 'Failed':
             logger.warning(
                 'Dry-run check failed for %s: %s',
                 self._action.description if self._action else '(unknown)',
                 result.message or 'unknown error',
             )
-        elif self._action is not None and self._action.kind is None:
-            # Bare command — porringer returns success=True; keep Pending.
-            label = 'Pending'
-            self._status_label.setText(label)
-            self._status_label.setStyleSheet(ACTION_CARD_STATUS_PENDING)
-        elif self._action is not None and self._action.kind == PluginKind.PROJECT:
-            label = 'Ready'
-            self._status_label.setText(label)
-            self._status_label.setStyleSheet(ACTION_CARD_STATUS_SATISFIED)
-        else:
-            label = 'Needed'
-            self._status_label.setText(label)
-            self._status_label.setStyleSheet(ACTION_CARD_STATUS_NEEDED)
+
+        self._status_label.setText(display)
+        self._status_label.setStyleSheet(style)
 
         # Surface diagnostic detail (e.g. SCM URL mismatch) as a tooltip
         if result.message:

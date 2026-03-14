@@ -404,7 +404,7 @@ class TestPreviewWorkerSignals:
         porringer.sync.execute_stream = mock_stream
 
         ready_calls: list[tuple[object, str, str]] = []
-        checked: list[tuple[int, SetupActionResult]] = []
+        checked: list[tuple[int, SetupActionResult, str]] = []
         finished = False
 
         async def _run() -> None:
@@ -414,7 +414,7 @@ class TestPreviewWorkerSignals:
                 str(manifest),
                 callbacks=PreviewCallbacks(
                     on_preview_ready=lambda p, m, t: ready_calls.append((p, m, t)),
-                    on_action_checked=lambda row, r: checked.append((row, r)),
+                    on_action_checked=lambda row, r, s: checked.append((row, r, s)),
                 ),
             )
             finished = True
@@ -424,7 +424,7 @@ class TestPreviewWorkerSignals:
         assert len(ready_calls) == 1
         assert ready_calls[0][0] is preview
         assert len(checked) == 1
-        assert checked[0] == (0, result)
+        assert checked[0][:2] == (0, result)
         assert finished
 
     @staticmethod
@@ -490,22 +490,22 @@ class TestPreviewWorkerSignals:
 
         porringer.sync.execute_stream = mock_stream
 
-        checked: list[tuple[int, SetupActionResult]] = []
+        checked: list[tuple[int, SetupActionResult, str]] = []
 
         asyncio.run(
             run_preview(
                 porringer,
                 str(manifest),
                 callbacks=PreviewCallbacks(
-                    on_action_checked=lambda row, r: checked.append((row, r)),
+                    on_action_checked=lambda row, r, s: checked.append((row, r, s)),
                 ),
             ),
         )
 
         assert len(checked) == _EXPECTED_CHECKED_COUNT
         # action_b is at index 1 in preview, action_a at index 0
-        assert checked[0] == (1, result_b)
-        assert checked[1] == (0, result_a)
+        assert checked[0][:2] == (1, result_b)
+        assert checked[1][:2] == (0, result_a)
 
     @staticmethod
     def test_emits_error_when_dry_run_fails(tmp_path: Path) -> None:
@@ -859,7 +859,7 @@ class TestSCMPreviewActions:
 
         porringer.sync.execute_stream = mock_stream
 
-        checked: list[tuple[int, SetupActionResult]] = []
+        checked: list[tuple[int, SetupActionResult, str]] = []
 
         asyncio.run(
             run_preview(
@@ -867,13 +867,13 @@ class TestSCMPreviewActions:
                 str(manifest),
                 config=PreviewConfig(project_directory=tmp_path),
                 callbacks=PreviewCallbacks(
-                    on_action_checked=lambda row, r: checked.append((row, r)),
+                    on_action_checked=lambda row, r, s: checked.append((row, r, s)),
                 ),
             ),
         )
 
         assert len(checked) == 1
-        assert checked[0] == (0, result)
+        assert checked[0][:2] == (0, result)
         assert checked[0][1].skipped is True
         assert checked[0][1].skip_reason == SkipReason.ALREADY_INSTALLED
 
@@ -905,7 +905,7 @@ class TestSCMPreviewActions:
 
         porringer.sync.execute_stream = mock_stream
 
-        checked: list[tuple[int, SetupActionResult]] = []
+        checked: list[tuple[int, SetupActionResult, str]] = []
 
         asyncio.run(
             run_preview(
@@ -913,7 +913,7 @@ class TestSCMPreviewActions:
                 str(manifest),
                 config=PreviewConfig(project_directory=tmp_path),
                 callbacks=PreviewCallbacks(
-                    on_action_checked=lambda row, r: checked.append((row, r)),
+                    on_action_checked=lambda row, r, s: checked.append((row, r, s)),
                 ),
             ),
         )

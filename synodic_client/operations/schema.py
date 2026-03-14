@@ -10,6 +10,89 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from porringer.schema import PluginCapability, SetupAction, SetupActionResult, SetupResults, SkipReason
+from porringer.schema.plugin import PluginKind
+
+# ---------------------------------------------------------------------------
+# Status resolution helpers
+# ---------------------------------------------------------------------------
+
+SKIP_REASON_LABELS: dict[SkipReason, str] = {
+    SkipReason.ALREADY_INSTALLED: 'Already installed',
+    SkipReason.NOT_INSTALLED: 'Not installed',
+    SkipReason.ALREADY_LATEST: 'Already latest',
+    SkipReason.NO_PROJECT_DIRECTORY: 'No project directory',
+    SkipReason.UPDATE_AVAILABLE: 'Update available',
+}
+
+
+def skip_reason_label(reason: SkipReason | None) -> str:
+    """Return a human-readable label for a skip reason."""
+    if reason is None:
+        return 'Skipped'
+    return SKIP_REASON_LABELS.get(reason, reason.name.replace('_', ' ').capitalize())
+
+
+def resolve_action_status(result: SetupActionResult, action: SetupAction) -> str:
+    """Derive a human-readable status string from a dry-run result.
+
+    This is the single source of truth for mapping porringer's
+    :class:`SetupActionResult` to a display label.
+    """
+    if result.skipped:
+        return skip_reason_label(result.skip_reason)
+    if not result.success:
+        return 'Failed'
+    if action.kind is None:
+        return 'Pending'
+    if action.kind == PluginKind.PROJECT:
+        return 'Ready'
+    return 'Needed'
+
+
+# ---------------------------------------------------------------------------
+# Preview stream events
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewManifestParsed:
+    """Fast event emitted once the manifest JSON is parsed."""
+
+    manifest: SetupResults
+    manifest_path: str
+    temp_dir: str
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewPluginsQueried:
+    """Plugin availability discovered."""
+
+    availability: dict[str, bool]
+    capabilities: dict[str, frozenset[PluginCapability]]
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewReady:
+    """All actions resolved — full manifest loaded."""
+
+    manifest: SetupResults
+    manifest_path: str
+    temp_dir: str
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewActionChecked:
+    """A single action's dry-run result has been resolved."""
+
+    index: int
+    result: SetupActionResult
+    status: str
+
+
+PreviewEvent = PreviewManifestParsed | PreviewPluginsQueried | PreviewReady | PreviewActionChecked
+
+
 # ---------------------------------------------------------------------------
 # Project operations
 # ---------------------------------------------------------------------------

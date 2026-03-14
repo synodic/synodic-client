@@ -323,8 +323,8 @@ class PreviewCallbacks:
     on_preview_ready: Callable[[SetupResults, str, str], None] | None = None
     """``(SetupResults, manifest_path, temp_dir)`` — CLI commands resolved."""
 
-    on_action_checked: Callable[[int, SetupActionResult], None] | None = None
-    """``(row_index, SetupActionResult)`` — per-action dry-run result."""
+    on_action_checked: Callable[[int, SetupActionResult, str], None] | None = None
+    """``(row_index, SetupActionResult, status)`` — per-action dry-run result with resolved status."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,10 +333,3 @@ class PreviewConfig:
 
     project_directory: Path | None = None
     prerelease_packages: set[str] | None = None
-
-
-@dataclass(slots=True)
-class _DispatchState:
-    """Mutable accumulator for :func:`_dispatch_preview_event`."""
-
-    got_parsed: bool = False

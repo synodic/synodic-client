@@ -9,8 +9,18 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 
-from porringer.schema import SetupAction, SetupActionResult, SkipReason
+from porringer.schema import SetupAction, SetupActionResult
 from porringer.schema.plugin import PluginKind
+
+from synodic_client.operations.schema import (
+    SKIP_REASON_LABELS as SKIP_REASON_LABELS,
+)
+from synodic_client.operations.schema import (
+    resolve_action_status as resolve_action_status,
+)
+from synodic_client.operations.schema import (
+    skip_reason_label as skip_reason_label,
+)
 
 _SECONDS_PER_MINUTE = 60
 _MINUTES_PER_HOUR = 60
@@ -46,22 +56,6 @@ def plugin_kind_group_label(kind: PluginKind) -> str:
     *kind* is not in :data:`PLUGIN_KIND_GROUP_LABELS`.
     """
     return PLUGIN_KIND_GROUP_LABELS.get(kind, kind.name.replace('_', ' ').title())
-
-
-SKIP_REASON_LABELS: dict[SkipReason, str] = {
-    SkipReason.ALREADY_INSTALLED: 'Already installed',
-    SkipReason.NOT_INSTALLED: 'Not installed',
-    SkipReason.ALREADY_LATEST: 'Already latest',
-    SkipReason.NO_PROJECT_DIRECTORY: 'No project directory',
-    SkipReason.UPDATE_AVAILABLE: 'Update available',
-}
-
-
-def skip_reason_label(reason: SkipReason | None) -> str:
-    """Return a human-readable label for a skip reason."""
-    if reason is None:
-        return 'Skipped'
-    return SKIP_REASON_LABELS.get(reason, reason.name.replace('_', ' ').capitalize())
 
 
 def format_cli_command(
