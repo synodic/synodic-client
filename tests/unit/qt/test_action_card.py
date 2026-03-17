@@ -358,7 +358,7 @@ class TestActionCardCheckFailure:
     def test_failed_check_shows_failed_status() -> None:
         """A check result with success=False shows 'Failed'."""
         card = ActionCard()
-        card.populate(_make_action(kind=PluginKind.SCM, package='periapsis', installer='git'))
+        card.populate(_make_action(kind=PluginKind.SCM, package='mypackage', installer='git'))
         result = _make_result(
             success=False,
             skipped=False,

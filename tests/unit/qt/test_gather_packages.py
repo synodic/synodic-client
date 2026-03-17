@@ -374,8 +374,8 @@ class TestBuildDisplayPackages:
             PackageEntry(
                 name='cppython',
                 version='0.9.15.dev3',
-                project_label='periapsis',
-                project_path='/projects/periapsis',
+                project_label='myproject',
+                project_path='/projects/myproject',
             ),
         ]
         result = ToolsView._build_display_packages(entries, set())
@@ -386,8 +386,8 @@ class TestBuildDisplayPackages:
         assert pkg.is_global is False
         assert pkg.global_version is None
         assert len(pkg.project_instances) == 1
-        assert pkg.project_instances[0].project_label == 'periapsis'
-        assert pkg.project_instances[0].project_path == '/projects/periapsis'
+        assert pkg.project_instances[0].project_label == 'myproject'
+        assert pkg.project_instances[0].project_path == '/projects/myproject'
 
     @staticmethod
     def test_both_global_and_project() -> None:
@@ -417,8 +417,8 @@ class TestBuildDisplayPackages:
             PackageEntry(
                 name='cppython',
                 version='0.9.15.dev3',
-                project_label='periapsis',
-                project_path='/projects/periapsis',
+                project_label='myproject',
+                project_path='/projects/myproject',
             ),
         ]
         # 'cppython' is NOT in the manifest set â†’ transitive
@@ -432,8 +432,8 @@ class TestBuildDisplayPackages:
             PackageEntry(
                 name='cppython',
                 version='0.9.15.dev3',
-                project_label='periapsis',
-                project_path='/projects/periapsis',
+                project_label='myproject',
+                project_path='/projects/myproject',
             ),
         ]
         result = ToolsView._build_display_packages(entries, {'cppython'})
@@ -512,8 +512,8 @@ class TestProjectChildRow:
     def _make_instance(*, transitive: bool = False) -> ProjectChildRow:
         return ProjectChildRow(
             ProjectInstance(
-                project_label='periapsis',
-                project_path='/projects/periapsis',
+                project_label='myproject',
+                project_path='/projects/myproject',
                 version='0.9.15.dev3',
                 is_transitive=transitive,
             ),
@@ -530,7 +530,7 @@ class TestProjectChildRow:
         nav_btns = [w for w in row.findChildren(QPushButton) if w.text() == '\u2192']
         assert len(nav_btns) == 1
         nav_btns[0].click()
-        spy.assert_called_once_with('/projects/periapsis')
+        spy.assert_called_once_with('/projects/myproject')
 
     def test_transitive_label_shown(self) -> None:
         """Transitive instances show a (transitive) label."""
