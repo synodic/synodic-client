@@ -50,19 +50,30 @@ def resolve_action_status(result: SetupActionResult, action: SetupAction) -> str
     return 'Needed'
 
 
+_STATUS_BUCKETS: dict[str, str] = {
+    'Needed': 'needed',
+    'Pending': 'pending',
+    'Ready': 'ready',
+    'Not installed': 'unavailable',
+    'Failed': 'failed',
+    'Already installed': 'satisfied',
+    'Already latest': 'satisfied',
+}
+
+
 def classify_status(status: str) -> str:
     """Classify a resolved status string into a summary bucket.
 
-    Returns one of ``'needed'``, ``'satisfied'``, ``'pending'``, or
-    ``'unknown'``.  Upgradability is determined separately from skip
-    reason, so it is not included here.
+    Returns one of ``'needed'``, ``'satisfied'``, ``'pending'``,
+    ``'ready'``, ``'unavailable'``, ``'failed'``, or ``'unknown'``.
+    Upgradability is determined separately from skip reason, so it
+    is not included here.
     """
-    if status == 'Needed':
-        return 'needed'
-    if '\u2713' in status or status in {'Already installed', 'Already latest'}:
+    bucket = _STATUS_BUCKETS.get(status)
+    if bucket is not None:
+        return bucket
+    if '\u2713' in status:
         return 'satisfied'
-    if status == 'Pending':
-        return 'pending'
     return 'unknown'
 
 

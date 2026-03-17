@@ -632,6 +632,7 @@ class ActionCardList(QWidget):
 
         self._cards: list[ActionCard] = []
         self._action_map: dict[SetupAction, ActionCard] = {}
+        self._index_map: dict[int, ActionCard] = {}
 
     # ------------------------------------------------------------------
     # Skeleton loading
@@ -683,6 +684,14 @@ class ActionCardList(QWidget):
             self._cards.append(card)
             self._action_map[act] = card
 
+        # Build original-index → card mapping so callers can look up by
+        # the action index porringer emits, which is independent of the
+        # display sort order.
+        for original_index, act in enumerate(actions):
+            card = self._action_map.get(act)
+            if card is not None:
+                self._index_map[original_index] = card
+
     # ------------------------------------------------------------------
     # Card lookup
     # ------------------------------------------------------------------
@@ -696,6 +705,15 @@ class ActionCardList(QWidget):
     def card_count(self) -> int:
         """Return the number of cards (including skeletons)."""
         return len(self._cards)
+
+    def card_for_action_index(self, action_index: int) -> ActionCard | None:
+        """Return the card for the given original action index.
+
+        The index corresponds to the action's position in the unsorted
+        list passed to :meth:`populate`, matching the indices emitted
+        by porringer's ``ActionCompletedEvent``.
+        """
+        return self._index_map.get(action_index)
 
     def get_card(self, action: SetupAction) -> ActionCard | None:
         """Look up the card for a given action.
@@ -727,3 +745,4 @@ class ActionCardList(QWidget):
             card.deleteLater()
         self._cards.clear()
         self._action_map.clear()
+        self._index_map.clear()

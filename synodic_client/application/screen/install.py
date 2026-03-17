@@ -638,7 +638,7 @@ class SetupPreviewWidget(QWidget):
         # Update the card widget
         if m.preview and 0 <= row < len(m.preview.actions):
             action = m.preview.actions[row]
-            card = self._card_list.get_card(action)
+            card = self._card_list.card_for_action_index(row)
             if card is not None:
                 card.set_check_result(result, status)
 
@@ -679,15 +679,20 @@ class SetupPreviewWidget(QWidget):
                 finalized,
             )
 
-        # Compute summary
+        # Compute summary using the shared operations-layer classifier
+        from collections import Counter
+
+        from synodic_client.operations.schema import classify_status
+
         total = len(m.action_states)
-        needed = sum(1 for s in m.action_states if s.status == 'Needed')
+        counts = Counter(classify_status(s.status) for s in m.action_states)
+        needed = counts.get('needed', 0)
+        satisfied = counts.get('satisfied', 0)
+        pending = counts.get('pending', 0)
+        ready = counts.get('ready', 0)
+        unavailable = counts.get('unavailable', 0)
+        failed = counts.get('failed', 0)
         upgradable = len(m.upgradable_keys)
-        unavailable = sum(1 for s in m.action_states if s.status == 'Not installed')
-        failed = sum(1 for s in m.action_states if s.status == 'Failed')
-        pending = sum(1 for s in m.action_states if s.status == 'Pending')
-        ready = sum(1 for s in m.action_states if s.status == 'Ready')
-        satisfied = total - needed - upgradable - unavailable - failed - pending - ready
 
         parts: list[str] = []
         _counts: list[tuple[int, str]] = [
