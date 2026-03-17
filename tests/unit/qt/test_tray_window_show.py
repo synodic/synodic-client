@@ -8,8 +8,8 @@ import pytest
 
 from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.schema import UpdateTarget
-from synodic_client.operations.schema import UpdateResult
 from synodic_client.application.screen.tray import TrayScreen
+from synodic_client.operations.schema import UpdateResult
 from synodic_client.resolution import ResolvedConfig
 from synodic_client.schema import DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES, DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
 

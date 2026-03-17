@@ -67,7 +67,7 @@ def _headless_dispatch(command: str, *, dev: bool) -> None:
     elif command == 'actions':
         data = {'actions': DEBUG_ACTIONS}
     elif command.startswith('action:'):
-        remainder = command[len('action:'):]
+        remainder = command[len('action:') :]
         name, _, arg = remainder.partition(':')
         data = _headless_action(name, arg or None)
     else:

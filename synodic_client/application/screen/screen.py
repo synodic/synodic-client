@@ -11,13 +11,11 @@ from porringer.backend.builder import Builder
 from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.schema import (
-    ActionCompletedEvent,
     ManifestDirectory,
     ManifestParsedEvent,
     PluginInfo,
     SetupAction,
     SetupParameters,
-    SkipReason,
     SyncStrategy,
 )
 from porringer.schema.plugin import PluginKind, RuntimePackageResult

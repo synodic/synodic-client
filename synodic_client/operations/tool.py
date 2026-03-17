@@ -252,7 +252,10 @@ async def remove_package(
     """
     ref = PackageRef(name=package_name)
     action_result = await porringer.package.uninstall(
-        plugin_name, ref, runtime_tag=runtime_tag, plugins=discovered,
+        plugin_name,
+        ref,
+        runtime_tag=runtime_tag,
+        plugins=discovered,
     )
     return action_result.success
 
