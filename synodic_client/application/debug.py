@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from synodic_client.config import is_dev_mode
+from synodic_client.operations.schema import DEBUG_ACTIONS
 
 if TYPE_CHECKING:
     from porringer.api import API
@@ -32,19 +33,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_ACTIONS: dict[str, str] = {
-    'check_update': 'Trigger a self-update check.',
-    'tool_update': 'Run tool/package updates for all plugins.',
-    'refresh_data': 'Mark cached data as stale (next refresh re-fetches).',
-    'show_main': 'Show and raise the main window.',
-    'show_settings': 'Show the settings window.',
-    'apply_update': 'Apply a downloaded update and restart.',
-    'list_projects': 'List cached project directories with validation status.',
-    'add_project': 'Add a directory to the project cache. Arg: <path>',
-    'remove_project': 'Remove a directory from the project cache. Arg: <path>',
-    'project_status': 'Dump per-action preview status. Arg (optional): <path>',
-    'select_project': 'Select a project in the sidebar. Arg: <path>',
-}
+_ACTIONS = DEBUG_ACTIONS
 
 
 @dataclasses.dataclass
@@ -164,49 +153,39 @@ class DebugHandler:
 
     def _handle_list_projects(self) -> str:
         """List all cached project directories with validation status."""
-        from synodic_client.operations.project import list_projects
+        from synodic_client.operations.project import run_project_action
 
-        projects = list_projects(self._s.porringer)
-        return json.dumps({'projects': [dataclasses.asdict(p) for p in projects]})
+        return json.dumps(run_project_action('list_projects', None, self._s.porringer))
 
     def _handle_add_project(self, arg: str | None) -> str:
         """Add a directory to the porringer cache."""
-        if not arg:
-            return json.dumps({'error': 'add_project requires a path argument'})
+        from synodic_client.operations.project import run_project_action
 
-        from synodic_client.operations.project import add_project
+        result = run_project_action('add_project', arg, self._s.porringer)
 
-        try:
-            add_project(self._s.porringer, arg)
-        except (NotADirectoryError, ValueError) as exc:
-            return json.dumps({'error': str(exc)})
+        if 'error' not in result:
+            if self._s.coordinator is not None:
+                self._s.coordinator.invalidate()
+            projects_view = self._s.main_window._projects_view
+            if projects_view is not None:
+                projects_view.refresh()
 
-        if self._s.coordinator is not None:
-            self._s.coordinator.invalidate()
-
-        projects_view = self._s.main_window._projects_view
-        if projects_view is not None:
-            projects_view.refresh()
-
-        return json.dumps({'ok': True, 'action': 'add_project', 'path': arg})
+        return json.dumps(result)
 
     def _handle_remove_project(self, arg: str | None) -> str:
         """Remove a directory from the porringer cache."""
-        if not arg:
-            return json.dumps({'error': 'remove_project requires a path argument'})
+        from synodic_client.operations.project import run_project_action
 
-        from synodic_client.operations.project import remove_project
+        result = run_project_action('remove_project', arg, self._s.porringer)
 
-        remove_project(self._s.porringer, arg)
+        if 'error' not in result:
+            if self._s.coordinator is not None:
+                self._s.coordinator.invalidate()
+            projects_view = self._s.main_window._projects_view
+            if projects_view is not None:
+                projects_view.refresh()
 
-        if self._s.coordinator is not None:
-            self._s.coordinator.invalidate()
-
-        projects_view = self._s.main_window._projects_view
-        if projects_view is not None:
-            projects_view.refresh()
-
-        return json.dumps({'ok': True, 'action': 'remove_project', 'path': arg})
+        return json.dumps(result)
 
     def _handle_project_status(self, arg: str | None) -> str:
         """Dump per-action preview status for a project."""
@@ -243,9 +222,11 @@ class DebugHandler:
                 entry['installer'] = act.installer
             actions.append(entry)
 
-        needed = sum(1 for s in model.action_states if s.status == 'Needed')
-        satisfied = sum(1 for s in model.action_states if '\u2713' in s.status)
-        pending = sum(1 for s in model.action_states if s.status == 'Pending')
+        from synodic_client.operations.schema import classify_status
+
+        needed = sum(1 for s in model.action_states if classify_status(s.status) == 'needed')
+        satisfied = sum(1 for s in model.action_states if classify_status(s.status) == 'satisfied')
+        pending = sum(1 for s in model.action_states if classify_status(s.status) == 'pending')
         upgradable = len(model.upgradable_keys)
 
         return json.dumps({

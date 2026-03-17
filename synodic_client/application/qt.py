@@ -13,7 +13,6 @@ from collections.abc import Callable
 
 import qasync
 from porringer.api import API
-from porringer.schema import LocalConfiguration
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -29,12 +28,9 @@ from synodic_client.application.uri import parse_uri
 from synodic_client.client import Client
 from synodic_client.config import set_dev_mode
 from synodic_client.logging import configure_logging, log_path, set_debug_level
+from synodic_client.operations.bootstrap import init_services
 from synodic_client.protocol import extract_uri_from_args
-from synodic_client.resolution import (
-    ResolvedConfig,
-    resolve_config,
-    resolve_update_config,
-)
+from synodic_client.resolution import ResolvedConfig
 from synodic_client.subprocess_patch import apply as _apply_subprocess_patch
 from synodic_client.updater import initialize_velopack
 
@@ -42,27 +38,14 @@ from synodic_client.updater import initialize_velopack
 def _init_services(logger: logging.Logger) -> tuple[Client, API, ResolvedConfig]:
     """Create and configure core services.
 
+    Delegates to :func:`~synodic_client.operations.bootstrap.init_services`
+    and adds GUI-specific debug logging.
+
     Returns:
         A (Client, porringer API, resolved config) tuple.
     """
-    config = resolve_config()
-    client = Client()
+    client, porringer, config = init_services()
 
-    local_config = LocalConfiguration()
-    porringer = API(local_config)
-
-    update_config = resolve_update_config(config)
-    client.initialize_updater(update_config)
-
-    cached_dirs = porringer.cache.list_directories()
-
-    logger.info(
-        'Synodic Client v%s started (channel: %s, source: %s, cached_projects: %d)',
-        client.version,
-        update_config.channel.name,
-        update_config.repo_url,
-        len(cached_dirs),
-    )
     logger.debug(
         'Resolved config: update_source=%s update_channel=%s auto_update=%dm tool_update=%dm '
         'auto_apply=%s auto_start=%s debug_logging=%s prerelease_packages=%s plugin_auto_update=%s',

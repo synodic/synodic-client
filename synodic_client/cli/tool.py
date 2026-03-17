@@ -33,9 +33,7 @@ def tool_check(
     from synodic_client.operations.tool import check_tool_updates
 
     _, porringer, _ = get_services()
-    directories = porringer.cache.list_directories(validate=True, check_manifest=True)
-    manifest_dirs = [d.directory for d in directories if d.has_manifest]
-    available = asyncio.run(check_tool_updates(porringer, manifest_dirs))
+    available = asyncio.run(check_tool_updates(porringer))
     render(available, as_json=json_output)
 
 

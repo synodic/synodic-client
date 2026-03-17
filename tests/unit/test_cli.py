@@ -194,13 +194,13 @@ class TestConfigCli:
     @staticmethod
     def test_config_get_unknown_key() -> None:
         """Config get with unknown key exits code 1."""
-        from synodic_client.schema import ResolvedConfig
-
-        mock_config = ResolvedConfig.__new__(ResolvedConfig)
-        with patch('synodic_client.operations.config.get_config', return_value=mock_config):
+        with patch(
+            'synodic_client.operations.config.get_config_value',
+            side_effect=KeyError("Unknown config key: 'nonexistent_key_xyz'"),
+        ):
             result = runner.invoke(app, ['config', 'get', 'nonexistent_key_xyz'])
             assert result.exit_code == 1
-            assert 'Unknown key' in result.output
+            assert 'Unknown config key' in result.output
 
     @staticmethod
     def test_config_set_unknown_key() -> None:
@@ -284,54 +284,98 @@ class TestDebugCli:
     """Tests for synodic-c debug sub-commands."""
 
     @staticmethod
-    def test_debug_state() -> None:
-        """Debug state prints JSON from IPC."""
+    def test_debug_state_live() -> None:
+        """Debug state --live prints JSON from IPC."""
         response = json.dumps({'app': {'version': '1.0.0'}})
         with (
             patch('synodic_client.application.instance.SingleInstance') as mock_si,
             patch('synodic_client.config.set_dev_mode'),
         ):
             mock_si.send_debug_command.return_value = response
-            result = runner.invoke(app, ['debug', 'state'])
+            result = runner.invoke(app, ['debug', 'state', '--live'])
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert data['app']['version'] == '1.0.0'
 
     @staticmethod
-    def test_debug_actions() -> None:
-        """Debug actions prints the actions dict."""
+    def test_debug_actions_live() -> None:
+        """Debug actions --live prints the actions dict."""
         response = json.dumps({'actions': {'check_update': 'Trigger check.'}})
         with (
             patch('synodic_client.application.instance.SingleInstance') as mock_si,
             patch('synodic_client.config.set_dev_mode'),
         ):
             mock_si.send_debug_command.return_value = response
-            result = runner.invoke(app, ['debug', 'actions'])
+            result = runner.invoke(app, ['debug', 'actions', '--live'])
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert 'actions' in data
 
     @staticmethod
-    def test_debug_action_with_arg() -> None:
-        """Debug action sends action:<name>:<arg>."""
+    def test_debug_action_with_arg_live() -> None:
+        """Debug action --live sends action:<name>:<arg>."""
         response = json.dumps({'ok': True})
         with (
             patch('synodic_client.application.instance.SingleInstance') as mock_si,
             patch('synodic_client.config.set_dev_mode'),
         ):
             mock_si.send_debug_command.return_value = response
-            result = runner.invoke(app, ['debug', 'action', 'add_project', '/tmp/foo'])
+            result = runner.invoke(app, ['debug', 'action', 'add_project', '/tmp/foo', '--live'])
             assert result.exit_code == 0
             mock_si.send_debug_command.assert_called_once_with('action:add_project:/tmp/foo')
 
     @staticmethod
-    def test_debug_error_response_exits_1() -> None:
-        """An error response causes exit code 1."""
+    def test_debug_error_response_exits_1_live() -> None:
+        """An error response from IPC causes exit code 1."""
         response = json.dumps({'error': 'not found'})
         with (
             patch('synodic_client.application.instance.SingleInstance') as mock_si,
             patch('synodic_client.config.set_dev_mode'),
         ):
             mock_si.send_debug_command.return_value = response
-            result = runner.invoke(app, ['debug', 'state'])
+            result = runner.invoke(app, ['debug', 'state', '--live'])
             assert result.exit_code == 1
+
+    @staticmethod
+    def test_debug_actions_headless() -> None:
+        """Debug actions (headless default) returns the actions dict."""
+        with patch('synodic_client.config.set_dev_mode'):
+            result = runner.invoke(app, ['debug', 'actions'])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert 'actions' in data
+        assert 'project_status' in data['actions']
+
+    @staticmethod
+    def test_debug_state_headless() -> None:
+        """Debug state (headless default) returns app and config sections."""
+        with (
+            patch('synodic_client.cli.context.get_services') as mock_services,
+            patch('synodic_client.config.set_dev_mode'),
+            patch('synodic_client.config.is_dev_mode', return_value=False),
+        ):
+            mock_client = MagicMock()
+            mock_client.version = '1.2.3'
+            mock_porringer = MagicMock()
+            mock_porringer.cache.list_directories.return_value = []
+            mock_config = MagicMock(spec=[])  # empty spec to make dataclasses.asdict work
+            mock_services.return_value = (mock_client, mock_porringer, mock_config)
+
+            # dataclasses.asdict requires a real dataclass; patch it
+            with patch('synodic_client.cli.debug.dataclasses') as mock_dc:
+                mock_dc.asdict.return_value = {'channel': 'stable'}
+                result = runner.invoke(app, ['debug', 'state'])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data['app']['version'] == '1.2.3'
+        assert data['app']['headless'] is True
+
+    @staticmethod
+    def test_debug_gui_only_action_headless() -> None:
+        """GUI-only actions without --live return an error."""
+        with patch('synodic_client.config.set_dev_mode'):
+            result = runner.invoke(app, ['debug', 'action', 'show_main'])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert '--live' in data['error']

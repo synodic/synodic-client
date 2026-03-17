@@ -32,17 +32,14 @@ def config_get(
     ] = False,
 ) -> None:
     """Print the current value of a config key."""
-    import dataclasses
+    from synodic_client.operations.config import get_config_value
 
-    from synodic_client.operations.config import get_config
+    try:
+        value = get_config_value(key)
+    except KeyError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
 
-    config = get_config()
-    fields = {f.name for f in dataclasses.fields(config)}
-    if key not in fields:
-        typer.echo(f'Unknown key: {key!r}. Valid keys: {sorted(fields)}', err=True)
-        raise typer.Exit(code=1)
-
-    value = getattr(config, key)
     render({key: value}, as_json=json_output)
 
 

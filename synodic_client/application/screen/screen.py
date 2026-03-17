@@ -1045,14 +1045,10 @@ class ToolsView(QWidget):
         """
         actions: list[SetupAction] = []
         try:
+            from synodic_client.operations.project import find_manifest
+
             path = Path(directory.path)
-            filenames = self._porringer.sync.manifest_filenames()
-            manifest_path: Path | None = None
-            for fname in filenames:
-                candidate = path / fname
-                if candidate.exists():
-                    manifest_path = candidate
-                    break
+            manifest_path = find_manifest(self._porringer, path)
 
             if manifest_path is None:
                 return actions
@@ -1177,19 +1173,10 @@ class ToolsView(QWidget):
         if self._coordinator is not None:
             return await self._check_updates_via_coordinator()
 
-        # Legacy per-directory fallback
-        available: dict[str, dict[str, str]] = {}
+        # Legacy per-directory fallback — delegate to the operations layer
+        from synodic_client.operations.tool import check_tool_updates
 
-        async def _check_one(directory: ManifestDirectory) -> None:
-            partial = await self._check_directory_updates(directory)
-            for installer, packages in partial.items():
-                available.setdefault(installer, {}).update(packages)
-
-        async with asyncio.TaskGroup() as tg:
-            for d in directories:
-                tg.create_task(_check_one(d))
-
-        return available
+        return await check_tool_updates(self._porringer, directories)
 
     async def _check_updates_via_coordinator(self) -> dict[str, dict[str, str]]:
         """Use the coordinator's ``check_updates`` for efficient detection.
@@ -1223,48 +1210,6 @@ class ToolsView(QWidget):
                             latest = str(pi.latest_version) if pi.latest_version else ''
                             available.setdefault(composite, {})[pi.name] = latest
 
-        return available
-
-    async def _check_directory_updates(
-        self,
-        directory: ManifestDirectory,
-    ) -> dict[str, dict[str, str]]:
-        """Check a single directory for available updates (dry-run).
-
-        Legacy fallback used when no coordinator is available.
-        """
-        available: dict[str, dict[str, str]] = {}
-        try:
-            path = Path(directory.path)
-            filenames = self._porringer.sync.manifest_filenames()
-            manifest_path: Path | None = None
-            for fname in filenames:
-                candidate = path / fname
-                if candidate.exists():
-                    manifest_path = candidate
-                    break
-
-            if manifest_path is None:
-                return available
-
-            params = SetupParameters(
-                paths=[str(manifest_path)],
-                dry_run=True,
-                project_directory=path,
-            )
-            async for event in self._porringer.sync.execute_stream(params):
-                if isinstance(event, ActionCompletedEvent) and event.result.skip_reason == SkipReason.UPDATE_AVAILABLE:
-                    action = event.result.action
-                    if action.installer and action.package:
-                        pkg_name = str(action.package.name)
-                        latest = event.result.available_version or ''
-                        available.setdefault(action.installer, {})[pkg_name] = latest
-        except Exception:
-            logger.debug(
-                'Could not detect updates for %s',
-                directory.path,
-                exc_info=True,
-            )
         return available
 
     async def _deferred_update_check(self) -> None:

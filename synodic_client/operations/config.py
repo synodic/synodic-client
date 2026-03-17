@@ -22,6 +22,27 @@ def get_config() -> ResolvedConfig:
     return resolve_config()
 
 
+def get_config_value(key: str) -> object:
+    """Read a single configuration key.
+
+    Args:
+        key: The :class:`ResolvedConfig` field name.
+
+    Returns:
+        The current value of the field.
+
+    Raises:
+        KeyError: If *key* is not a recognised config field.
+    """
+    valid_keys = {f.name for f in dataclasses.fields(ResolvedConfig)}
+    if key not in valid_keys:
+        msg = f'Unknown config key: {key!r}. Valid keys: {sorted(valid_keys)}'
+        raise KeyError(msg)
+
+    config = resolve_config()
+    return getattr(config, key)
+
+
 def set_config(key: str, value: object) -> ResolvedConfig:
     """Update a single configuration key and return the new config.
 

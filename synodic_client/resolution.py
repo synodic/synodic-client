@@ -191,12 +191,9 @@ def resolve_auto_update_scope(
 ) -> tuple[set[str] | None, set[str] | None]:
     """Derive plugin and package include-lists for auto-update.
 
-    Walks ``plugin_auto_update`` to determine which plugins and packages
-    should participate in automatic updates.  When a plugin entry is a
-    nested ``dict[str, bool]``, individual packages can be toggled on or
-    off.  Packages not listed in the config inherit a manifest-aware
-    default: **ON** if the package appears in *manifest_packages* for
-    that plugin, **OFF** otherwise.
+    Convenience wrapper around
+    :func:`synodic_client.operations.tool.resolve_auto_update_scope`
+    that extracts ``plugin_auto_update`` from a resolved config.
 
     Args:
         config: A resolved configuration snapshot.
@@ -209,68 +206,6 @@ def resolve_auto_update_scope(
         A ``(enabled_plugins, include_packages)`` tuple.  Either element
         may be ``None`` meaning "no filtering".
     """
-    mapping = config.plugin_auto_update
+    from synodic_client.operations.tool import resolve_auto_update_scope as _resolve
 
-    # --- Determine enabled plugins ---
-    disabled_plugins: set[str] = set()
-    per_package_entries: dict[str, dict[str, bool]] = {}
-
-    if mapping:
-        for name, value in mapping.items():
-            # Skip runtime-scoped composite keys ("plugin:tag"); they
-            # are only relevant for on-demand runtime updates.
-            if ':' in name:
-                continue
-            if value is False:
-                disabled_plugins.add(name)
-            elif isinstance(value, dict):
-                per_package_entries[name] = value
-
-    enabled_plugins: set[str] | None = None
-    if disabled_plugins:
-        enabled_plugins = {n for n in all_plugin_names if n not in disabled_plugins}
-
-    # --- Determine include_packages ---
-    include_packages = _build_include_packages(
-        per_package_entries,
-        manifest_packages,
-        disabled_plugins,
-    )
-
-    return enabled_plugins, include_packages
-
-
-def _build_include_packages(
-    per_package_entries: dict[str, dict[str, bool]],
-    manifest_packages: dict[str, set[str]] | None,
-    disabled_plugins: set[str],
-) -> set[str] | None:
-    """Build the set of package names eligible for auto-update.
-
-    Only builds the set when there are per-package overrides or
-    manifest data that distinguishes global from manifest-required.
-
-    Returns:
-        A set of package names, or ``None`` when no filtering is needed.
-    """
-    if not per_package_entries and not manifest_packages:
-        return None
-
-    # Start with manifest-referenced packages (auto-update ON by default)
-    pkg_set: set[str] = set()
-    if manifest_packages:
-        for plugin_name, pkgs in manifest_packages.items():
-            if plugin_name not in disabled_plugins:
-                pkg_set |= pkgs
-
-    # Apply per-package config overrides
-    for plugin_name, pkg_map in per_package_entries.items():
-        if plugin_name in disabled_plugins:
-            continue
-        for pkg_name, enabled in pkg_map.items():
-            if enabled:
-                pkg_set.add(pkg_name)
-            else:
-                pkg_set.discard(pkg_name)
-
-    return pkg_set or None
+    return _resolve(config.plugin_auto_update, all_plugin_names, manifest_packages)

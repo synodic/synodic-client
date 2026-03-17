@@ -2,9 +2,8 @@
 
 :class:`ToolUpdateOrchestrator` owns the background tool update
 lifecycle — periodic polling, single-plugin / single-package updates,
-and package removal — delegating actual work to
-:func:`~synodic_client.application.workers.run_tool_updates` and
-:func:`~synodic_client.application.workers.run_package_remove`.
+and package removal — delegating actual work to the operations layer
+(``synodic_client.operations.tool``).
 """
 
 from __future__ import annotations
@@ -16,19 +15,21 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from porringer.api import API
-from porringer.core.schema import PackageRef
-from porringer.schema.execution import SetupActionResult
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QSystemTrayIcon
 
-from synodic_client.application.schema import ToolUpdateResult, UpdateTarget
+from synodic_client.application.schema import UpdateTarget
 from synodic_client.application.screen.screen import MainWindow, ToolsView
-from synodic_client.application.workers import (
-    run_runtime_package_updates,
-    run_tool_updates,
+from synodic_client.operations.schema import UpdateResult
+from synodic_client.operations.tool import (
+    parse_plugin_key,
+    remove_package,
+    resolve_auto_update_scope,
+    update_all_tools,
+    update_runtime_plugin,
+    update_tool,
 )
 from synodic_client.resolution import (
-    resolve_auto_update_scope,
     resolve_update_config,
 )
 
@@ -36,17 +37,6 @@ if TYPE_CHECKING:
     from synodic_client.application.config_store import ConfigStore
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_plugin_key(name: str) -> tuple[str, str | None]:
-    """Split a composite ``'plugin:tag'`` key into ``(bare_name, tag)``.
-
-    Returns ``(name, None)`` when there is no tag component.
-    """
-    if ':' in name:
-        bare, tag = name.split(':', 1)
-        return bare, tag
-    return name, None
 
 
 class ToolUpdateOrchestrator:
@@ -215,16 +205,16 @@ class ToolUpdateOrchestrator:
 
         all_names = [p.name for p in all_plugins if p.installed]
         enabled_plugins, include_packages = resolve_auto_update_scope(
-            config,
+            config.plugin_auto_update,
             all_names,
         )
 
         try:
-            result = await run_tool_updates(
+            result = await update_all_tools(
                 porringer,
                 plugins=enabled_plugins,
                 include_packages=include_packages,
-                discovered_plugins=discovered,
+                discovered=discovered,
             )
             if coordinator is not None:
                 coordinator.invalidate()
@@ -254,7 +244,7 @@ class ToolUpdateOrchestrator:
         if tools_view is not None:
             tools_view.set_plugin_updating(plugin_name, True)
 
-        bare_plugin, runtime_tag = _parse_plugin_key(plugin_name)
+        bare_plugin, runtime_tag = parse_plugin_key(plugin_name)
         if runtime_tag is not None:
             self._set_task(
                 self._async_runtime_plugin_update(porringer, plugin_name, bare_plugin, runtime_tag),
@@ -285,12 +275,12 @@ class ToolUpdateOrchestrator:
                 include_packages = enabled_pkgs
 
         try:
-            result = await run_runtime_package_updates(
+            result = await update_runtime_plugin(
                 porringer,
                 plugin_name,
                 runtime_tag,
                 include_packages=include_packages,
-                discovered_plugins=discovered,
+                discovered=discovered,
             )
             if coordinator is not None:
                 coordinator.invalidate()
@@ -304,25 +294,14 @@ class ToolUpdateOrchestrator:
 
     async def _async_single_plugin_update(self, porringer: API, plugin_name: str) -> None:
         """Run a single-plugin tool update and route results."""
-        config = self._store.config
-        mapping = config.plugin_auto_update or {}
-        pkg_entry = mapping.get(plugin_name)
         coordinator = self._window.coordinator
         discovered = coordinator.discovered_plugins if coordinator is not None else None
 
-        # Resolve per-package filtering for this plugin
-        include_packages: set[str] | None = None
-        if isinstance(pkg_entry, dict):
-            enabled_pkgs = {name for name, enabled in pkg_entry.items() if enabled}
-            if enabled_pkgs:
-                include_packages = enabled_pkgs
-
         try:
-            result = await run_tool_updates(
+            result = await update_all_tools(
                 porringer,
                 plugins={plugin_name},
-                include_packages=include_packages,
-                discovered_plugins=discovered,
+                discovered=discovered,
             )
             if coordinator is not None:
                 coordinator.invalidate()
@@ -361,39 +340,21 @@ class ToolUpdateOrchestrator:
 
         When *plugin_name* is a composite ``"plugin:tag"`` key the
         upgrade is scoped to that runtime tag via
-        ``porringer.package.upgrade(runtime_tag=...)``.
+        ``update_tool(runtime_tag=...)``.
         """
         coordinator = self._window.coordinator
         discovered = coordinator.discovered_plugins if coordinator is not None else None
 
         target = UpdateTarget(plugin=plugin_name, package=package_name)
-        bare_plugin, runtime_tag = _parse_plugin_key(plugin_name)
-        if runtime_tag is not None:
-            try:
-                result = await run_runtime_package_updates(
-                    porringer,
-                    bare_plugin,
-                    runtime_tag,
-                    include_packages={package_name},
-                    discovered_plugins=discovered,
-                )
-                if coordinator is not None:
-                    coordinator.invalidate()
-                self._on_tool_update_finished(result, target)
-            except asyncio.CancelledError:
-                logger.debug('Runtime package update cancelled (shutdown)')
-                raise
-            except Exception as exc:
-                logger.exception('Runtime package update failed')
-                self._fail_package_update(plugin_name, package_name, f'Update failed: {exc}')
-            return
+        bare_plugin, runtime_tag = parse_plugin_key(plugin_name)
 
         try:
-            result = await run_tool_updates(
+            result = await update_tool(
                 porringer,
-                plugins={plugin_name},
-                include_packages={package_name},
-                discovered_plugins=discovered,
+                bare_plugin,
+                package_name,
+                runtime_tag=runtime_tag,
+                discovered=discovered,
             )
             if coordinator is not None:
                 coordinator.invalidate()
@@ -409,7 +370,7 @@ class ToolUpdateOrchestrator:
 
     def _on_tool_update_finished(
         self,
-        result: ToolUpdateResult,
+        result: UpdateResult,
         target: UpdateTarget | None = None,
     ) -> None:
         """Handle tool update completion.
@@ -423,7 +384,7 @@ class ToolUpdateOrchestrator:
             'Tool update completed: %d manifest(s), %d updated, %d already latest, %d failed',
             result.manifests_processed,
             result.updated,
-            result.already_latest,
+            len(result.already_latest),
             result.failed,
         )
 
@@ -487,28 +448,25 @@ class ToolUpdateOrchestrator:
         coordinator = self._window.coordinator
         discovered = coordinator.discovered_plugins if coordinator is not None else None
 
-        bare_plugin, runtime_tag = _parse_plugin_key(plugin_name)
+        bare_plugin, runtime_tag = parse_plugin_key(plugin_name)
 
         try:
-            package_ref = PackageRef(name=package_name)
-            result = await porringer.package.uninstall(
+            success = await remove_package(
+                porringer,
                 bare_plugin,
-                package_ref,
+                package_name,
                 runtime_tag=runtime_tag,
-                plugins=discovered,
+                discovered=discovered,
             )
             logger.info(
-                'Removal result for %s/%s: success=%s, skipped=%s, skip_reason=%s, message=%s',
+                'Removal result for %s/%s: success=%s',
                 plugin_name,
                 package_name,
-                result.success,
-                result.skipped,
-                result.skip_reason,
-                result.message,
+                success,
             )
             if coordinator is not None:
                 coordinator.invalidate()
-            self._on_package_remove_finished(result, plugin_name, package_name)
+            self._on_package_remove_finished(success, plugin_name, package_name)
         except asyncio.CancelledError:
             logger.debug('Package removal cancelled (shutdown)')
             raise
@@ -523,18 +481,17 @@ class ToolUpdateOrchestrator:
 
     def _on_package_remove_finished(
         self,
-        result: SetupActionResult,
+        success: bool,
         plugin_name: str,
         package_name: str,
     ) -> None:
         """Handle package removal completion."""
-        if not result.success or result.skipped:
-            detail = result.message or 'Unknown error'
-            logger.warning('Package removal failed for %s/%s: %s', plugin_name, package_name, detail)
+        if not success:
+            logger.warning('Package removal failed for %s/%s', plugin_name, package_name)
             self._fail_package_update(
                 plugin_name,
                 package_name,
-                f'Could not remove {package_name}: {detail}',
+                f'Could not remove {package_name}',
                 removing=True,
             )
             return

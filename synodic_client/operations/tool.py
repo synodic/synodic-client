@@ -31,13 +31,29 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Plugin key parsing
+# ---------------------------------------------------------------------------
+
+
+def parse_plugin_key(name: str) -> tuple[str, str | None]:
+    """Split a composite ``'plugin:tag'`` key into ``(bare_name, tag)``.
+
+    Returns ``(name, None)`` when there is no tag component.
+    """
+    if ':' in name:
+        bare, tag = name.split(':', 1)
+        return bare, tag
+    return name, None
+
+
+# ---------------------------------------------------------------------------
 # Update-check
 # ---------------------------------------------------------------------------
 
 
 async def check_tool_updates(
     porringer: API,
-    directories: list[ManifestDirectory],
+    directories: list[ManifestDirectory] | None = None,
     discovered: DiscoveredPlugins | None = None,
 ) -> dict[str, dict[str, str]]:
     """Detect available updates across cached manifests.
@@ -45,23 +61,30 @@ async def check_tool_updates(
     Returns ``{plugin_name: {package_name: latest_version}}`` for
     packages that have a newer version available.
 
+    When *directories* is ``None`` the function fetches and filters
+    the cached directory list internally.
+
     Args:
         porringer: The porringer API instance.
-        directories: Cached project directories to scan.
+        directories: Cached project directories to scan.  ``None``
+            means fetch from the cache automatically.
         discovered: Pre-discovered plugins to avoid redundant discovery.
     """
+    if directories is None:
+        loop = asyncio.get_running_loop()
+        dir_results = await loop.run_in_executor(
+            None,
+            lambda: porringer.cache.list_directories(validate=True, check_manifest=True),
+        )
+        directories = [dr.directory for dr in dir_results if dr.has_manifest]
     available: dict[str, dict[str, str]] = {}
 
     async def _check_one(directory: ManifestDirectory) -> None:
         try:
+            from synodic_client.operations.project import find_manifest
+
             path = Path(directory.path)
-            filenames = porringer.sync.manifest_filenames()
-            manifest_path: Path | None = None
-            for fname in filenames:
-                candidate = path / fname
-                if candidate.exists():
-                    manifest_path = candidate
-                    break
+            manifest_path = find_manifest(porringer, path)
 
             if manifest_path is None:
                 return
@@ -132,13 +155,14 @@ async def update_tool(
             result.already_latest.append(package_name)
         elif action_result.success:
             result.packages_updated.append(package_name)
+            result.updated_packages.add(package_name)
         else:
             result.packages_failed.append(package_name)
         return result
 
     # Full-plugin update: re-sync all cached manifests for this plugin.
     if runtime_tag is not None:
-        return await _update_runtime_plugin(
+        return await update_runtime_plugin(
             porringer,
             plugin_name,
             runtime_tag,
@@ -159,42 +183,16 @@ async def _update_plugin_via_manifests(
     discovered: DiscoveredPlugins | None = None,
 ) -> UpdateResult:
     """Re-sync cached manifests scoped to a single plugin."""
-    result = UpdateResult(plugin=plugin_name)
-    loop = asyncio.get_running_loop()
-    dir_results = await loop.run_in_executor(
-        None,
-        lambda: porringer.cache.list_directories(validate=True, check_manifest=True),
+    result = await update_all_tools(
+        porringer,
+        plugins={plugin_name},
+        discovered=discovered,
     )
-
-    for dr in dir_results:
-        if not dr.has_manifest:
-            continue
-        path = Path(dr.directory.path)
-        params = SetupParameters(
-            paths=[path],
-            project_directory=path if path.is_dir() else None,
-            strategy=SyncStrategy.LATEST,
-            plugins={plugin_name},
-        )
-        try:
-            async for event in porringer.sync.execute_stream(params, plugins=discovered):
-                if not isinstance(event, ActionCompletedEvent):
-                    continue
-                ar = event.result
-                pkg_name = str(ar.action.package.name) if ar.action.package else ''
-                if ar.skipped:
-                    if ar.skip_reason in {SkipReason.ALREADY_LATEST, SkipReason.ALREADY_INSTALLED}:
-                        result.already_latest.append(pkg_name)
-                elif ar.success:
-                    result.packages_updated.append(pkg_name)
-                else:
-                    result.packages_failed.append(pkg_name)
-        except asyncio.CancelledError:
-            raise
+    result.plugin = plugin_name
     return result
 
 
-async def _update_runtime_plugin(
+async def update_runtime_plugin(
     porringer: API,
     plugin_name: str,
     runtime_tag: str,
@@ -225,6 +223,7 @@ async def _update_runtime_plugin(
                 result.already_latest.append(pkg_name)
             elif ar.success:
                 result.packages_updated.append(pkg_name)
+                result.updated_packages.add(pkg_name)
             else:
                 result.packages_failed.append(pkg_name)
         break
@@ -236,6 +235,7 @@ async def remove_package(
     plugin_name: str,
     package_name: str,
     *,
+    runtime_tag: str | None = None,
     discovered: DiscoveredPlugins | None = None,
 ) -> bool:
     """Uninstall a single package.
@@ -244,13 +244,16 @@ async def remove_package(
         porringer: The porringer API instance.
         plugin_name: The installer plugin name.
         package_name: The package to remove.
+        runtime_tag: Optional runtime tag for per-runtime removal.
         discovered: Pre-discovered plugins.
 
     Returns:
         ``True`` if the removal succeeded.
     """
     ref = PackageRef(name=package_name)
-    action_result = await porringer.package.uninstall(plugin_name, ref, plugins=discovered)
+    action_result = await porringer.package.uninstall(
+        plugin_name, ref, runtime_tag=runtime_tag, plugins=discovered,
+    )
     return action_result.success
 
 
@@ -301,10 +304,13 @@ async def update_all_tools(
                         result.already_latest.append(pkg_name)
                 elif ar.success:
                     result.packages_updated.append(pkg_name)
+                    if pkg_name:
+                        result.updated_packages.add(pkg_name)
                 else:
                     result.packages_failed.append(pkg_name)
         except asyncio.CancelledError:
             raise
+        result.manifests_processed += 1
 
     return result
 

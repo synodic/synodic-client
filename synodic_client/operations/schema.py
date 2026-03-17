@@ -50,6 +50,22 @@ def resolve_action_status(result: SetupActionResult, action: SetupAction) -> str
     return 'Needed'
 
 
+def classify_status(status: str) -> str:
+    """Classify a resolved status string into a summary bucket.
+
+    Returns one of ``'needed'``, ``'satisfied'``, ``'pending'``, or
+    ``'unknown'``.  Upgradability is determined separately from skip
+    reason, so it is not included here.
+    """
+    if status == 'Needed':
+        return 'needed'
+    if '\u2713' in status or status in {'Already installed', 'Already latest'}:
+        return 'satisfied'
+    if status == 'Pending':
+        return 'pending'
+    return 'unknown'
+
+
 # ---------------------------------------------------------------------------
 # Preview stream events
 # ---------------------------------------------------------------------------
@@ -206,6 +222,18 @@ class UpdateResult:
     packages_updated: list[str] = field(default_factory=list)
     packages_failed: list[str] = field(default_factory=list)
     already_latest: list[str] = field(default_factory=list)
+    manifests_processed: int = 0
+    updated_packages: set[str] = field(default_factory=set)
+
+    @property
+    def updated(self) -> int:
+        """Number of packages successfully updated."""
+        return len(self.packages_updated)
+
+    @property
+    def failed(self) -> int:
+        """Number of packages that failed to update."""
+        return len(self.packages_failed)
 
 
 # ---------------------------------------------------------------------------
@@ -261,3 +289,33 @@ class ConfigKeyInfo:
     type_hint: str = ''
     description: str = ''
     current_value: object = None
+
+
+# ---------------------------------------------------------------------------
+# Debug actions registry
+# ---------------------------------------------------------------------------
+
+DEBUG_ACTIONS: dict[str, str] = {
+    'check_update': 'Trigger a self-update check.',
+    'tool_update': 'Run tool/package updates for all plugins.',
+    'refresh_data': 'Mark cached data as stale (next refresh re-fetches).',
+    'show_main': 'Show and raise the main window.',
+    'show_settings': 'Show the settings window.',
+    'apply_update': 'Apply a downloaded update and restart.',
+    'list_projects': 'List cached project directories with validation status.',
+    'add_project': 'Add a directory to the project cache. Arg: <path>',
+    'remove_project': 'Remove a directory from the project cache. Arg: <path>',
+    'project_status': 'Dump per-action preview status. Arg (optional): <path>',
+    'select_project': 'Select a project in the sidebar. Arg: <path>',
+}
+
+#: Actions that require a live GUI instance (IPC via ``--live``).
+GUI_ONLY_ACTIONS: frozenset[str] = frozenset({
+    'check_update',
+    'tool_update',
+    'refresh_data',
+    'show_main',
+    'show_settings',
+    'apply_update',
+    'select_project',
+})

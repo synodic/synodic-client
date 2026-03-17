@@ -7,7 +7,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from synodic_client.application.config_store import ConfigStore
-from synodic_client.application.schema import ToolUpdateResult, UpdateTarget
+from synodic_client.application.schema import UpdateTarget
+from synodic_client.operations.schema import UpdateResult
 from synodic_client.application.screen.tray import TrayScreen
 from synodic_client.resolution import ResolvedConfig
 from synodic_client.schema import DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES, DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
@@ -58,21 +59,21 @@ class TestToolUpdateWindowShow:
     @staticmethod
     def test_auto_update_does_not_show_window(tray_screen) -> None:
         """Periodic (automatic) tool update must not bring the window forward."""
-        result = ToolUpdateResult(manifests_processed=1, updated=1)
+        result = UpdateResult(manifests_processed=1, packages_updated=['pkg'])
         tray_screen._tool_orchestrator._on_tool_update_finished(result)
         tray_screen._window.show.assert_not_called()
 
     @staticmethod
     def test_manual_plugin_update_shows_window(tray_screen) -> None:
         """A user-initiated single-plugin update should show the window."""
-        result = ToolUpdateResult(manifests_processed=1, updated=1)
+        result = UpdateResult(manifests_processed=1, packages_updated=['pkg'])
         tray_screen._tool_orchestrator._on_tool_update_finished(result, UpdateTarget(plugin='pipx'))
         tray_screen._window.show.assert_called_once()
 
     @staticmethod
     def test_manual_package_update_shows_window(tray_screen) -> None:
         """A user-initiated single-package update should show the window."""
-        result = ToolUpdateResult(manifests_processed=1, updated=1)
+        result = UpdateResult(manifests_processed=1, packages_updated=['pkg'])
         tray_screen._tool_orchestrator._on_tool_update_finished(
             result,
             UpdateTarget(plugin='pipx', package='ruff'),
@@ -82,6 +83,6 @@ class TestToolUpdateWindowShow:
     @staticmethod
     def test_auto_update_with_no_changes_does_not_show(tray_screen) -> None:
         """An automatic check with nothing to update must stay hidden."""
-        result = ToolUpdateResult(manifests_processed=1, already_latest=1)
+        result = UpdateResult(manifests_processed=1, already_latest=['pkg'])
         tray_screen._tool_orchestrator._on_tool_update_finished(result)
         tray_screen._window.show.assert_not_called()

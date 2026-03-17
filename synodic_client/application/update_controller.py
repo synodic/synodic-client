@@ -29,12 +29,12 @@ from synodic_client.application.theme import (
     UPDATE_STATUS_UP_TO_DATE_STYLE,
 )
 from synodic_client.application.update_model import UpdateModel
-from synodic_client.application.workers import check_for_update, download_update
+from synodic_client.operations.schema import UpdateCheckResult
+from synodic_client.operations.update import check_self_update, download_self_update
 from synodic_client.resolution import (
     ResolvedConfig,
     resolve_update_config,
 )
-from synodic_client.schema import UpdateInfo
 from synodic_client.startup import sync_startup
 
 if TYPE_CHECKING:
@@ -295,7 +295,7 @@ class UpdateController:
     async def _async_check(self, *, silent: bool) -> None:
         """Run the update check coroutine and route results."""
         try:
-            result = await check_for_update(self._client)
+            result = await check_self_update(self._client)
             self._on_check_finished(result, silent=silent)
         except asyncio.CancelledError:
             logger.debug('Update check cancelled (shutdown)')
@@ -304,13 +304,9 @@ class UpdateController:
             logger.exception('Update check failed')
             self._on_check_error(str(exc), silent=silent)
 
-    def _on_check_finished(self, result: UpdateInfo | None, *, silent: bool = False) -> None:
+    def _on_check_finished(self, result: UpdateCheckResult, *, silent: bool = False) -> None:
         """Route the update-check result."""
         self._model.set_check_button_enabled(True)
-
-        if result is None:
-            self._report_error('Failed to check for updates.', silent=silent)
-            return
 
         if result.error:
             self._report_error(result.error, silent=silent)
@@ -327,7 +323,7 @@ class UpdateController:
                 logger.debug('Automatic update check: no update available')
             return
 
-        version = str(result.latest_version)
+        version = result.version or result.current_version
 
         # Already downloaded — restore the ready state without re-downloading
         if version == self._pending_version:
@@ -361,11 +357,11 @@ class UpdateController:
     async def _async_download(self, version: str, *, silent: bool = False) -> None:
         """Run the download coroutine and route results."""
         try:
-            success = await download_update(
+            dl_result = await download_self_update(
                 self._client,
                 on_progress=self._on_download_progress,
             )
-            self._on_download_finished(success, version, silent=silent)
+            self._on_download_finished(dl_result.success, version, silent=silent)
         except asyncio.CancelledError:
             logger.debug('Update download cancelled (shutdown)')
             raise

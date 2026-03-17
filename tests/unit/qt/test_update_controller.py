@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from packaging.version import Version
-
 from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.screen.update_banner import UpdateBanner
 from synodic_client.application.theme import (
@@ -16,11 +14,11 @@ from synodic_client.application.theme import (
 )
 from synodic_client.application.update_controller import UpdateController
 from synodic_client.application.update_model import UpdateModel
+from synodic_client.operations.schema import UpdateCheckResult
 from synodic_client.resolution import ResolvedConfig
 from synodic_client.schema import (
     DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
     DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
-    UpdateInfo,
 )
 
 # ---------------------------------------------------------------------------
@@ -119,24 +117,27 @@ class TestCheckFinished:
         """A None result should set 'Check failed' in red."""
         ctrl, _app, _client, banner, model = _make_controller()
         spy = ModelSpy(model)
-        ctrl._on_check_finished(None, silent=False)
+        result = UpdateCheckResult(available=False, current_version='1.0.0', error='Updater is not initialized.')
+        ctrl._on_check_finished(result, silent=False)
 
         assert True in spy.check_button_enabled
         assert ('Check failed', UPDATE_STATUS_ERROR_STYLE) in spy.status
 
     @staticmethod
     def test_none_result_shows_banner_when_not_silent() -> None:
-        """A None result with silent=False should show the error banner."""
+        """An error result with silent=False should show the error banner."""
         ctrl, _app, _client, banner, model = _make_controller()
-        ctrl._on_check_finished(None, silent=False)
+        result = UpdateCheckResult(available=False, current_version='1.0.0', error='Updater is not initialized.')
+        ctrl._on_check_finished(result, silent=False)
 
         assert banner.state.name == 'ERROR'
 
     @staticmethod
     def test_none_result_no_banner_when_silent() -> None:
-        """A None result with silent=True should NOT show the error banner."""
+        """An error result with silent=True should NOT show the error banner."""
         ctrl, _app, _client, banner, model = _make_controller()
-        ctrl._on_check_finished(None, silent=True)
+        result = UpdateCheckResult(available=False, current_version='1.0.0', error='Updater is not initialized.')
+        ctrl._on_check_finished(result, silent=True)
 
         assert banner.state.name == 'HIDDEN'
 
@@ -145,7 +146,7 @@ class TestCheckFinished:
         """An error result should set 'Check failed' status."""
         ctrl, _app, _client, banner, model = _make_controller()
         spy = ModelSpy(model)
-        result = UpdateInfo(available=False, current_version=Version('1.0.0'), error='No releases found')
+        result = UpdateCheckResult(available=False, current_version='1.0.0', error='No releases found')
         ctrl._on_check_finished(result, silent=False)
 
         assert ('Check failed', UPDATE_STATUS_ERROR_STYLE) in spy.status
@@ -155,7 +156,7 @@ class TestCheckFinished:
         """No update available should set 'Up to date' in green."""
         ctrl, _app, _client, banner, model = _make_controller()
         spy = ModelSpy(model)
-        result = UpdateInfo(available=False, current_version=Version('1.0.0'))
+        result = UpdateCheckResult(available=False, current_version='1.0.0')
         ctrl._on_check_finished(result, silent=False)
 
         assert ('Up to date', UPDATE_STATUS_UP_TO_DATE_STYLE) in spy.status
@@ -165,7 +166,7 @@ class TestCheckFinished:
         """Available update should set orange status and start download."""
         ctrl, _app, _client, banner, model = _make_controller()
         spy = ModelSpy(model)
-        result = UpdateInfo(available=True, current_version=Version('1.0.0'), latest_version=Version('2.0.0'))
+        result = UpdateCheckResult(available=True, current_version='1.0.0', version='2.0.0')
 
         with patch.object(ctrl, '_start_download') as mock_dl:
             ctrl._on_check_finished(result, silent=False)
@@ -480,7 +481,7 @@ class TestPersistCheckTimestamp:
     def test_on_check_finished_success_syncs_via_store() -> None:
         """A successful check should persist timestamp via the store."""
         ctrl, _app, _client, _banner, model = _make_controller()
-        result = UpdateInfo(available=False, current_version=Version('1.0.0'))
+        result = UpdateCheckResult(available=False, current_version='1.0.0')
 
         fake_resolved = _make_config(last_client_update='2026-03-09T00:00:00+00:00')
         with patch.object(ctrl._store, 'update', return_value=fake_resolved) as mock_update:
@@ -549,7 +550,7 @@ class TestReinitializeUpdater:
             )
             ctrl._reinitialize_updater(new_config)
 
-        result = UpdateInfo(available=True, current_version=Version('1.0.0'), latest_version=Version('2.0.0'))
+        result = UpdateCheckResult(available=True, current_version='1.0.0', version='2.0.0')
         with patch.object(ctrl, '_start_download') as mock_dl:
             ctrl._on_check_finished(result, silent=True)
 

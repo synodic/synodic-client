@@ -26,57 +26,74 @@ The `--dev` flag isolates the development instance from production:
 
 ## Debug CLI
 
-With the app running (`pdm dev`), inspect and control it from another terminal:
+Debug commands run **headlessly** by default — no running GUI instance
+is required.  Data operations (``state``, ``list_projects``,
+``project_status``, etc.) call the porringer API directly.
+
+Pass ``--live`` to route a command over IPC to a running GUI instance.
+This is required for GUI-control actions (``show_main``,
+``check_update``, ``select_project``, etc.) and gives faster responses
+for data queries thanks to the GUI's cached plugin discovery.
 
 ```shell
-pdm run synodic-c debug state --dev              # JSON dump of app state, config, update phase, data
-pdm run synodic-c debug actions --dev            # List available actions with descriptions
-pdm run synodic-c debug action <name> --dev      # Trigger an action (e.g. check_update, show_main)
-pdm run synodic-c debug action <name> <arg> --dev  # Action with argument (e.g. add_project /path)
+# Headless (default) — no GUI needed
+pdm run synodic-c debug state --dev
+pdm run synodic-c debug actions --dev
+pdm run synodic-c debug action list_projects --dev
+pdm run synodic-c debug action project_status D:\example --dev
+pdm run synodic-c debug action add_project D:\my-project --dev
+pdm run synodic-c debug action remove_project D:\my-project --dev
+
+# Live (IPC to running GUI) — requires `pdm dev` in another terminal
+pdm run synodic-c debug state --dev --live
+pdm run synodic-c debug action show_main --dev --live
+pdm run synodic-c debug action check_update --dev --live
+pdm run synodic-c debug action project_status --dev --live        # uses selected project
+pdm run synodic-c debug action select_project D:\example --dev --live
 ```
 
 Available actions: `check_update`, `tool_update`, `refresh_data`, `show_main`, `show_settings`, `apply_update`, `list_projects`, `add_project`, `remove_project`, `project_status`, `select_project`.
 
 ### Project management actions
 
+| Action | Arg | Headless | Description |
+|--------|-----|----------|-------------|
+| `list_projects` | — | ✓ | List cached directories with validation status. |
+| `add_project` | `<path>` | ✓ | Add a directory to the cache (no file picker). |
+| `remove_project` | `<path>` | ✓ | Remove a directory from the cache. |
+| `project_status` | `<path>` | ✓ | Per-action preview status (dry-run). |
+| `select_project` | `<path>` | `--live` | Switch sidebar selection to a project. |
+
+### GUI-only actions (require `--live`)
+
 | Action | Arg | Description |
 |--------|-----|-------------|
-| `list_projects` | — | List cached directories with validation status. |
-| `add_project` | `<path>` | Add a directory to the cache (no file picker). |
-| `remove_project` | `<path>` | Remove a directory from the cache. |
-| `project_status` | `[path]` | Per-action preview status. Defaults to selected project. |
-| `select_project` | `<path>` | Switch sidebar selection to a project. |
-
-Example workflow:
-
-```shell
-pdm run synodic-c debug action list_projects --dev
-pdm run synodic-c debug action show_main --dev
-pdm run synodic-c debug action project_status --dev                # selected project
-pdm run synodic-c debug action project_status D:\example --dev     # specific project
-pdm run synodic-c debug action add_project D:\my-project --dev
-pdm run synodic-c debug action remove_project D:\my-project --dev
-```
+| `check_update` | — | Trigger a self-update check. |
+| `tool_update` | — | Run tool/package updates for all plugins. |
+| `refresh_data` | — | Mark cached data as stale. |
+| `show_main` | — | Show and raise the main window. |
+| `show_settings` | — | Show the settings window. |
+| `apply_update` | — | Apply a downloaded update and restart. |
 
 Commands route to the controller/service layer (not widgets), so they are stable across UI changes.
 
 For production instances, omit `--dev`:
 
 ```shell
-pdm run synodic-c debug state
-pdm run synodic-c debug action check_update
+pdm run synodic-c debug state                       # headless
+pdm run synodic-c debug action check_update --live   # IPC to running GUI
 ```
 
-## IPC Console
+## IPC Console (`--live` mode)
 
-The debug CLI communicates with the running GUI over a local named-pipe IPC channel powered by `QLocalServer` / `QLocalSocket` (PySide6).
+When ``--live`` is passed, the debug CLI communicates with the running GUI over a local named-pipe IPC channel powered by `QLocalServer` / `QLocalSocket` (PySide6).
 
 ### Architecture
 
 ```
 CLI process                             GUI process
 ───────────                             ───────────
-synodic-c debug <cmd>
+synodic-c debug <cmd> --live
   │
   ▼
 SingleInstance.send_debug_command(cmd)
