@@ -20,7 +20,7 @@ from synodic_client.operations.schema import (
     UpdateResult,
 )
 
-runner = CliRunner()
+runner = CliRunner(color=False)
 
 
 class TestCli:
