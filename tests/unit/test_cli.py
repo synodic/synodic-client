@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,7 +21,13 @@ from synodic_client.operations.schema import (
     UpdateResult,
 )
 
-runner = CliRunner(color=False)
+runner = CliRunner()
+
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub('', text)
 
 
 class TestCli:
@@ -38,7 +45,7 @@ class TestCli:
         """Verify --help shows usage information."""
         result = runner.invoke(app, ['--help'])
         assert result.exit_code == 0
-        assert '--uri' in result.output
+        assert '--uri' in _strip_ansi(result.output)
 
     @staticmethod
     def test_launches_application_without_uri() -> None:

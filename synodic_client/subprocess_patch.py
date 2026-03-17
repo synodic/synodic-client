@@ -49,11 +49,13 @@ def apply() -> None:
 _CREATE_NO_WINDOW: int = 0
 _STARTF_USESHOWWINDOW: int = 0
 _SW_HIDE: int = 0
+_StartupInfo: type | None = None
 
 if sys.platform == 'win32':
     _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW  # 0x0800_0000
     _STARTF_USESHOWWINDOW = subprocess.STARTF_USESHOWWINDOW
     _SW_HIDE = 0
+    _StartupInfo = subprocess.STARTUPINFO
 
 
 def _inject_hidden_flags(kwargs: dict[str, Any]) -> None:
@@ -63,12 +65,12 @@ def _inject_hidden_flags(kwargs: dict[str, Any]) -> None:
     preserved.  An existing ``startupinfo`` object is augmented
     rather than overwritten.
     """
-    if sys.platform != 'win32':
+    if _StartupInfo is None:
         return
 
     kwargs['creationflags'] = kwargs.get('creationflags', 0) | _CREATE_NO_WINDOW
 
-    startupinfo = kwargs.get('startupinfo') or subprocess.STARTUPINFO()
+    startupinfo = kwargs.get('startupinfo') or _StartupInfo()
     startupinfo.dwFlags |= _STARTF_USESHOWWINDOW
     startupinfo.wShowWindow = _SW_HIDE
     kwargs['startupinfo'] = startupinfo
