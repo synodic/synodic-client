@@ -33,6 +33,7 @@ class TestUpdateResult:
     def test_fields_are_assignable() -> None:
         """Verify fields can be set via constructor."""
         expected_manifests = 3
+        expected_updated = 2
         expected_packages = {'pdm', 'ruff'}
         result = UpdateResult(
             manifests_processed=expected_manifests,
@@ -42,7 +43,7 @@ class TestUpdateResult:
             updated_packages=expected_packages,
         )
         assert result.manifests_processed == expected_manifests
-        assert result.updated == 2
+        assert result.updated == expected_updated
         assert len(result.already_latest) == 1
         assert result.failed == 0
         assert result.updated_packages == expected_packages

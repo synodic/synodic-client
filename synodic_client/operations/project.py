@@ -8,6 +8,7 @@ calls in → typed results out.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -112,6 +113,33 @@ def remove_project(porringer: API, path: str | Path) -> None:
     porringer.cache.remove_directory(Path(path))
 
 
+def _run_add_project(arg: str | None, porringer: API) -> dict:
+    if not arg:
+        return {'error': 'add_project requires a path argument'}
+    try:
+        add_project(porringer, arg)
+    except (NotADirectoryError, ValueError) as exc:
+        return {'error': str(exc)}
+    return {'ok': True, 'action': 'add_project', 'path': arg}
+
+
+def _run_remove_project(arg: str | None, porringer: API) -> dict:
+    if not arg:
+        return {'error': 'remove_project requires a path argument'}
+    remove_project(porringer, arg)
+    return {'ok': True, 'action': 'remove_project', 'path': arg}
+
+
+def _run_project_status(arg: str | None, porringer: API) -> dict:
+    import asyncio
+    import dataclasses
+
+    if not arg:
+        return {'error': 'project_status requires a path argument in headless mode'}
+    status = asyncio.run(project_status(porringer, arg))
+    return dataclasses.asdict(status)
+
+
 def run_project_action(
     name: str,
     arg: str | None,
@@ -123,33 +151,20 @@ def run_project_action(
     Handles ``list_projects``, ``add_project``, ``remove_project``, and
     ``project_status``.  Unknown actions return ``{'error': …}``.
     """
-    import asyncio
     import dataclasses
 
     if name == 'list_projects':
         projects = list_projects(porringer)
         return {'projects': [dataclasses.asdict(p) for p in projects]}
 
-    if name == 'add_project':
-        if not arg:
-            return {'error': 'add_project requires a path argument'}
-        try:
-            add_project(porringer, arg)
-        except (NotADirectoryError, ValueError) as exc:
-            return {'error': str(exc)}
-        return {'ok': True, 'action': 'add_project', 'path': arg}
-
-    if name == 'remove_project':
-        if not arg:
-            return {'error': 'remove_project requires a path argument'}
-        remove_project(porringer, arg)
-        return {'ok': True, 'action': 'remove_project', 'path': arg}
-
-    if name == 'project_status':
-        if not arg:
-            return {'error': 'project_status requires a path argument in headless mode'}
-        status = asyncio.run(project_status(porringer, arg))
-        return dataclasses.asdict(status)
+    handlers: dict[str, Callable[[str | None, API], dict]] = {
+        'add_project': _run_add_project,
+        'remove_project': _run_remove_project,
+        'project_status': _run_project_status,
+    }
+    handler = handlers.get(name)
+    if handler is not None:
+        return handler(arg, porringer)
 
     return {'error': f'unknown project action: {name}'}
 
