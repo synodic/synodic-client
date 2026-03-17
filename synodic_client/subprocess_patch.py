@@ -63,6 +63,9 @@ def _inject_hidden_flags(kwargs: dict[str, Any]) -> None:
     preserved.  An existing ``startupinfo`` object is augmented
     rather than overwritten.
     """
+    if sys.platform != 'win32':
+        return
+
     kwargs['creationflags'] = kwargs.get('creationflags', 0) | _CREATE_NO_WINDOW
 
     startupinfo = kwargs.get('startupinfo') or subprocess.STARTUPINFO()
