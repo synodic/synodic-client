@@ -46,6 +46,34 @@ def parse_plugin_key(name: str) -> tuple[str, str | None]:
     return name, None
 
 
+def _capture_versions(result: UpdateResult, pkg_name: str, action_result: object) -> None:
+    """Store before/after version info from *action_result* into *result*."""
+    old_ver = getattr(action_result, 'installed_version', '') or ''
+    new_ver = getattr(action_result, 'available_version', '') or ''
+    if pkg_name and (old_ver or new_ver):
+        result.version_map[pkg_name] = (old_ver, new_ver)
+
+
+def log_update_result(result: UpdateResult) -> None:
+    """Log a human-readable summary of an :class:`UpdateResult`.
+
+    Called by both the GUI controller and the CLI after an update
+    completes so that version transitions are recorded consistently.
+    """
+    logger.info(
+        'Tool update completed: %d manifest(s), %d updated, %d already latest, %d failed',
+        result.manifests_processed,
+        result.updated,
+        len(result.already_latest),
+        result.failed,
+    )
+    for pkg_name, (old_ver, new_ver) in result.version_map.items():
+        if old_ver and new_ver:
+            logger.info('  %s: %s \u2192 %s', pkg_name, old_ver, new_ver)
+        elif new_ver:
+            logger.info('  %s: \u2192 %s', pkg_name, new_ver)
+
+
 # ---------------------------------------------------------------------------
 # Update-check
 # ---------------------------------------------------------------------------
@@ -156,6 +184,7 @@ async def update_tool(
         elif action_result.success:
             result.packages_updated.append(package_name)
             result.updated_packages.add(package_name)
+            _capture_versions(result, package_name, action_result)
         else:
             result.packages_failed.append(package_name)
         return result
@@ -224,6 +253,7 @@ async def update_runtime_plugin(
             elif ar.success:
                 result.packages_updated.append(pkg_name)
                 result.updated_packages.add(pkg_name)
+                _capture_versions(result, pkg_name, ar)
             else:
                 result.packages_failed.append(pkg_name)
         break
@@ -309,6 +339,7 @@ async def update_all_tools(
                     result.packages_updated.append(pkg_name)
                     if pkg_name:
                         result.updated_packages.add(pkg_name)
+                    _capture_versions(result, pkg_name, ar)
                 else:
                     result.packages_failed.append(pkg_name)
         except asyncio.CancelledError:

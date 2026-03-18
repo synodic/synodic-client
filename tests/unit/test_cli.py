@@ -174,6 +174,29 @@ class TestToolCli:
             assert result.exit_code == 0
 
     @staticmethod
+    def test_tool_update_json_with_versions() -> None:
+        """Tool update --json serialises sets, tuples, and version_map."""
+        update_result = UpdateResult(
+            plugin='pip',
+            packages_updated=['requests'],
+            updated_packages={'requests'},
+            version_map={'requests': ('2.31.0', '2.32.0')},
+        )
+        with (
+            patch('synodic_client.cli.context.get_services', return_value=(None, MagicMock(), None)),
+            patch(
+                'synodic_client.operations.tool.update_tool',
+                new_callable=AsyncMock,
+                return_value=update_result,
+            ),
+        ):
+            result = runner.invoke(app, ['tool', 'update', 'pip', '--json'])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data['updated_packages'] == ['requests']
+            assert data['version_map'] == {'requests': ['2.31.0', '2.32.0']}
+
+    @staticmethod
     def test_tool_remove_json() -> None:
         """Tool remove --json returns valid JSON with success."""
         with (

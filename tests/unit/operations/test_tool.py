@@ -117,6 +117,8 @@ class TestUpdateTool:
         action_result = MagicMock()
         action_result.skipped = False
         action_result.success = True
+        action_result.installed_version = '2.31.0'
+        action_result.available_version = '2.32.0'
         api.package.upgrade = AsyncMock(return_value=action_result)
 
         result = asyncio.run(update_tool(api, 'pip', 'requests'))
@@ -124,6 +126,7 @@ class TestUpdateTool:
         assert result.packages_updated == ['requests']
         assert result.already_latest == []
         assert result.packages_failed == []
+        assert result.version_map == {'requests': ('2.31.0', '2.32.0')}
 
     @staticmethod
     def test_single_package_already_latest() -> None:
@@ -135,6 +138,7 @@ class TestUpdateTool:
 
         result = asyncio.run(update_tool(api, 'pip', 'requests'))
         assert result.already_latest == ['requests']
+        assert result.version_map == {}
 
     @staticmethod
     def test_single_package_failure() -> None:
@@ -147,6 +151,23 @@ class TestUpdateTool:
 
         result = asyncio.run(update_tool(api, 'pip', 'requests'))
         assert result.packages_failed == ['requests']
+        assert result.version_map == {}
+
+    @staticmethod
+    def test_single_package_success_no_version_data() -> None:
+        """Upgrading succeeds but porringer provides no version info."""
+        api = MagicMock()
+        action_result = MagicMock()
+        action_result.skipped = False
+        action_result.success = True
+        # Simulate older porringer without version attributes
+        del action_result.installed_version
+        del action_result.available_version
+        api.package.upgrade = AsyncMock(return_value=action_result)
+
+        result = asyncio.run(update_tool(api, 'pip', 'requests'))
+        assert result.packages_updated == ['requests']
+        assert result.version_map == {}
 
 
 # ---------------------------------------------------------------------------

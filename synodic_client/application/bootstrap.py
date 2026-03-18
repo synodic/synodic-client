@@ -55,6 +55,7 @@ def bootstrap() -> None:
         run_startup_preamble(sys.executable)
 
     # Heavy imports happen here — PySide6, porringer, etc.
+
     from synodic_client.application.qt import application
 
     application(uri=extract_uri_from_args(), dev_mode=dev_mode, debug=debug)

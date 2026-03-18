@@ -37,11 +37,13 @@ def render(data: Any, *, as_json: bool = False) -> None:
 def _serialise(obj: Any) -> Any:
     """Recursively convert dataclass instances to dicts."""
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return dataclasses.asdict(obj)
-    if isinstance(obj, list):
-        return [_serialise(item) for item in obj]
+        return {k: _serialise(v) for k, v in dataclasses.asdict(obj).items()}
     if isinstance(obj, dict):
         return {k: _serialise(v) for k, v in obj.items()}
+    if isinstance(obj, (set, frozenset)):
+        return sorted(_serialise(v) for v in obj)
+    if isinstance(obj, (list, tuple)):
+        return [_serialise(item) for item in obj]
     return obj
 
 

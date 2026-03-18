@@ -63,6 +63,10 @@ def tool_update(
 
     _, porringer, _ = get_services()
     result = asyncio.run(_update_tool(porringer, plugin, package, runtime_tag=runtime_tag))
+
+    from synodic_client.operations.tool import log_update_result
+
+    log_update_result(result)
     render(result, as_json=json_output)
 
 

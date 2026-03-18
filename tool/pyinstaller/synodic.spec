@@ -16,6 +16,11 @@ datas += copy_metadata('porringer')
 # are bundled without manual spec updates.
 hiddenimports = collect_submodules('porringer.plugin')
 
+# httpx lazily imports httpcore inside transport constructors.  Ensure all
+# httpcore submodules are collected so the eager import in bootstrap.py
+# fully resolves the module tree.
+hiddenimports += collect_submodules('httpcore')
+
 a = Analysis(
     [str(REPO_ROOT / 'synodic_client' / 'application' / 'bootstrap.py')],
     pathex=[],

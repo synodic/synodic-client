@@ -380,13 +380,10 @@ class ToolUpdateOrchestrator:
             target: Which plugin/package was updated.  ``None`` for
                 periodic (automatic) updates.
         """
-        logger.info(
-            'Tool update completed: %d manifest(s), %d updated, %d already latest, %d failed',
-            result.manifests_processed,
-            result.updated,
-            len(result.already_latest),
-            result.failed,
-        )
+        # Log summary + per-package version transitions (shared with CLI)
+        from synodic_client.operations.tool import log_update_result
+
+        log_update_result(result)
 
         # Persist timestamps for updated packages
         if result.updated_packages:
@@ -405,6 +402,10 @@ class ToolUpdateOrchestrator:
         # not None) call show() below which triggers the refresh.
         tools_view = self._window.tools_view
         if tools_view is not None:
+            # Clear stale "update available" badges for packages that were just updated
+            if result.version_map:
+                signal_key = target.plugin if target else result.plugin
+                tools_view.record_updates_completed(signal_key, result.version_map)
             tools_view.invalidate_update_data()
             if self._window.isVisible() and target is None:
                 tools_view.refresh()

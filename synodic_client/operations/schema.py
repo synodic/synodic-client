@@ -235,6 +235,8 @@ class UpdateResult:
     already_latest: list[str] = field(default_factory=list)
     manifests_processed: int = 0
     updated_packages: set[str] = field(default_factory=set)
+    version_map: dict[str, tuple[str, str]] = field(default_factory=dict)
+    """Mapping of ``package_name → (old_version, new_version)``."""
 
     @property
     def updated(self) -> int:
@@ -321,14 +323,12 @@ DEBUG_ACTIONS: dict[str, str] = {
 }
 
 #: Actions that require a live GUI instance (IPC via ``--live``).
-GUI_ONLY_ACTIONS: frozenset[str] = frozenset(
-    {
-        'check_update',
-        'tool_update',
-        'refresh_data',
-        'show_main',
-        'show_settings',
-        'apply_update',
-        'select_project',
-    }
-)
+GUI_ONLY_ACTIONS: frozenset[str] = frozenset({
+    'check_update',
+    'tool_update',
+    'refresh_data',
+    'show_main',
+    'show_settings',
+    'apply_update',
+    'select_project',
+})

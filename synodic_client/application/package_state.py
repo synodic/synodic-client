@@ -123,3 +123,26 @@ class PackageStateStore(QObject):
     def clear(self) -> None:
         """Remove all recorded state."""
         self._data.clear()
+
+    def record_updates_completed(
+        self,
+        signal_key: str,
+        version_map: dict[str, tuple[str, str]],
+    ) -> None:
+        """Mark packages as updated, clearing stale ``has_update`` flags.
+
+        Called after a successful tool update run.  For each entry in
+        *version_map* (``{package_name: (old_version, new_version)}``),
+        the corresponding :class:`PackageState` is updated to reflect
+        the new installed version and ``has_update`` is cleared.
+        """
+        changed = False
+        bucket = self._data.get(signal_key, {})
+        for pkg_name, (_, new_ver) in version_map.items():
+            existing = bucket.get(pkg_name)
+            if existing is not None:
+                existing.installed_version = new_ver
+                existing.has_update = False
+                changed = True
+        if changed:
+            self.state_changed.emit()

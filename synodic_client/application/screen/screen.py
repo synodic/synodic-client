@@ -242,6 +242,15 @@ class ToolsView(QWidget):
         if self._package_store is not None:
             self._package_store.clear()
 
+    def record_updates_completed(
+        self,
+        signal_key: str,
+        version_map: dict[str, tuple[str, str]],
+    ) -> None:
+        """Forward completed-update data to the shared store."""
+        if self._package_store is not None:
+            self._package_store.record_updates_completed(signal_key, version_map)
+
     def refresh(self) -> None:
         """Schedule an asynchronous rebuild of the tool list."""
         if self._refresh_in_progress:
