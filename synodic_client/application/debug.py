@@ -229,19 +229,21 @@ class DebugHandler:
         pending = sum(1 for s in model.action_states if classify_status(s.status) == 'pending')
         upgradable = sum(1 for s in model.action_states if s.status == 'Update available')
 
-        return json.dumps({
-            'path': str(target),
-            'phase': model.phase.name,
-            'action_count': len(model.action_states),
-            'checked_count': model.checked_count,
-            'actions': actions,
-            'summary': {
-                'needed': needed,
-                'satisfied': satisfied,
-                'pending': pending,
-                'upgradable': upgradable,
-            },
-        })
+        return json.dumps(
+            {
+                'path': str(target),
+                'phase': model.phase.name,
+                'action_count': len(model.action_states),
+                'checked_count': model.checked_count,
+                'actions': actions,
+                'summary': {
+                    'needed': needed,
+                    'satisfied': satisfied,
+                    'pending': pending,
+                    'upgradable': upgradable,
+                },
+            }
+        )
 
     def _handle_select_project(self, arg: str | None) -> str:
         """Select a project in the sidebar."""

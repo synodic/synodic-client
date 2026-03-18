@@ -231,11 +231,13 @@ class TestExecuteInstall:
         """exclude_post_sync=True strips post_sync from manifest before execution."""
         manifest = tmp_path / 'porringer.json'
         manifest.write_text(
-            json.dumps({
-                'version': '1',
-                'actions': [{'description': 'install something'}],
-                'post_sync': [{'command': 'echo hello'}],
-            }),
+            json.dumps(
+                {
+                    'version': '1',
+                    'actions': [{'description': 'install something'}],
+                    'post_sync': [{'command': 'echo hello'}],
+                }
+            ),
             encoding='utf-8',
         )
 
@@ -315,11 +317,13 @@ class TestExecutePostSync:
 
         manifest = tmp_path / 'porringer.json'
         manifest.write_text(
-            json.dumps({
-                'version': '1',
-                'actions': [{'description': 'install something'}],
-                'post_sync': [{'command': 'echo hello'}],
-            }),
+            json.dumps(
+                {
+                    'version': '1',
+                    'actions': [{'description': 'install something'}],
+                    'post_sync': [{'command': 'echo hello'}],
+                }
+            ),
             encoding='utf-8',
         )
 
