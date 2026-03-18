@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from synodic_client.operations.config import get_config, list_config_keys, set_config
+from synodic_client.operations.config import get_config, list_config_keys, set_config, update_config
 from synodic_client.operations.schema import ConfigKeyInfo
 
 
@@ -75,3 +75,39 @@ class TestListConfigKeys:
             assert set(keys.keys()) == expected_fields
             for info in keys.values():
                 assert isinstance(info, ConfigKeyInfo)
+
+
+class TestUpdateConfig:
+    """Tests for update_config()."""
+
+    @staticmethod
+    def test_unknown_key_raises() -> None:
+        """Raises KeyError for an invalid config key."""
+        with pytest.raises(KeyError, match='Unknown config key'):
+            update_config(nonexistent_key_xyz='value')
+
+    @staticmethod
+    def test_delegates_to_update_user_config() -> None:
+        """Calls update_user_config with all provided kwargs."""
+        with patch('synodic_client.operations.config.update_user_config') as mock:
+            mock_config = object()
+            mock.return_value = mock_config
+            from synodic_client.schema import ResolvedConfig
+
+            field_names = [f.name for f in dataclasses.fields(ResolvedConfig)]
+            min_fields = 2
+            if len(field_names) >= min_fields:
+                key1, key2 = field_names[0], field_names[1]
+                result = update_config(**{key1: 'a', key2: 'b'})
+                mock.assert_called_once_with(**{key1: 'a', key2: 'b'})
+                assert result is mock_config
+
+    @staticmethod
+    def test_validates_all_keys_before_writing() -> None:
+        """All keys are validated — one bad key rejects the whole batch."""
+        from synodic_client.schema import ResolvedConfig
+
+        field_names = [f.name for f in dataclasses.fields(ResolvedConfig)]
+        if field_names:
+            with pytest.raises(KeyError, match='Unknown config key'):
+                update_config(**{field_names[0]: 'ok', 'bad_key_xyz': 'nope'})

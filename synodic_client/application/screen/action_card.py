@@ -17,11 +17,12 @@ from porringer.backend.command.core.action_builder import PHASE_ORDER
 from porringer.schema import SetupAction, SetupActionResult
 from porringer.schema.plugin import PluginKind
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QCursor, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QToolButton,
@@ -57,6 +58,7 @@ from synodic_client.application.theme import (
     ACTION_CARD_STATUS_UPDATE,
     ACTION_CARD_STYLE,
     ACTION_CARD_TYPE_BADGE_STYLE,
+    ACTION_CARD_UPDATE_AVAILABLE_STYLE,
     ACTION_CARD_VERSION_STYLE,
     COPY_BTN_SIZE,
     COPY_BTN_STYLE,
@@ -118,6 +120,10 @@ class ActionCard(QFrame):
     prerelease_toggled = Signal(str, bool)
     """Emitted with ``(package_name, checked)`` when the user toggles the
     per-row pre-release checkbox."""
+
+    navigate_to_tool = Signal(str, str)
+    """Emitted with ``(installer, package_name)`` when the user clicks an
+    'Update available' card to navigate to the Tools view."""
 
     def __init__(
         self,
@@ -491,6 +497,10 @@ class ActionCard(QFrame):
         else:
             self._status_label.setToolTip('')
 
+        # "Update available" — fade the card and make it clickable
+        if status == 'Update available':
+            self._apply_update_available_style()
+
         # CLI command — update with resolved cli_command from result
         assert self._action is not None
         cmd_text = format_cli_command(self._action, result=result, suppress_description=True)
@@ -523,6 +533,15 @@ class ActionCard(QFrame):
         elif result.available_version:
             self._version_label.setText(f'\u2192 {result.available_version}')
             self._version_label.setStyleSheet(ACTION_CARD_VERSION_STYLE + ' color: grey;')
+
+    def _apply_update_available_style(self) -> None:
+        """Fade the card and make it clickable for 'Update available' status."""
+        self.setStyleSheet(ACTION_CARD_UPDATE_AVAILABLE_STYLE)
+        opacity = QGraphicsOpacityEffect(self)
+        opacity.setOpacity(0.55)
+        self.setGraphicsEffect(opacity)
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.setToolTip('Manage this update in the Tools view')
 
     def finalize_checking(self) -> None:
         """Resolve a still-pending 'Checking\u2026' status to 'Needed'.
@@ -605,6 +624,16 @@ class ActionCard(QFrame):
         """Return whether the card shows an 'Update available' status."""
         return self.status_text() == 'Update available'
 
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Navigate to Tools view when clicking an 'Update available' card."""
+        if self.is_update_available() and self._action is not None:
+            installer = self._action.installer or ''
+            package = str(self._action.package.name) if self._action.package else ''
+            if installer and package:
+                self.navigate_to_tool.emit(installer, package)
+                return
+        super().mousePressEvent(event)
+
 
 # ---------------------------------------------------------------------------
 # ActionCardList — card container
@@ -620,6 +649,13 @@ class ActionCardList(QWidget):
 
     prerelease_toggled = Signal(str, bool)
     """Forwarded from child :class:`ActionCard` widgets."""
+
+    navigate_to_tool = Signal(str, str)
+    """Forwarded from child :class:`ActionCard` widgets.
+
+    Emitted with ``(installer, package_name)`` when the user clicks an
+    'Update available' card.
+    """
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Initialise the card list."""
@@ -680,6 +716,7 @@ class ActionCardList(QWidget):
                 prerelease_overrides=prerelease_overrides,
             )
             card.prerelease_toggled.connect(self.prerelease_toggled.emit)
+            card.navigate_to_tool.connect(self.navigate_to_tool.emit)
             self._layout.insertWidget(self._layout.count() - 1, card)
             self._cards.append(card)
             self._action_map[act] = card

@@ -16,9 +16,11 @@ Modules:
 """
 
 from synodic_client.operations.bootstrap import init_services
-from synodic_client.operations.config import get_config, get_config_value, list_config_keys, set_config
+from synodic_client.operations.config import get_config, get_config_value, list_config_keys, set_config, update_config
 from synodic_client.operations.install import (
     execute_install,
+    execute_post_sync,
+    load_manifest_actions,
     preview_manifest,
     preview_manifest_stream,
     resolve_manifest_path,
@@ -35,9 +37,11 @@ from synodic_client.operations.schema import (
     DEBUG_ACTIONS,
     GUI_ONLY_ACTIONS,
     SKIP_REASON_LABELS,
+    ActionCheckResult,
     ActionInfo,
     ConfigKeyInfo,
     DownloadResult,
+    InstallPlan,
     PackageInfo,
     PreviewActionChecked,
     PreviewEvent,
@@ -54,6 +58,8 @@ from synodic_client.operations.schema import (
     UpdateCheckResult,
     UpdateResult,
     classify_status,
+    compute_install_plan,
+    format_install_summary,
     resolve_action_status,
     skip_reason_label,
 )
@@ -76,8 +82,11 @@ __all__ = [
     'get_config_value',
     'list_config_keys',
     'set_config',
+    'update_config',
     # install
     'execute_install',
+    'execute_post_sync',
+    'load_manifest_actions',
     'preview_manifest',
     'preview_manifest_stream',
     'resolve_manifest_path',
@@ -89,8 +98,10 @@ __all__ = [
     'remove_project',
     'run_project_action',
     # schema
+    'ActionCheckResult',
     'ActionInfo',
     'ConfigKeyInfo',
+    'InstallPlan',
     'DEBUG_ACTIONS',
     'DownloadResult',
     'GUI_ONLY_ACTIONS',
@@ -111,6 +122,8 @@ __all__ = [
     'UpdateCheckResult',
     'UpdateResult',
     'classify_status',
+    'compute_install_plan',
+    'format_install_summary',
     'resolve_action_status',
     'skip_reason_label',
     # tool

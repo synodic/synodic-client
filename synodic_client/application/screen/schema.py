@@ -25,6 +25,7 @@ from porringer.schema import (
 from porringer.schema.plugin import RuntimePackageResult
 
 from synodic_client.application.uri import normalize_manifest_key
+from synodic_client.operations.schema import InstallPlan
 
 # ---------------------------------------------------------------------------
 # Package gathering & display (from screen.py)
@@ -250,10 +251,14 @@ class PreviewModel:
         self.action_states: list[ActionState] = []
         self._action_state_map: dict[SetupAction, ActionState] = {}
         self._action_state_map_len: int = 0
-        self.upgradable_keys: set[SetupAction] = set()
+        self.install_plan: InstallPlan | None = None
         self.checked_count: int = 0
         self.completed_count: int = 0
         self.temp_dir: str | None = None
+
+        # Post-sync tracking (independent from install)
+        self.post_sync_completed: bool = False
+        self.post_sync_results: list[SetupActionResult] | None = None
 
     # -- Computed helpers --------------------------------------------------
 
@@ -265,18 +270,24 @@ class PreviewModel:
         return self._action_state_map
 
     @property
-    def actionable_count(self) -> int:
-        """Number of needed + upgradable actions."""
-        needed = sum(1 for s in self.action_states if s.status == 'Needed')
-        upgradable = len(self.upgradable_keys)
-        return needed + upgradable
-
-    @property
     def install_enabled(self) -> bool:
-        """Whether the install button should be enabled."""
+        """Whether the install button should be enabled.
+
+        Delegates to :attr:`install_plan` when available; falls back
+        to ``False`` when no plan has been computed yet.
+        """
         if self.phase not in {PreviewPhase.READY}:
             return False
-        return self.actionable_count > 0 or any(s.action.kind is None for s in self.action_states)
+        if self.install_plan is not None:
+            return self.install_plan.install_enabled
+        return False
+
+    @property
+    def has_post_sync(self) -> bool:
+        """Whether the manifest has post-sync commands."""
+        if self.install_plan is not None:
+            return self.install_plan.has_post_sync
+        return False
 
     def action_state_for(self, act: SetupAction) -> ActionState | None:
         """Look up :class:`ActionState` for *act* (O(1) amortized)."""

@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
 from porringer.schema import ProgressEvent, SetupParameters
 
-from synodic_client.operations.install import execute_install, preview_manifest
+from synodic_client.operations.install import (
+    execute_install,
+    execute_post_sync,
+    load_manifest_actions,
+    preview_manifest,
+)
 from synodic_client.operations.schema import ActionInfo, PreviewResult
 
 # ---------------------------------------------------------------------------
@@ -219,3 +225,200 @@ class TestExecuteInstall:
 
         results = asyncio.run(_collect())
         assert results == []
+
+    @staticmethod
+    def test_exclude_post_sync(tmp_path: Path) -> None:
+        """exclude_post_sync=True strips post_sync from manifest before execution."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text(
+            json.dumps({
+                'version': '1',
+                'actions': [{'description': 'install something'}],
+                'post_sync': [{'command': 'echo hello'}],
+            }),
+            encoding='utf-8',
+        )
+
+        api = MagicMock()
+        captured_params: list[SetupParameters] = []
+        captured_manifest_data: list[dict] = []
+
+        async def _capture(params: SetupParameters, **_kw: object):
+            captured_params.append(params)
+            # Read the temp manifest before it's cleaned up
+            assert isinstance(params.paths, (list, tuple))
+            path = Path(str(params.paths[0]))
+            captured_manifest_data.append(json.loads(path.read_text(encoding='utf-8')))
+            return
+            yield
+
+        api.sync.execute_stream = _capture
+
+        async def _run() -> list:
+            return [item async for item in execute_install(api, manifest, exclude_post_sync=True)]
+
+        asyncio.run(_run())
+
+        assert len(captured_params) == 1
+        # The effective path should differ from the original (temp file)
+        paths = captured_params[0].paths
+        assert isinstance(paths, (list, tuple))
+        used_path = paths[0]
+        assert str(used_path) != str(manifest)
+        # The temp file should have had empty post_sync
+        assert captured_manifest_data[0]['post_sync'] == []
+
+    @staticmethod
+    def test_exclude_post_sync_no_post_sync(tmp_path: Path) -> None:
+        """exclude_post_sync=True with no post_sync uses original manifest."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text(
+            json.dumps({'version': '1', 'actions': []}),
+            encoding='utf-8',
+        )
+
+        api = MagicMock()
+        captured_params: list[SetupParameters] = []
+
+        async def _capture(params: SetupParameters, **_kw: object):
+            captured_params.append(params)
+            return
+            yield
+
+        api.sync.execute_stream = _capture
+
+        async def _run() -> list:
+            return [item async for item in execute_install(api, manifest, exclude_post_sync=True)]
+
+        asyncio.run(_run())
+
+        assert len(captured_params) == 1
+        # Should use original path since there's no post_sync to strip
+        paths = captured_params[0].paths
+        assert isinstance(paths, (list, tuple))
+        used_path = Path(str(paths[0]))
+        assert used_path == manifest
+
+
+# ---------------------------------------------------------------------------
+# execute_post_sync
+# ---------------------------------------------------------------------------
+
+
+class TestExecutePostSync:
+    """Tests for execute_post_sync()."""
+
+    @staticmethod
+    def test_yields_events_from_post_sync_manifest(tmp_path: Path) -> None:
+        """Extracts post_sync, executes, and yields events."""
+        from porringer.schema import ManifestLoadedEvent
+
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text(
+            json.dumps({
+                'version': '1',
+                'actions': [{'description': 'install something'}],
+                'post_sync': [{'command': 'echo hello'}],
+            }),
+            encoding='utf-8',
+        )
+
+        loaded = MagicMock(spec=ManifestLoadedEvent)
+        api = MagicMock()
+
+        async def _stream(params: SetupParameters, **_kw: object):
+            yield loaded
+
+        api.sync.execute_stream = _stream
+
+        async def _collect() -> list[tuple[str, ProgressEvent]]:
+            return [(s, e) async for s, e in execute_post_sync(api, manifest)]
+
+        results = asyncio.run(_collect())
+        assert len(results) == 1
+        assert results[0] == ('manifest_loaded', loaded)
+
+    @staticmethod
+    def test_no_post_sync_yields_nothing(tmp_path: Path) -> None:
+        """No post_sync entries → yields nothing."""
+        manifest = tmp_path / 'porringer.json'
+        manifest.write_text(
+            json.dumps({'version': '1', 'actions': []}),
+            encoding='utf-8',
+        )
+
+        api = MagicMock()
+
+        async def _collect() -> list[tuple[str, ProgressEvent]]:
+            return [(s, e) async for s, e in execute_post_sync(api, manifest)]
+
+        results = asyncio.run(_collect())
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# load_manifest_actions
+# ---------------------------------------------------------------------------
+
+
+class TestLoadManifestActions:
+    """Tests for load_manifest_actions()."""
+
+    @staticmethod
+    def test_fast_path_with_discovered() -> None:
+        """Uses async_load_manifest when discovered plugins are provided."""
+        api = MagicMock()
+        action1 = MagicMock()
+        action2 = MagicMock()
+        mock_result = MagicMock()
+        mock_result.actions = [action1, action2]
+
+        async def _mock_load(*_a, **_kw):
+            return mock_result
+
+        api.sync.async_load_manifest = _mock_load
+
+        discovered = MagicMock()
+
+        actions = asyncio.run(
+            load_manifest_actions(api, Path('/tmp/manifest.json'), discovered=discovered),
+        )
+        expected_count = 2
+        assert len(actions) == expected_count
+        assert actions[0] is action1
+        assert actions[1] is action2
+
+    @staticmethod
+    def test_legacy_path_without_discovered() -> None:
+        """Falls back to execute_stream when no discovered plugins."""
+        from porringer.schema import ManifestParsedEvent
+
+        api = MagicMock()
+        action = MagicMock()
+        parsed_event = MagicMock(spec=ManifestParsedEvent)
+        parsed_event.manifest.actions = [action]
+
+        async def _stream(*_a, **_kw):
+            yield parsed_event
+
+        api.sync.execute_stream = _stream
+
+        actions = asyncio.run(
+            load_manifest_actions(api, Path('/tmp/manifest.json'), project_directory=Path('/proj')),
+        )
+        assert len(actions) == 1
+        assert actions[0] is action
+
+    @staticmethod
+    def test_empty_manifest_returns_empty_list() -> None:
+        """Empty stream → empty list."""
+        api = MagicMock()
+
+        async def _empty(*_a, **_kw):
+            return
+            yield
+
+        api.sync.execute_stream = _empty
+
+        actions = asyncio.run(load_manifest_actions(api, Path('/tmp/manifest.json')))
+        assert actions == []

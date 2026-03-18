@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from porringer.schema import PluginCapability, SetupAction, SetupActionResult, SetupResults, SkipReason
+from porringer.schema import PluginCapability, SetupAction, SetupActionResult, SetupResults, SkipReason, SyncStrategy
 from porringer.schema.plugin import PluginKind
 
 # ---------------------------------------------------------------------------
@@ -78,8 +78,214 @@ def classify_status(status: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Preview stream events
+# Install plan computation
 # ---------------------------------------------------------------------------
+
+#: Statuses that mean the action is already handled — nothing to install.
+_SATISFIED_STATUSES: frozenset[str] = frozenset({'Already installed', 'Already latest'})
+
+
+@dataclass(frozen=True, slots=True)
+class ActionCheckResult:
+    """A single action's dry-run result paired with its resolved status.
+
+    Mirrors :class:`PreviewActionChecked` but carries the ``action``
+    object directly, making it usable outside the streaming context.
+    """
+
+    index: int
+    """Original action index (porringer ordering)."""
+
+    action: SetupAction
+    """The porringer setup action."""
+
+    result: SetupActionResult
+    """Dry-run result for this action."""
+
+    status: str
+    """Pre-resolved human-readable status label."""
+
+
+@dataclass(frozen=True, slots=True)
+class InstallPlan:
+    """Deterministic, immutable plan computed from dry-run results.
+
+    The single source of truth for what the Install button should do,
+    what gets skipped, and whether post-sync commands exist.  Both the
+    GUI and CLI consume this dataclass without re-deriving the logic.
+    """
+
+    install_indices: tuple[int, ...]
+    """Action indices that need execution (``Needed`` / ``Ready``)."""
+
+    satisfied_indices: tuple[int, ...]
+    """Action indices already satisfied (``Already installed``/``Already latest``).
+
+    **Display-only** — porringer handles skipping internally.  These
+    indices are used for the UI summary (``pre_skipped_count``) and
+    ``install_enabled`` determination, not for execution filtering."""
+
+    upgradable_indices: tuple[int, ...]
+    """Action indices with updates available — excluded from install."""
+
+    post_sync_indices: tuple[int, ...]
+    """Action indices for post-sync commands (``kind is None``)."""
+
+    strategy: SyncStrategy
+    """Sync strategy to use for the install."""
+
+    install_enabled: bool
+    """Whether there are actions worth running an install for."""
+
+    has_post_sync: bool
+    """Whether the manifest contains post-sync commands."""
+
+    summary: str
+    """Pre-formatted status summary for the UI."""
+
+
+def _classify_action(cr: ActionCheckResult) -> tuple[str, str | None]:
+    """Return ``(bucket, list_name)`` for a single check result.
+
+    ``list_name`` is ``'install'``, ``'satisfied'``, ``'upgradable'``,
+    ``'post_sync'``, or ``None`` (not assigned to an index list).
+    ``bucket`` is one of the counter keys used for the summary.
+    """
+    bucket = classify_status(cr.status)
+
+    if cr.action.kind is None:
+        return ('pending' if bucket == 'pending' else 'post_sync_only'), 'post_sync'
+
+    if cr.status == 'Update available':
+        return 'upgradable', 'upgradable'
+    if bucket == 'satisfied':
+        return 'satisfied', 'satisfied'
+    if bucket in {'needed', 'ready'}:
+        return bucket, 'install'
+    if bucket in {'unavailable', 'failed'}:
+        return bucket, None
+    # Unknown status — include in install to be safe
+    return 'needed', 'install'
+
+
+def compute_install_plan(check_results: list[ActionCheckResult]) -> InstallPlan:
+    """Derive an :class:`InstallPlan` from a completed dry-run.
+
+    This is a **pure function** — no I/O, no side effects.  It is the
+    single place where "what to do" is decided, consumed identically
+    by the GUI and CLI.
+
+    Args:
+        check_results: Completed dry-run results for every action.
+
+    Returns:
+        An immutable :class:`InstallPlan`.
+    """
+    lists: dict[str, list[int]] = {
+        'install': [],
+        'satisfied': [],
+        'upgradable': [],
+        'post_sync': [],
+    }
+    counts: dict[str, int] = {
+        'needed': 0,
+        'satisfied': 0,
+        'upgradable': 0,
+        'pending': 0,
+        'ready': 0,
+        'unavailable': 0,
+        'failed': 0,
+    }
+
+    for cr in check_results:
+        bucket, list_name = _classify_action(cr)
+        if list_name is not None:
+            lists[list_name].append(cr.index)
+        if bucket in counts:
+            counts[bucket] += 1
+
+    # Build summary text
+    total = len(check_results)
+    label_map = {
+        'needed': 'needed',
+        'upgradable': 'upgradable (manage in Tools)',
+        'satisfied': 'already satisfied',
+        'ready': 'ready',
+        'pending': 'pending',
+        'unavailable': 'unavailable (plugin not installed)',
+        'failed': 'failed',
+    }
+    parts = [f'{counts[k]} {v}' for k, v in label_map.items() if counts[k]]
+
+    actionable = counts['needed'] + counts['ready']
+    if actionable == 0 and counts['unavailable'] == 0 and counts['failed'] == 0:
+        summary = f'{total} action(s) \u2014 all already satisfied.'
+    else:
+        summary = f'{total} action(s): {", ".join(parts)}.'
+
+    return InstallPlan(
+        install_indices=tuple(lists['install']),
+        satisfied_indices=tuple(lists['satisfied']),
+        upgradable_indices=tuple(lists['upgradable']),
+        post_sync_indices=tuple(lists['post_sync']),
+        strategy=SyncStrategy.MINIMAL,
+        install_enabled=actionable > 0,
+        has_post_sync=len(lists['post_sync']) > 0,
+        summary=summary,
+    )
+
+
+def format_install_summary(
+    install_results: list[SetupActionResult] | None = None,
+    post_sync_results: list[SetupActionResult] | None = None,
+    pre_skipped_count: int = 0,
+) -> str:
+    """Build a unified completion summary string.
+
+    Pure function that formats the results of install + post-sync phases
+    into a single human-readable string.
+
+    Args:
+        install_results: Results from the install phase (may be ``None``
+            if only post-sync was executed).
+        post_sync_results: Results from the post-sync phase (may be
+            ``None`` if no post-sync commands exist).
+        pre_skipped_count: Number of actions pre-skipped (already
+            satisfied, excluded from execution).
+
+    Returns:
+        A formatted summary string.
+    """
+    parts: list[str] = []
+
+    if install_results is not None:
+        succeeded = sum(1 for r in install_results if r.success and not r.skipped)
+        skipped = sum(1 for r in install_results if r.skipped)
+        failed = sum(1 for r in install_results if not r.success)
+        if succeeded:
+            parts.append(f'{succeeded} succeeded')
+        if skipped:
+            parts.append(f'{skipped} skipped')
+        if failed:
+            parts.append(f'{failed} failed')
+
+    if pre_skipped_count:
+        parts.append(f'{pre_skipped_count} already satisfied')
+
+    install_summary = ', '.join(parts) if parts else 'No actions executed.'
+
+    if post_sync_results is not None:
+        ps_succeeded = sum(1 for r in post_sync_results if r.success and not r.skipped)
+        ps_failed = sum(1 for r in post_sync_results if not r.success)
+        ps_parts: list[str] = []
+        if ps_succeeded:
+            ps_parts.append(f'{ps_succeeded} ran')
+        if ps_failed:
+            ps_parts.append(f'{ps_failed} failed')
+        ps_summary = ', '.join(ps_parts) if ps_parts else 'none ran'
+        return f'Done \u2014 {install_summary}. Post-sync: {ps_summary}.'
+
+    return f'Done \u2014 {install_summary}'
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,14 +529,12 @@ DEBUG_ACTIONS: dict[str, str] = {
 }
 
 #: Actions that require a live GUI instance (IPC via ``--live``).
-GUI_ONLY_ACTIONS: frozenset[str] = frozenset(
-    {
-        'check_update',
-        'tool_update',
-        'refresh_data',
-        'show_main',
-        'show_settings',
-        'apply_update',
-        'select_project',
-    }
-)
+GUI_ONLY_ACTIONS: frozenset[str] = frozenset({
+    'check_update',
+    'tool_update',
+    'refresh_data',
+    'show_main',
+    'show_settings',
+    'apply_update',
+    'select_project',
+})

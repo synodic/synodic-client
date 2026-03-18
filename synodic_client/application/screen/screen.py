@@ -12,11 +12,8 @@ from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.schema import (
     ManifestDirectory,
-    ManifestParsedEvent,
     PluginInfo,
     SetupAction,
-    SetupParameters,
-    SyncStrategy,
 )
 from porringer.schema.plugin import PluginKind, RuntimePackageResult
 from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt, QTimer, Signal
@@ -59,8 +56,10 @@ from synodic_client.application.theme import (
     FILTER_TOGGLE_ACTIVE_STYLE,
     FILTER_TOGGLE_STYLE,
     MAIN_WINDOW_MIN_SIZE,
+    PLUGIN_ROW_HIGHLIGHT_STYLE,
     PLUGIN_ROW_STATUS_AVAILABLE_STYLE,
     PLUGIN_ROW_STATUS_UP_TO_DATE_STYLE,
+    PLUGIN_ROW_STYLE,
     PLUGIN_SECTION_SPACING,
     SEARCH_INPUT_STYLE,
     SETTINGS_GEAR_STYLE,
@@ -1045,13 +1044,13 @@ class ToolsView(QWidget):
     ) -> list[SetupAction]:
         """Load the manifest for *directory* and return its actions.
 
-        When a :class:`DataCoordinator` is available the efficient
-        ``async_load_manifest`` path is used (no streaming, no
-        ``aclosing`` needed).  The legacy ``execute_stream`` path is
-        kept as a fallback for tests and headless usage.
+        Delegates to :func:`~synodic_client.operations.install.load_manifest_actions`
+        in the operations layer, passing pre-discovered plugins when
+        available for the efficient single-shot path.
         """
         actions: list[SetupAction] = []
         try:
+            from synodic_client.operations.install import load_manifest_actions
             from synodic_client.operations.project import find_manifest
 
             path = Path(directory.path)
@@ -1062,25 +1061,12 @@ class ToolsView(QWidget):
 
             discovered = self._coordinator.discovered_plugins if self._coordinator else None
 
-            if discovered is not None:
-                # Fast path: single-shot manifest load
-                result = await self._porringer.sync.async_load_manifest(
-                    manifest_path,
-                    SyncStrategy.MINIMAL,
-                    plugins=discovered,
-                )
-                actions.extend(result.actions)
-            else:
-                # Legacy path: stream and break after first parse
-                params = SetupParameters(
-                    paths=[str(manifest_path)],
-                    dry_run=True,
-                    project_directory=path,
-                )
-                async for event in self._porringer.sync.execute_stream(params):
-                    if isinstance(event, ManifestParsedEvent):
-                        actions.extend(event.manifest.actions)
-                        break
+            actions = await load_manifest_actions(
+                self._porringer,
+                manifest_path,
+                project_directory=path,
+                discovered=discovered,
+            )
         except Exception:
             logger.debug(
                 'Could not gather requirements for %s',
@@ -1293,6 +1279,47 @@ class ToolsView(QWidget):
             if isinstance(widget, PluginRow):
                 widget.update_timestamp()
 
+    def navigate_to_package(self, plugin_name: str, package_name: str) -> None:
+        """Scroll to and briefly highlight a specific package row.
+
+        Opens the filter panel, sets the search text to filter down to the
+        target package, ensures the plugin chip is active, scrolls the row
+        into view, and applies a transient amber highlight.
+        """
+        # Find the target row first
+        target: PluginRow | None = None
+        for widget in self._section_widgets:
+            if (
+                isinstance(widget, PluginRow)
+                and widget._plugin_name == plugin_name
+                and widget._package_name == package_name
+            ):
+                target = widget
+                break
+
+        if target is None:
+            return
+
+        # Ensure the plugin chip is checked so the row won't be hidden
+        self._deselected_plugins.discard(plugin_name)
+        chip = self._filter_chips.get(plugin_name)
+        if chip is not None:
+            chip.setChecked(True)
+
+        # Set search text and apply the filter
+        self._search_input.setText(package_name)
+        self._apply_filter()
+
+        # Open the filter panel if closed
+        self._open_filter_panel()
+
+        # Scroll the row into view
+        self._scroll.ensureWidgetVisible(target)
+
+        # Apply a brief amber highlight
+        target.setStyleSheet(PLUGIN_ROW_HIGHLIGHT_STYLE)
+        QTimer.singleShot(2000, lambda: target.setStyleSheet(PLUGIN_ROW_STYLE))
+
     def set_plugin_updating(self, plugin_name: str, updating: bool) -> None:
         """Toggle the *Updatingâ€¦* state on the header for *plugin_name*."""
         for widget in self._section_widgets:
@@ -1454,6 +1481,9 @@ class MainWindow(QMainWindow):
             # Navigate-to-project: switch to Projects tab and select directory
             self._tools_view.navigate_to_project_requested.connect(self._navigate_to_project)
 
+            # Navigate-to-tool: switch to Tools tab and highlight the package
+            self._projects_view.navigate_to_tool_requested.connect(self._navigate_to_tool)
+
             gear_btn = QPushButton('\u2699')
             gear_btn.setStyleSheet(SETTINGS_GEAR_STYLE)
             gear_btn.setToolTip('Settings')
@@ -1483,6 +1513,12 @@ class MainWindow(QMainWindow):
         if self._tabs is not None and self._projects_view is not None:
             self._tabs.setCurrentIndex(0)
             self._projects_view._sidebar.select(Path(path_str))
+
+    def _navigate_to_tool(self, plugin_name: str, package_name: str) -> None:
+        """Switch to the Tools tab and highlight the given package."""
+        if self._tabs is not None and self._tools_view is not None:
+            self._tabs.setCurrentIndex(1)
+            self._tools_view.navigate_to_package(plugin_name, package_name)
 
 
 class Screen:

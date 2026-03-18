@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from porringer.api import API
 from porringer.backend.command.core.discovery import DiscoveredPlugins
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -41,6 +41,10 @@ class ProjectsView(QWidget):
     :class:`SetupPreviewWidget` per manifest.  All manifests are loaded
     in parallel on first refresh; switching between them is instant.
     """
+
+    navigate_to_tool_requested = Signal(str, str)
+    """Emitted with ``(installer, package_name)`` when a child widget
+    requests navigation to a tool in the Tools view."""
 
     def __init__(
         self,
@@ -127,14 +131,23 @@ class ProjectsView(QWidget):
                 results = snapshot.validated_directories
                 discovered = snapshot.discovered
             else:
+                from synodic_client.operations.project import list_projects
+
                 loop = asyncio.get_running_loop()
-                results = await loop.run_in_executor(
-                    None,
-                    lambda: self._porringer.cache.list_directories(
-                        validate=True,
-                        check_manifest=True,
-                    ),
-                )
+                projects = await loop.run_in_executor(None, lambda: list_projects(self._porringer))
+                # Convert ProjectInfo list to the same shape as validated_directories
+                results = []
+                for p in projects:
+                    result = type(
+                        '_Result',
+                        (),
+                        {
+                            'directory': type('_Dir', (), {'path': p.path, 'name': p.name})(),
+                            'exists': p.exists,
+                            'has_manifest': p.has_manifest,
+                        },
+                    )()
+                    results.append(result)
                 discovered = None
 
             directories: list[tuple[Path, str, bool]] = []
@@ -207,6 +220,7 @@ class ProjectsView(QWidget):
                 )
                 widget._discovered_plugins = discovered
                 widget.install_finished.connect(self._on_install_finished)
+                widget.navigate_to_tool_requested.connect(self.navigate_to_tool_requested.emit)
                 widget.phase_changed.connect(
                     lambda phase, p=path: self._on_widget_phase_changed(p, phase),
                 )
@@ -244,10 +258,12 @@ class ProjectsView(QWidget):
         directory = selected if selected.is_dir() else selected.parent
 
         try:
-            self._porringer.cache.add_directory(directory)
+            from synodic_client.operations.project import add_project
+
+            add_project(self._porringer, str(directory))
             logger.info('Cached new project directory: %s', directory)
-        except ValueError:
-            logger.debug('Directory already cached: %s', directory)
+        except NotADirectoryError, ValueError:
+            logger.debug('Directory already cached or invalid: %s', directory)
 
         if self._coordinator is not None:
             self._coordinator.invalidate()
@@ -256,7 +272,9 @@ class ProjectsView(QWidget):
 
     def _on_remove(self, path: Path) -> None:
         """Remove a directory from the porringer cache."""
-        self._porringer.cache.remove_directory(path)
+        from synodic_client.operations.project import remove_project
+
+        remove_project(self._porringer, str(path))
         logger.info('Removed project directory from cache: %s', path)
 
         # Tear down the widget immediately

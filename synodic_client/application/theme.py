@@ -166,6 +166,11 @@ PLUGIN_ROW_STYLE = (
 )
 """Compact row for an individual tool or package managed by a plugin."""
 
+PLUGIN_ROW_HIGHLIGHT_STYLE = (
+    'QFrame#pluginRow {  background: #3e3417;  border-radius: 4px;  padding: 3px 8px 3px 20px;}'
+)
+"""Brief amber highlight applied when navigating to a specific package row."""
+
 PLUGIN_ROW_NAME_STYLE = 'font-size: 12px; color: #cccccc;'
 """Package / tool name in a row."""
 
@@ -391,6 +396,17 @@ ACTION_CARD_EXECUTING_STYLE = (
     '}'
 )
 """Style for an action card that is currently executing."""
+
+ACTION_CARD_UPDATE_AVAILABLE_STYLE = (
+    'QFrame#actionCard {'
+    '  border: 1px solid palette(mid);'
+    '  border-radius: 4px;'
+    '  background: palette(window);'
+    '  padding: 6px 8px;'
+    '  opacity: 0.6;'
+    '}'
+)
+"""Faded style for an action card with an available update (managed in Tools)."""
 
 ACTION_CARD_SKELETON_STYLE = (
     'QFrame#actionCard {'

@@ -23,9 +23,7 @@ from porringer.schema import (
     SetupAction,
     SetupActionResult,
     SetupResults,
-    SkipReason,
     SubActionProgress,
-    SyncStrategy,
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QShowEvent
@@ -46,7 +44,7 @@ from PySide6.QtWidgets import (
 from synodic_client.application.package_state import PackageStateStore
 from synodic_client.application.screen.action_card import ActionCardList
 from synodic_client.application.screen.card import CardFrame
-from synodic_client.application.screen.install_workers import run_install, run_preview
+from synodic_client.application.screen.install_workers import run_install, run_post_sync, run_preview
 from synodic_client.application.screen.log_panel import ExecutionLogPanel
 from synodic_client.application.screen.schema import (
     ActionState,
@@ -106,6 +104,10 @@ class SetupPreviewWidget(QWidget):
     #: Emitted whenever the lifecycle phase changes.
     phase_changed = Signal(object)  # PreviewPhase
 
+    #: Emitted with ``(installer, package_name)`` when the user clicks an
+    #: 'Update available' card to navigate to the Tools view.
+    navigate_to_tool_requested = Signal(str, str)
+
     def __init__(
         self,
         porringer: API,
@@ -134,6 +136,7 @@ class SetupPreviewWidget(QWidget):
 
         self._model = PreviewModel()
         self._task: asyncio.Task[None] | None = None
+        self._install_results: SetupResults | None = None
 
         # Debounce timer for per-row pre-release checkbox changes
         self._prerelease_debounce = QTimer(self)
@@ -183,6 +186,7 @@ class SetupPreviewWidget(QWidget):
 
         self._card_list = ActionCardList()
         self._card_list.prerelease_toggled.connect(self._on_prerelease_row_toggled)
+        self._card_list.navigate_to_tool.connect(self.navigate_to_tool_requested.emit)
         scroll_layout.addWidget(self._card_list)
 
         self._log_panel = ExecutionLogPanel()
@@ -248,6 +252,13 @@ class SetupPreviewWidget(QWidget):
         """Create the bottom button bar."""
         button_bar = QHBoxLayout()
         button_bar.addStretch()
+
+        self._run_commands_btn = QPushButton('Run Commands')
+        self._run_commands_btn.setToolTip('Execute post-sync commands from the manifest')
+        self._run_commands_btn.setEnabled(False)
+        self._run_commands_btn.hide()
+        self._run_commands_btn.clicked.connect(self._on_run_commands)
+        button_bar.addWidget(self._run_commands_btn)
 
         self._install_btn = QPushButton('Install')
         self._install_btn.setEnabled(False)
@@ -370,6 +381,9 @@ class SetupPreviewWidget(QWidget):
         self._status_label.setText('')
         self._status_label.setStyleSheet('')
         self._install_btn.setEnabled(False)
+        self._run_commands_btn.setEnabled(False)
+        self._run_commands_btn.hide()
+        self._install_results = None
         self._log_panel.clear()
         self._log_panel.hide()
 
@@ -517,6 +531,7 @@ class SetupPreviewWidget(QWidget):
                     on_progress=self._on_action_progress,
                 ),
                 plugins=self._discovered_plugins,
+                exclude_post_sync=self._model.has_post_sync,
             )
             self._on_install_finished(results)
         except asyncio.CancelledError:
@@ -614,20 +629,24 @@ class SetupPreviewWidget(QWidget):
             self.metadata_ready.emit(preview)
 
     def _on_action_checked(self, row: int, result: SetupActionResult, status: str) -> None:
-        """Update the model and action card with a dry-run result."""
-        m = self._model
-        label = status
+        """Update the model and action card with a dry-run result.
 
-        if result.skipped and result.skip_reason == SkipReason.UPDATE_AVAILABLE and 0 <= row < len(m.action_states):
-            m.upgradable_keys.add(m.action_states[row].action)
+        This callback performs only two things:
+        1. Update the ``ActionState.status`` in the model.
+        2. Update the ``ActionCard`` widget visually.
+
+        Cross-component side effects (PackageStateStore writes) are
+        deferred to :meth:`_on_preview_finished` for one-way data flow.
+        """
+        m = self._model
 
         if 0 <= row < len(m.action_states):
-            m.action_states[row].status = label
+            m.action_states[row].status = status
 
         logger.debug(
             'Action checked [%d]: status=%s success=%s skipped=%s skip_reason=%s installed=%s available=%s',
             row,
-            label,
+            status,
             result.success,
             result.skipped,
             result.skip_reason,
@@ -637,20 +656,9 @@ class SetupPreviewWidget(QWidget):
 
         # Update the card widget
         if m.preview and 0 <= row < len(m.preview.actions):
-            action = m.preview.actions[row]
             card = self._card_list.card_for_action_index(row)
             if card is not None:
                 card.set_check_result(result, status)
-
-            # Record in shared store so ToolsView can reflect the update
-            if self._package_store is not None and action.installer and action.package:
-                self._package_store.record_action_result(
-                    action.installer,
-                    str(action.package.name),
-                    installed_version=result.installed_version or '',
-                    available_version=result.available_version or '',
-                    has_update=result.skip_reason == SkipReason.UPDATE_AVAILABLE,
-                )
 
         # Update phase text
         m.checked_count += 1
@@ -660,7 +668,15 @@ class SetupPreviewWidget(QWidget):
         )
 
     def _on_preview_finished(self) -> None:
-        """Finalize the preview after the dry-run check completes."""
+        """Finalize the preview after the dry-run check completes.
+
+        Computes the :class:`InstallPlan` via the operations layer,
+        batch-writes to :class:`PackageStateStore`, and updates all
+        button states.  This is the single point where preview results
+        are materialised into actionable decisions.
+        """
+        from synodic_client.operations.schema import ActionCheckResult, compute_install_plan
+
         m = self._model
         if not m.action_states:
             return
@@ -679,55 +695,60 @@ class SetupPreviewWidget(QWidget):
                 finalized,
             )
 
-        # Compute summary using the shared operations-layer classifier
-        from collections import Counter
+        # Build check results for the plan computation
+        check_results: list[ActionCheckResult] = []
+        for i, state in enumerate(m.action_states):
+            # We need the dry-run result — reconstruct a minimal one from the status
+            # The actual result was already applied to the card; here we use the
+            # status string which is the canonical output of resolve_action_status.
+            check_results.append(
+                ActionCheckResult(
+                    index=i,
+                    action=state.action,
+                    result=SetupActionResult(action=state.action, success=True),
+                    status=state.status,
+                ),
+            )
 
-        from synodic_client.operations.schema import classify_status
+        plan = compute_install_plan(check_results)
+        m.install_plan = plan
 
-        total = len(m.action_states)
-        counts = Counter(classify_status(s.status) for s in m.action_states)
-        needed = counts.get('needed', 0)
-        satisfied = counts.get('satisfied', 0)
-        pending = counts.get('pending', 0)
-        ready = counts.get('ready', 0)
-        unavailable = counts.get('unavailable', 0)
-        failed = counts.get('failed', 0)
-        upgradable = len(m.upgradable_keys)
+        # Batch-write to PackageStateStore (one-way, after plan is computed)
+        if self._package_store is not None and m.preview is not None:
+            for state in m.action_states:
+                action = state.action
+                if action.installer and action.package:
+                    self._package_store.record_action_result(
+                        action.installer,
+                        str(action.package.name),
+                        installed_version='',
+                        available_version='',
+                        has_update=state.status == 'Update available',
+                    )
 
-        parts: list[str] = []
-        _counts: list[tuple[int, str]] = [
-            (needed, 'needed'),
-            (upgradable, 'upgradable'),
-            (satisfied, 'already satisfied'),
-            (ready, 'ready'),
-            (pending, 'pending'),
-            (unavailable, 'unavailable (plugin not installed)'),
-            (failed, 'failed'),
-        ]
-        for count, label in _counts:
-            if count:
-                parts.append(f'{count} {label}')
-
-        actionable = needed + upgradable
-        if actionable == 0 and unavailable == 0 and failed == 0:
-            self._status_label.setText(f'{total} action(s) \u2014 all already satisfied.')
-            self._install_btn.setEnabled(False)
+        # Update UI from the plan
+        self._status_label.setText(plan.summary)
+        self._install_btn.setEnabled(plan.install_enabled)
+        if not plan.install_enabled:
+            self._install_btn.setToolTip('No packages to install')
         else:
-            self._status_label.setText(f'{total} action(s): {", ".join(parts)}.')
+            self._install_btn.setToolTip('')
+
+        # Show/enable the Run Commands button if post-sync exists
+        if plan.has_post_sync:
+            self._run_commands_btn.show()
+            self._run_commands_btn.setEnabled(True)
 
         self._set_phase(PreviewPhase.READY)
 
         logger.info(
-            'Preview complete: %d total, %d needed, %d upgradable, %d satisfied, '
-            '%d ready, %d pending, %d unavailable, %d failed',
-            total,
-            needed,
-            upgradable,
-            satisfied,
-            ready,
-            pending,
-            unavailable,
-            failed,
+            'Preview complete: %d total, %d to install, %d satisfied, %d upgradable, %d post-sync, install_enabled=%s',
+            len(m.action_states),
+            len(plan.install_indices),
+            len(plan.satisfied_indices),
+            len(plan.upgradable_indices),
+            len(plan.post_sync_indices),
+            plan.install_enabled,
         )
 
     def _on_preview_error(self, message: str) -> None:
@@ -774,14 +795,20 @@ class SetupPreviewWidget(QWidget):
     # --- Install execution ---
 
     def _on_install(self) -> None:
-        """Handle the Install button click."""
+        """Handle the Install button click.
+
+        Uses the pre-computed :class:`InstallPlan` to determine the
+        sync strategy.  Post-sync commands are excluded from this
+        execution — they are handled by :meth:`_on_run_commands`.
+        """
         m = self._model
-        if m.manifest_path is None:
+        if m.manifest_path is None or m.install_plan is None:
             return
 
         self._prerelease_debounce.stop()
         self._set_phase(PreviewPhase.INSTALLING)
         self._install_btn.setEnabled(False)
+        self._run_commands_btn.setEnabled(False)
         self._close_btn.setEnabled(False)
         m.completed_count = 0
 
@@ -791,9 +818,8 @@ class SetupPreviewWidget(QWidget):
         self._log_panel.clear()
         self._log_panel.show()
 
-        # Choose LATEST strategy when there are upgradable actions so
-        # porringer actually upgrades the already-installed packages.
-        strategy = SyncStrategy.LATEST if m.upgradable_keys else SyncStrategy.MINIMAL
+        # Strategy and post-sync exclusion come from the plan
+        strategy = m.install_plan.strategy
 
         self._task = asyncio.create_task(
             self._run_install_task(
@@ -852,25 +878,39 @@ class SetupPreviewWidget(QWidget):
             self._task.cancel()
 
     def _on_install_finished(self, results: SetupResults) -> None:
-        """Handle install completion."""
-        self._set_phase(PreviewPhase.DONE)
+        """Handle install completion.
 
-        succeeded = sum(1 for r in results.results if r.success and not r.skipped)
-        skipped = sum(1 for r in results.results if r.skipped)
+        If the plan includes post-sync commands and no actions failed,
+        automatically triggers :meth:`_on_run_commands`.
+        """
+        from synodic_client.operations.schema import format_install_summary
+
+        m = self._model
+        pre_skipped = len(m.install_plan.satisfied_indices) if m.install_plan else 0
         failed = sum(1 for r in results.results if not r.success)
 
-        parts = []
-        if succeeded:
-            parts.append(f'{succeeded} succeeded')
-        if skipped:
-            parts.append(f'{skipped} skipped')
-        if failed:
-            parts.append(f'{failed} failed')
+        # Auto-run post-sync if install succeeded and post-sync exists
+        if m.has_post_sync and failed == 0:
+            summary = format_install_summary(
+                install_results=list(results.results),
+                pre_skipped_count=pre_skipped,
+            )
+            self._status_label.setText(f'{summary}. Running post-sync commands\u2026')
+            self._run_commands_btn.setEnabled(False)
+            self._task = asyncio.create_task(self._run_post_sync_task())
+            self._install_results = results  # Stash for final summary
+            return
 
-        summary = ', '.join(parts) if parts else 'No actions executed.'
-        self._status_label.setText(f'Done \u2014 {summary}')
+        self._set_phase(PreviewPhase.DONE)
+        summary = format_install_summary(
+            install_results=list(results.results),
+            pre_skipped_count=pre_skipped,
+        )
+        self._status_label.setText(summary)
         self._install_btn.setEnabled(False)
         self._close_btn.setEnabled(True)
+        if m.has_post_sync:
+            self._run_commands_btn.setEnabled(True)
         self.install_finished.emit(results)
 
     def _on_install_error(self, message: str) -> None:
@@ -879,6 +919,76 @@ class SetupPreviewWidget(QWidget):
         self._status_label.setText(f'Install failed: {message}')
         self._install_btn.setEnabled(True)
         self._close_btn.setEnabled(True)
+
+    # --- Post-sync execution ---
+
+    def _on_run_commands(self) -> None:
+        """Handle the Run Commands button click."""
+        m = self._model
+        if m.manifest_path is None:
+            return
+
+        self._run_commands_btn.setEnabled(False)
+        self._install_btn.setEnabled(False)
+        self._close_btn.setEnabled(False)
+
+        self._status_label.setText('Running post-sync commands\u2026')
+
+        if not self._log_panel.isVisible():
+            self._log_panel.clear()
+            self._log_panel.show()
+
+        self._install_results = None
+        self._task = asyncio.create_task(self._run_post_sync_task())
+
+    async def _run_post_sync_task(self) -> None:
+        """Run the post-sync coroutine and route completion/errors."""
+        assert self._model.manifest_path is not None
+        try:
+            results = await run_post_sync(
+                self._porringer,
+                self._model.manifest_path,
+                project_directory=self._model.project_directory,
+                callbacks=InstallCallbacks(
+                    on_action_started=self._on_action_started,
+                    on_sub_progress=self._on_sub_progress,
+                    on_progress=self._on_action_progress,
+                ),
+                plugins=self._discovered_plugins,
+            )
+            self._on_post_sync_finished(results)
+        except asyncio.CancelledError:
+            self._on_post_sync_finished(SetupResults(actions=[]))
+        except Exception as exc:
+            logger.exception('Post-sync execution failed')
+            self._on_install_error(f'Post-sync failed: {exc}')
+
+    def _on_post_sync_finished(self, results: SetupResults) -> None:
+        """Handle post-sync completion."""
+        from synodic_client.operations.schema import format_install_summary
+
+        m = self._model
+        m.post_sync_completed = True
+        m.post_sync_results = list(results.results)
+
+        self._set_phase(PreviewPhase.DONE)
+
+        pre_skipped = len(m.install_plan.satisfied_indices) if m.install_plan else 0
+
+        # If we have stashed install results (auto-run path), use combined summary
+        install_results = (
+            list(self._install_results.results) if hasattr(self, '_install_results') and self._install_results else None
+        )
+        summary = format_install_summary(
+            install_results=install_results,
+            post_sync_results=m.post_sync_results,
+            pre_skipped_count=pre_skipped,
+        )
+        self._status_label.setText(summary)
+        self._install_btn.setEnabled(False)
+        self._run_commands_btn.setEnabled(False)
+        self._close_btn.setEnabled(True)
+        self.install_finished.emit(results)
 
 
 # ---------------------------------------------------------------------------

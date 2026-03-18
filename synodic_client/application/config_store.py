@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, Signal
 
-from synodic_client.resolution import ResolvedConfig, resolve_config, update_user_config
+from synodic_client.operations.config import get_config, update_config
+from synodic_client.schema import ResolvedConfig
 
 
 class ConfigStore(QObject):
@@ -33,7 +34,7 @@ class ConfigStore(QObject):
     def __init__(self, config: ResolvedConfig | None = None, parent: QObject | None = None) -> None:
         """Create a new store, optionally seeded with *config*."""
         super().__init__(parent)
-        self._config = config if config is not None else resolve_config()
+        self._config = config if config is not None else get_config()
 
     @property
     def config(self) -> ResolvedConfig:
@@ -52,7 +53,7 @@ class ConfigStore(QObject):
         Returns:
             The fresh :class:`ResolvedConfig`.
         """
-        self._config = update_user_config(**changes)
+        self._config = update_config(**changes)
         self.changed.emit(self._config)
         return self._config
 

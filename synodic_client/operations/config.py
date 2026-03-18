@@ -64,6 +64,29 @@ def set_config(key: str, value: object) -> ResolvedConfig:
     return update_user_config(**{key: value})
 
 
+def update_config(**changes: object) -> ResolvedConfig:
+    """Persist multiple configuration changes and return the new config.
+
+    Each key is validated against :class:`ResolvedConfig` fields before
+    writing.  This is the batch equivalent of :func:`set_config`.
+
+    Args:
+        **changes: Field-name / value pairs.
+
+    Returns:
+        The updated :class:`ResolvedConfig`.
+
+    Raises:
+        KeyError: If any key is not a recognised config field.
+    """
+    valid_keys = {f.name for f in dataclasses.fields(ResolvedConfig)}
+    for key in changes:
+        if key not in valid_keys:
+            msg = f'Unknown config key: {key!r}. Valid keys: {sorted(valid_keys)}'
+            raise KeyError(msg)
+    return update_user_config(**changes)
+
+
 def list_config_keys(config: ResolvedConfig | None = None) -> dict[str, ConfigKeyInfo]:
     """Return metadata for every configuration key.
 

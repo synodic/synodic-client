@@ -227,7 +227,7 @@ class DebugHandler:
         needed = sum(1 for s in model.action_states if classify_status(s.status) == 'needed')
         satisfied = sum(1 for s in model.action_states if classify_status(s.status) == 'satisfied')
         pending = sum(1 for s in model.action_states if classify_status(s.status) == 'pending')
-        upgradable = len(model.upgradable_keys)
+        upgradable = sum(1 for s in model.action_states if s.status == 'Update available')
 
         return json.dumps({
             'path': str(target),

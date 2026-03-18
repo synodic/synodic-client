@@ -7,6 +7,7 @@ No Qt, no signals — progress is reported via streaming async iterators.
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -20,6 +21,7 @@ from porringer.schema import (
     ManifestParsedEvent,
     PluginsDiscoveredEvent,
     ProgressEvent,
+    SetupAction,
     SetupParameters,
     SubActionProgressEvent,
     SyncStrategy,
@@ -245,28 +247,191 @@ async def execute_install(
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
     prerelease_packages: set[str] | None = None,
     discovered: DiscoveredPlugins | None = None,
+    exclude_post_sync: bool = False,
 ) -> AsyncIterator[tuple[str, ProgressEvent]]:
     """Execute setup actions and yield ``(stage, event)`` tuples.
 
     Yields ``("action_started", event)``, ``("sub_progress", event)``,
     ``("action_completed", event)``, etc. so callers can wire up
     progress tracking without coupling to porringer event kinds.
-    """
-    params = SetupParameters(
-        paths=[manifest_path],
-        project_directory=project_directory,
-        strategy=strategy,
-        prerelease_packages=prerelease_packages,
-    )
 
-    async for event in porringer.sync.execute_stream(params, plugins=discovered):
-        if isinstance(event, ManifestLoadedEvent):
-            yield ('manifest_loaded', event)
-        elif isinstance(event, ActionStartedEvent):
-            yield ('action_started', event)
-        elif isinstance(event, SubActionProgressEvent):
-            yield ('sub_progress', event)
-        elif isinstance(event, ActionCompletedEvent):
-            yield ('action_completed', event)
-        else:
-            yield ('other', event)
+    Args:
+        porringer: The porringer API instance.
+        manifest_path: Path to the manifest file.
+        project_directory: Optional project directory override.
+        strategy: Sync strategy (MINIMAL, LATEST, EXACT).
+        prerelease_packages: Optional prerelease overrides.
+        discovered: Pre-discovered plugins.
+        exclude_post_sync: When ``True``, post-sync commands are
+            stripped from the manifest before execution.  Use this
+            when post-sync is handled separately via
+            :func:`execute_post_sync`.
+    """
+    effective_path = manifest_path
+
+    if exclude_post_sync:
+        effective_path = _strip_post_sync(manifest_path)
+
+    try:
+        params = SetupParameters(
+            paths=[effective_path],
+            project_directory=project_directory,
+            strategy=strategy,
+            prerelease_packages=prerelease_packages,
+        )
+
+        async for event in porringer.sync.execute_stream(params, plugins=discovered):
+            if isinstance(event, ManifestLoadedEvent):
+                yield ('manifest_loaded', event)
+            elif isinstance(event, ActionStartedEvent):
+                yield ('action_started', event)
+            elif isinstance(event, SubActionProgressEvent):
+                yield ('sub_progress', event)
+            elif isinstance(event, ActionCompletedEvent):
+                yield ('action_completed', event)
+            else:
+                yield ('other', event)
+    finally:
+        if exclude_post_sync and effective_path != manifest_path:
+            effective_path.unlink(missing_ok=True)
+
+
+async def execute_post_sync(
+    porringer: API,
+    manifest_path: Path,
+    *,
+    project_directory: Path | None = None,
+    discovered: DiscoveredPlugins | None = None,
+) -> AsyncIterator[tuple[str, ProgressEvent]]:
+    """Execute only the post-sync commands from a manifest.
+
+    Builds a temporary manifest containing only the ``post_sync``
+    entries from the original, then streams execution events.
+
+    Args:
+        porringer: The porringer API instance.
+        manifest_path: Path to the original manifest file.
+        project_directory: Optional project directory override.
+        discovered: Pre-discovered plugins.
+
+    Yields:
+        ``(stage, event)`` tuples identical to :func:`execute_install`.
+    """
+    post_sync_path = _extract_post_sync(manifest_path)
+    if post_sync_path is None:
+        return
+
+    try:
+        params = SetupParameters(
+            paths=[post_sync_path],
+            project_directory=project_directory,
+        )
+
+        async for event in porringer.sync.execute_stream(params, plugins=discovered):
+            if isinstance(event, ManifestLoadedEvent):
+                yield ('manifest_loaded', event)
+            elif isinstance(event, ActionStartedEvent):
+                yield ('action_started', event)
+            elif isinstance(event, SubActionProgressEvent):
+                yield ('sub_progress', event)
+            elif isinstance(event, ActionCompletedEvent):
+                yield ('action_completed', event)
+            else:
+                yield ('other', event)
+    finally:
+        post_sync_path.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers for manifest filtering
+# ---------------------------------------------------------------------------
+
+
+def _strip_post_sync(manifest_path: Path) -> Path:
+    """Return a temp manifest copy with ``post_sync`` cleared.
+
+    If the manifest has no ``post_sync`` entries, returns the
+    original path unchanged.
+    """
+    import json
+
+    data = json.loads(manifest_path.read_text(encoding='utf-8'))
+    if not data.get('post_sync'):
+        return manifest_path
+
+    data['post_sync'] = []
+    fd, tmp_str = tempfile.mkstemp(prefix='synodic_nosync_', suffix='.json')
+    tmp = Path(tmp_str)
+    tmp.write_text(json.dumps(data), encoding='utf-8')
+    os.close(fd)
+    return tmp
+
+
+def _extract_post_sync(manifest_path: Path) -> Path | None:
+    """Return a temp manifest containing only ``post_sync`` entries.
+
+    Returns ``None`` if the manifest has no ``post_sync`` entries.
+    """
+    import json
+
+    data = json.loads(manifest_path.read_text(encoding='utf-8'))
+    post_sync = data.get('post_sync', [])
+    if not post_sync:
+        return None
+
+    minimal = {'version': data.get('version', '1'), 'post_sync': post_sync}
+    fd, tmp_str = tempfile.mkstemp(prefix='synodic_postsync_', suffix='.json')
+    tmp = Path(tmp_str)
+    tmp.write_text(json.dumps(minimal), encoding='utf-8')
+    os.close(fd)
+    return tmp
+
+
+# ---------------------------------------------------------------------------
+# Manifest action loading (lightweight, no dry-run checking)
+# ---------------------------------------------------------------------------
+
+
+async def load_manifest_actions(
+    porringer: API,
+    manifest_path: Path,
+    *,
+    project_directory: Path | None = None,
+    discovered: DiscoveredPlugins | None = None,
+) -> list[SetupAction]:
+    """Load the action list from a manifest without dry-run checking.
+
+    When *discovered* plugins are provided, uses the efficient
+    ``async_load_manifest`` single-shot path.  Otherwise falls back
+    to streaming ``execute_stream`` with ``dry_run=True`` and
+    extracting actions from the first parse event.
+
+    Args:
+        porringer: The porringer API instance.
+        manifest_path: Path to the manifest file.
+        project_directory: Optional project directory override.
+        discovered: Pre-discovered plugins for the fast path.
+
+    Returns:
+        The list of :class:`SetupAction` entries from the manifest.
+    """
+    if discovered is not None:
+        result = await porringer.sync.async_load_manifest(
+            manifest_path,
+            SyncStrategy.MINIMAL,
+            plugins=discovered,
+        )
+        return list(result.actions)
+
+    # Legacy streaming fallback
+    params = SetupParameters(
+        paths=[str(manifest_path)],
+        dry_run=True,
+        project_directory=project_directory,
+    )
+    actions: list[SetupAction] = []
+    async for event in porringer.sync.execute_stream(params):
+        if isinstance(event, ManifestParsedEvent):
+            actions.extend(event.manifest.actions)
+            break
+    return actions

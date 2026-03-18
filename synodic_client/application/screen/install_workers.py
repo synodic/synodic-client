@@ -1,7 +1,9 @@
 """Async worker coroutines for install and preview operations.
 
-Contains ``run_install``, ``run_preview``, and supporting helpers that
-stream porringer events back to the GUI via callbacks.
+Contains ``run_install``, ``run_preview``, ``run_post_sync``, and
+supporting helpers that stream porringer events back to the GUI via
+callbacks.  All execution delegates to the operations layer to
+avoid direct porringer API coupling.
 """
 
 from __future__ import annotations
@@ -18,7 +20,6 @@ from porringer.schema import (
     ManifestLoadedEvent,
     SetupAction,
     SetupActionResult,
-    SetupParameters,
     SetupResults,
     SubActionProgressEvent,
 )
@@ -30,7 +31,7 @@ from synodic_client.application.screen.schema import (
     PreviewConfig,
 )
 from synodic_client.application.uri import safe_rmtree
-from synodic_client.operations.install import preview_manifest_stream
+from synodic_client.operations.install import execute_install, execute_post_sync, preview_manifest_stream
 from synodic_client.operations.schema import (
     PreviewActionChecked,
     PreviewManifestParsed,
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# run_install — execute setup actions via porringer
+# run_install — execute setup actions via operations layer
 # ---------------------------------------------------------------------------
 
 
@@ -53,37 +54,91 @@ async def run_install(
     callbacks: InstallCallbacks | None = None,
     *,
     plugins: DiscoveredPlugins | None = None,
+    exclude_post_sync: bool = False,
 ) -> SetupResults:
-    """Execute setup actions via porringer and stream progress.
+    """Execute setup actions via the operations layer and stream progress.
 
-    Runs on the caller's event loop (typically the qasync main-thread
-    loop).  Callbacks are invoked between ``await`` points so the GUI
-    stays responsive without cross-thread signalling.
+    Delegates to :func:`~synodic_client.operations.install.execute_install`
+    and routes the tagged ``(stage, event)`` stream to GUI callbacks.
     """
     cfg = config or InstallConfig()
     cb = callbacks or InstallCallbacks()
-    params = SetupParameters(
-        paths=[manifest_path],
-        project_directory=cfg.project_directory,
-        strategy=cfg.strategy,
-        prerelease_packages=cfg.prerelease_packages,
-    )
     actions: list[SetupAction] = []
     collected: list[SetupActionResult] = []
     manifest_result: SetupResults | None = None
 
-    async for event in porringer.sync.execute_stream(params, plugins=plugins):
-        if isinstance(event, ManifestLoadedEvent):
+    async for stage, event in execute_install(
+        porringer,
+        manifest_path,
+        project_directory=cfg.project_directory,
+        strategy=cfg.strategy,
+        prerelease_packages=cfg.prerelease_packages,
+        discovered=plugins,
+        exclude_post_sync=exclude_post_sync,
+    ):
+        if stage == 'manifest_loaded' and isinstance(event, ManifestLoadedEvent):
             manifest_result = event.manifest
             actions = list(event.manifest.actions)
 
-        elif isinstance(event, ActionStartedEvent) and cb.on_action_started is not None:
+        elif stage == 'action_started' and isinstance(event, ActionStartedEvent) and cb.on_action_started is not None:
             cb.on_action_started(event.action)
 
-        elif isinstance(event, SubActionProgressEvent) and cb.on_sub_progress is not None:
+        elif stage == 'sub_progress' and isinstance(event, SubActionProgressEvent) and cb.on_sub_progress is not None:
             cb.on_sub_progress(event.action, event.sub_action)
 
-        elif isinstance(event, ActionCompletedEvent):
+        elif stage == 'action_completed' and isinstance(event, ActionCompletedEvent):
+            collected.append(event.result)
+            if cb.on_progress is not None:
+                cb.on_progress(event.action, event.result)
+
+    return SetupResults(
+        actions=actions,
+        results=collected,
+        manifest_path=manifest_result.manifest_path if manifest_result else None,
+        metadata=manifest_result.metadata if manifest_result else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# run_post_sync — execute only post-sync commands via operations layer
+# ---------------------------------------------------------------------------
+
+
+async def run_post_sync(
+    porringer: API,
+    manifest_path: Path,
+    *,
+    project_directory: Path | None = None,
+    callbacks: InstallCallbacks | None = None,
+    plugins: DiscoveredPlugins | None = None,
+) -> SetupResults:
+    """Execute only the post-sync commands from a manifest.
+
+    Delegates to :func:`~synodic_client.operations.install.execute_post_sync`
+    and routes events to GUI callbacks.
+    """
+    cb = callbacks or InstallCallbacks()
+    actions: list[SetupAction] = []
+    collected: list[SetupActionResult] = []
+    manifest_result: SetupResults | None = None
+
+    async for stage, event in execute_post_sync(
+        porringer,
+        manifest_path,
+        project_directory=project_directory,
+        discovered=plugins,
+    ):
+        if stage == 'manifest_loaded' and isinstance(event, ManifestLoadedEvent):
+            manifest_result = event.manifest
+            actions = list(event.manifest.actions)
+
+        elif stage == 'action_started' and isinstance(event, ActionStartedEvent) and cb.on_action_started is not None:
+            cb.on_action_started(event.action)
+
+        elif stage == 'sub_progress' and isinstance(event, SubActionProgressEvent) and cb.on_sub_progress is not None:
+            cb.on_sub_progress(event.action, event.sub_action)
+
+        elif stage == 'action_completed' and isinstance(event, ActionCompletedEvent):
             collected.append(event.result)
             if cb.on_progress is not None:
                 cb.on_progress(event.action, event.result)
