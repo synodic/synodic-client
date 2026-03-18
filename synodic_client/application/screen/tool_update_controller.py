@@ -22,11 +22,11 @@ from synodic_client.application.schema import UpdateTarget
 from synodic_client.application.screen.screen import MainWindow, ToolsView
 from synodic_client.operations.schema import UpdateResult
 from synodic_client.operations.tool import (
+    log_update_result,
     parse_plugin_key,
     remove_package,
     resolve_auto_update_scope,
     update_all_tools,
-    update_runtime_plugin,
     update_tool,
 )
 from synodic_client.resolution import (
@@ -274,40 +274,49 @@ class ToolUpdateOrchestrator:
                 tools_view.set_packages_pending(plugin_name, pending)
 
         bare_plugin, runtime_tag = parse_plugin_key(plugin_name)
-        if runtime_tag is not None:
-            self._set_task(
-                self._async_runtime_plugin_update(porringer, plugin_name, bare_plugin, runtime_tag),
-            )
-        else:
-            self._set_task(
-                self._async_single_plugin_update(porringer, plugin_name),
-            )
+        include_packages = self._resolve_include_packages(plugin_name, bare_plugin, runtime_tag)
+        self._set_task(
+            self._async_plugin_update(porringer, plugin_name, bare_plugin, runtime_tag, include_packages),
+        )
 
-    async def _async_runtime_plugin_update(
+    def _resolve_include_packages(
+        self,
+        signal_key: str,
+        bare_plugin: str,
+        runtime_tag: str | None,
+    ) -> set[str] | None:
+        """Derive the include-set of package names for a plugin update.
+
+        Only runtime-scoped updates consult the per-package auto-update
+        config; manifest-scoped updates include everything.
+        """
+        if runtime_tag is None:
+            return None
+        mapping = self._store.config.plugin_auto_update or {}
+        pkg_entry = mapping.get(signal_key) or mapping.get(bare_plugin)
+        if isinstance(pkg_entry, dict):
+            enabled_pkgs = {name for name, enabled in pkg_entry.items() if enabled}
+            if enabled_pkgs:
+                return enabled_pkgs
+        return None
+
+    async def _async_plugin_update(
         self,
         porringer: API,
         signal_key: str,
         plugin_name: str,
-        runtime_tag: str,
+        runtime_tag: str | None,
+        include_packages: set[str] | None,
     ) -> None:
-        """Run a runtime-scoped plugin update and route results."""
-        config = self._store.config
-        mapping = config.plugin_auto_update or {}
-        pkg_entry = mapping.get(signal_key) or mapping.get(plugin_name)
+        """Run a plugin update through the shared operations layer."""
         coordinator = self._window.coordinator
         discovered = coordinator.discovered_plugins if coordinator is not None else None
 
-        include_packages: set[str] | None = None
-        if isinstance(pkg_entry, dict):
-            enabled_pkgs = {name for name, enabled in pkg_entry.items() if enabled}
-            if enabled_pkgs:
-                include_packages = enabled_pkgs
-
         try:
-            result = await update_runtime_plugin(
+            result = await update_tool(
                 porringer,
                 plugin_name,
-                runtime_tag,
+                runtime_tag=runtime_tag,
                 include_packages=include_packages,
                 discovered=discovered,
                 on_package_starting=self._make_package_starting_cb(signal_key),
@@ -317,34 +326,11 @@ class ToolUpdateOrchestrator:
                 coordinator.invalidate()
             self._on_tool_update_finished(result, UpdateTarget(plugin=signal_key))
         except asyncio.CancelledError:
-            logger.debug('Runtime plugin update cancelled (shutdown)')
-            raise
-        except Exception as exc:
-            logger.exception('Runtime tool update failed')
-            self._fail_plugin_update(signal_key, f'Update failed: {exc}')
-
-    async def _async_single_plugin_update(self, porringer: API, plugin_name: str) -> None:
-        """Run a single-plugin tool update and route results."""
-        coordinator = self._window.coordinator
-        discovered = coordinator.discovered_plugins if coordinator is not None else None
-
-        try:
-            result = await update_all_tools(
-                porringer,
-                plugins={plugin_name},
-                discovered=discovered,
-                on_package_starting=self._make_package_starting_cb(plugin_name),
-                on_package_completed=self._make_package_completed_cb(plugin_name),
-            )
-            if coordinator is not None:
-                coordinator.invalidate()
-            self._on_tool_update_finished(result, UpdateTarget(plugin=plugin_name))
-        except asyncio.CancelledError:
-            logger.debug('Single plugin update cancelled (shutdown)')
+            logger.debug('Plugin update cancelled (shutdown)')
             raise
         except Exception as exc:
             logger.exception('Tool update failed')
-            self._fail_plugin_update(plugin_name, f'Update failed: {exc}')
+            self._fail_plugin_update(signal_key, f'Update failed: {exc}')
 
     # -- Single package update --
 
@@ -414,8 +400,6 @@ class ToolUpdateOrchestrator:
                 periodic (automatic) updates.
         """
         # Log summary + per-package version transitions (shared with CLI)
-        from synodic_client.operations.tool import log_update_result
-
         log_update_result(result)
 
         # Persist timestamps for updated packages

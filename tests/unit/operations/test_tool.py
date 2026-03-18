@@ -6,6 +6,8 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+from porringer.schema import SkipReason
+
 from synodic_client.operations.schema import UpdateResult
 from synodic_client.operations.tool import (
     check_tool_updates,
@@ -134,6 +136,7 @@ class TestUpdateTool:
         api = MagicMock()
         action_result = MagicMock()
         action_result.skipped = True
+        action_result.skip_reason = SkipReason.ALREADY_LATEST
         api.package.upgrade = AsyncMock(return_value=action_result)
 
         result = asyncio.run(update_tool(api, 'pip', 'requests'))

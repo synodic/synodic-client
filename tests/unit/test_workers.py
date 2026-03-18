@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 from porringer.core.schema import Package
-from porringer.schema.execution import SetupAction, SetupActionResult
+from porringer.schema.execution import SetupAction, SetupActionResult, SkipReason
 from porringer.schema.plugin import RuntimePackageResult
 
 from synodic_client.operations.schema import UpdateResult
@@ -217,6 +217,7 @@ class TestUpdateRuntimePlugin:
                 action=SetupAction(description='upgrade'),
                 success=False,
                 skipped=True,
+                skip_reason=SkipReason.ALREADY_LATEST,
             ),
         )
         completed: list[tuple[str, bool, bool]] = []

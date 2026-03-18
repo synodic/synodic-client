@@ -38,6 +38,7 @@ from synodic_client.application.screen.plugin_row import (
     PluginKindHeader,
     PluginProviderHeader,
     PluginRow,
+    RowPhase,
 )
 from synodic_client.application.screen.projects import ProjectsView
 from synodic_client.application.screen.schema import (
@@ -1396,7 +1397,7 @@ class ToolsView(QWidget):
                 and widget._signal_key == signal_key
                 and widget._package_name in package_names
             ):
-                widget.set_pending(True)
+                widget.set_phase(RowPhase.PENDING)
 
     def set_package_active(self, signal_key: str, package_name: str) -> None:
         """Transition a package row from *Pending* to *Updating* (spinner)."""
@@ -1406,16 +1407,14 @@ class ToolsView(QWidget):
                 and widget._signal_key == signal_key
                 and widget._package_name == package_name
             ):
-                widget.set_pending(False)
-                widget.set_updating(True)
+                widget.set_phase(RowPhase.UPDATING)
                 break
 
     def clear_plugin_row_states(self, signal_key: str) -> None:
         """Reset pending / updating state on all package rows for *signal_key*."""
         for widget in self._section_widgets:
             if isinstance(widget, PluginRow) and widget._signal_key == signal_key:
-                widget.set_pending(False)
-                widget.set_updating(False)
+                widget.set_phase(RowPhase.IDLE)
 
 
 class MainWindow(QMainWindow):

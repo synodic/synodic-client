@@ -152,6 +152,7 @@ async def update_tool(
     package_name: str | None = None,
     *,
     runtime_tag: str | None = None,
+    include_packages: set[str] | None = None,
     discovered: DiscoveredPlugins | None = None,
     on_package_starting: Callable[[str], None] | None = None,
     on_package_completed: Callable[[str, bool, bool], None] | None = None,
@@ -167,6 +168,8 @@ async def update_tool(
         plugin_name: The installer plugin name.
         package_name: Optional specific package to upgrade.
         runtime_tag: Optional runtime tag for per-runtime updates.
+        include_packages: Optional include-set of package names
+            (forwarded to runtime updates).
         discovered: Pre-discovered plugins.
         on_package_starting: Called with ``(package_name)`` before each
             package upgrade begins.
@@ -181,20 +184,15 @@ async def update_tool(
     if package_name is not None:
         # Single-package upgrade
         ref = PackageRef(name=package_name)
+        if on_package_starting is not None:
+            on_package_starting(package_name)
         action_result = await porringer.package.upgrade(
             plugin_name,
             ref,
             runtime_tag=runtime_tag,
             plugins=discovered,
         )
-        if action_result.skipped:
-            result.already_latest.append(package_name)
-        elif action_result.success:
-            result.packages_updated.append(package_name)
-            result.updated_packages.add(package_name)
-            _capture_versions(result, package_name, action_result)
-        else:
-            result.packages_failed.append(package_name)
+        _record_completed_event(result, action_result, package_name, on_package_completed)
         return result
 
     # Full-plugin update: re-sync all cached manifests for this plugin.
@@ -203,6 +201,7 @@ async def update_tool(
             porringer,
             plugin_name,
             runtime_tag,
+            include_packages=include_packages,
             discovered=discovered,
             on_package_starting=on_package_starting,
             on_package_completed=on_package_completed,
@@ -280,20 +279,7 @@ async def update_runtime_plugin(
                 runtime_tag=runtime_tag,
                 plugins=discovered,
             )
-            if ar.skipped:
-                result.already_latest.append(pkg_name)
-                if on_package_completed is not None:
-                    on_package_completed(pkg_name, False, True)
-            elif ar.success:
-                result.packages_updated.append(pkg_name)
-                result.updated_packages.add(pkg_name)
-                _capture_versions(result, pkg_name, ar)
-                if on_package_completed is not None:
-                    on_package_completed(pkg_name, True, False)
-            else:
-                result.packages_failed.append(pkg_name)
-                if on_package_completed is not None:
-                    on_package_completed(pkg_name, False, False)
+            _record_completed_event(result, ar, pkg_name, on_package_completed)
         break
     return result
 
