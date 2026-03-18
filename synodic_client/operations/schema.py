@@ -321,12 +321,14 @@ DEBUG_ACTIONS: dict[str, str] = {
 }
 
 #: Actions that require a live GUI instance (IPC via ``--live``).
-GUI_ONLY_ACTIONS: frozenset[str] = frozenset({
-    'check_update',
-    'tool_update',
-    'refresh_data',
-    'show_main',
-    'show_settings',
-    'apply_update',
-    'select_project',
-})
+GUI_ONLY_ACTIONS: frozenset[str] = frozenset(
+    {
+        'check_update',
+        'tool_update',
+        'refresh_data',
+        'show_main',
+        'show_settings',
+        'apply_update',
+        'select_project',
+    }
+)

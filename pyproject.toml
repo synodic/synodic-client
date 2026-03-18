@@ -16,7 +16,7 @@ dependencies = [
     "packaging>=26.0",
     "porringer>=0.2.1.dev85",
     "qasync>=0.28.0",
-    "velopack>=0.0.1444.dev49733",
+    "velopack>=0.0.1521.dev61717",
     "typer>=0.24.1",
 ]
 
@@ -30,7 +30,7 @@ build = [
 ]
 lint = [
     "ruff>=0.15.6",
-    "pyrefly>=0.56.0",
+    "pyrefly>=0.57.0",
 ]
 test = [
     "pytest>=9.0.2",
