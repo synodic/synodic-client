@@ -152,6 +152,31 @@ class ToolUpdateOrchestrator:
         tools_view.package_update_requested.connect(self.on_single_package_update)
         tools_view.package_remove_requested.connect(self.on_single_package_remove)
 
+    # -- Per-package progress callbacks --
+
+    def _make_package_starting_cb(self, signal_key: str) -> Callable[[str], None]:
+        """Return a callback that transitions a package row to *Updating*."""
+
+        def _on_starting(package_name: str) -> None:
+            tools_view = self._window.tools_view
+            if tools_view is not None:
+                tools_view.set_package_active(signal_key, package_name)
+
+        return _on_starting
+
+    def _make_package_completed_cb(
+        self,
+        signal_key: str,
+    ) -> Callable[[str, bool, bool], None]:
+        """Return a callback that clears a package row's updating state."""
+
+        def _on_completed(package_name: str, _success: bool, _skipped: bool) -> None:
+            tools_view = self._window.tools_view
+            if tools_view is not None:
+                tools_view.set_package_updating(signal_key, package_name, False)
+
+        return _on_completed
+
     # -- ToolsView error helpers --
 
     def _fail_plugin_update(self, plugin_name: str, error: str) -> None:
@@ -159,6 +184,7 @@ class ToolUpdateOrchestrator:
         tools_view = self._window.tools_view
         if tools_view is not None:
             tools_view.set_plugin_updating(plugin_name, False)
+            tools_view.clear_plugin_row_states(plugin_name)
             tools_view.set_plugin_error(plugin_name, error)
 
     def _fail_package_update(
@@ -243,6 +269,9 @@ class ToolUpdateOrchestrator:
         tools_view = self._window.tools_view
         if tools_view is not None:
             tools_view.set_plugin_updating(plugin_name, True)
+            pending = tools_view.get_plugin_update_packages(plugin_name)
+            if pending:
+                tools_view.set_packages_pending(plugin_name, pending)
 
         bare_plugin, runtime_tag = parse_plugin_key(plugin_name)
         if runtime_tag is not None:
@@ -281,6 +310,8 @@ class ToolUpdateOrchestrator:
                 runtime_tag,
                 include_packages=include_packages,
                 discovered=discovered,
+                on_package_starting=self._make_package_starting_cb(signal_key),
+                on_package_completed=self._make_package_completed_cb(signal_key),
             )
             if coordinator is not None:
                 coordinator.invalidate()
@@ -302,6 +333,8 @@ class ToolUpdateOrchestrator:
                 porringer,
                 plugins={plugin_name},
                 discovered=discovered,
+                on_package_starting=self._make_package_starting_cb(plugin_name),
+                on_package_completed=self._make_package_completed_cb(plugin_name),
             )
             if coordinator is not None:
                 coordinator.invalidate()
@@ -406,6 +439,10 @@ class ToolUpdateOrchestrator:
             if result.version_map:
                 signal_key = target.plugin if target else result.plugin
                 tools_view.record_updates_completed(signal_key, result.version_map)
+            # Clear pending / updating spinners left on child rows
+            if target is not None and not target.package:
+                tools_view.set_plugin_updating(target.plugin, False)
+                tools_view.clear_plugin_row_states(target.plugin)
             tools_view.invalidate_update_data()
             if self._window.isVisible() and target is None:
                 tools_view.refresh()

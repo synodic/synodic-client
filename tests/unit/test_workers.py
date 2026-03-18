@@ -159,3 +159,73 @@ class TestUpdateRuntimePlugin:
         assert result.updated == 1
         assert result.updated_packages == {'ruff'}
         porringer.package.upgrade.assert_called_once()
+
+    @staticmethod
+    def test_callbacks_fire_in_order() -> None:
+        """on_package_starting and on_package_completed fire per package."""
+        porringer = MagicMock()
+        porringer.package.list_by_runtime = AsyncMock(
+            return_value=[
+                RuntimePackageResult(
+                    provider='pim',
+                    tag='3.12',
+                    executable=Path('/usr/bin/python3.12'),
+                    packages=[
+                        Package(name='pdm', version='2.22.0'),
+                        Package(name='ruff', version='0.1.0'),
+                    ],
+                ),
+            ],
+        )
+        porringer.package.upgrade = AsyncMock(
+            return_value=SetupActionResult(
+                action=SetupAction(description='upgrade'),
+                success=True,
+            ),
+        )
+        started: list[str] = []
+        completed: list[tuple[str, bool, bool]] = []
+        result = asyncio.run(
+            update_runtime_plugin(
+                porringer,
+                'pipx',
+                '3.12',
+                on_package_starting=started.append,
+                on_package_completed=lambda name, ok, skip: completed.append((name, ok, skip)),
+            ),
+        )
+        assert result.updated == _EXPECTED_RUNTIME_UPGRADES
+        assert started == ['pdm', 'ruff']
+        assert completed == [('pdm', True, False), ('ruff', True, False)]
+
+    @staticmethod
+    def test_callbacks_skipped_packages() -> None:
+        """on_package_completed reports skipped=True for already-latest packages."""
+        porringer = MagicMock()
+        porringer.package.list_by_runtime = AsyncMock(
+            return_value=[
+                RuntimePackageResult(
+                    provider='pim',
+                    tag='3.12',
+                    executable=Path('/usr/bin/python3.12'),
+                    packages=[Package(name='pdm', version='2.22.0')],
+                ),
+            ],
+        )
+        porringer.package.upgrade = AsyncMock(
+            return_value=SetupActionResult(
+                action=SetupAction(description='upgrade'),
+                success=False,
+                skipped=True,
+            ),
+        )
+        completed: list[tuple[str, bool, bool]] = []
+        asyncio.run(
+            update_runtime_plugin(
+                porringer,
+                'pipx',
+                '3.12',
+                on_package_completed=lambda name, ok, skip: completed.append((name, ok, skip)),
+            ),
+        )
+        assert completed == [('pdm', False, True)]

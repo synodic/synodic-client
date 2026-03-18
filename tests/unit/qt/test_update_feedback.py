@@ -72,8 +72,9 @@ class TestPluginProviderHeaderUpdates:
         )
         header.set_updating(True)
         assert header._update_btn is not None
-        assert header._update_btn.text() == 'Updating\u2026'
-        assert not header._update_btn.isEnabled()
+        assert header._update_btn.isHidden()
+        assert header._checking_spinner is not None
+        assert not header._checking_spinner.isHidden()
 
     @staticmethod
     def test_set_updating_false_restores_button() -> None:
@@ -89,6 +90,8 @@ class TestPluginProviderHeaderUpdates:
         assert header._update_btn is not None
         assert header._update_btn.text() == 'Update'
         assert header._update_btn.isEnabled()
+        assert header._checking_spinner is not None
+        assert header._checking_spinner.isHidden()
 
     @staticmethod
     def test_set_updating_noop_without_controls() -> None:
@@ -200,8 +203,9 @@ class TestPluginRowUpdates:
         )
         row.set_updating(True)
         assert row._update_btn is not None
-        assert row._update_btn.text() == 'Updating\u2026'
-        assert not row._update_btn.isEnabled()
+        assert row._update_btn.isHidden()
+        assert row._row_spinner is not None
+        assert not row._row_spinner.isHidden()
 
     @staticmethod
     def test_set_updating_false_restores() -> None:
@@ -219,6 +223,8 @@ class TestPluginRowUpdates:
         assert row._update_btn is not None
         assert row._update_btn.text() == 'Update'
         assert row._update_btn.isEnabled()
+        assert row._row_spinner is not None
+        assert row._row_spinner.isHidden()
 
     @staticmethod
     def test_update_requested_signal() -> None:
@@ -257,8 +263,8 @@ class TestPluginRowUpdates:
             )
         )
         row.set_checking(True)
-        assert row._checking_spinner is not None
-        assert not row._checking_spinner.isHidden()
+        assert row._row_spinner is not None
+        assert not row._row_spinner.isHidden()
         assert row._update_btn is not None
         assert row._update_btn.isHidden()
 
@@ -275,15 +281,76 @@ class TestPluginRowUpdates:
         )
         row.set_checking(True)
         row.set_checking(False)
-        assert row._checking_spinner is not None
-        assert row._checking_spinner.isHidden()
+        assert row._row_spinner is not None
+        assert row._row_spinner.isHidden()
 
     @staticmethod
-    def test_set_checking_noop_without_toggle() -> None:
-        """set_checking is a no-op when show_toggle is False (no spinner created)."""
+    def test_spinner_exists_without_toggle() -> None:
+        """The row spinner is always created even without show_toggle."""
+        row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx'))
+        assert row._row_spinner is not None
+
+    @staticmethod
+    def test_set_checking_works_without_toggle() -> None:
+        """set_checking works for rows without a toggle (spinner still created)."""
         row = PluginRow(PluginRowData(name='pdm', plugin_name='pipx'))
         row.set_checking(True)
-        assert row._checking_spinner is None
+        assert row._row_spinner is not None
+        assert not row._row_spinner.isHidden()
+        row.set_checking(False)
+        assert row._row_spinner.isHidden()
+
+    @staticmethod
+    def test_set_pending_true_shows_status() -> None:
+        """set_pending(True) shows 'Pending' text and hides update button."""
+        row = PluginRow(
+            PluginRowData(
+                name='pdm',
+                plugin_name='pipx',
+                show_toggle=True,
+                has_update=True,
+            )
+        )
+        row.set_pending(True)
+        assert row._update_status_label is not None
+        assert row._update_status_label.text() == 'Pending'
+        assert not row._update_status_label.isHidden()
+        assert row._update_btn is not None
+        assert row._update_btn.isHidden()
+
+    @staticmethod
+    def test_set_pending_false_clears_status() -> None:
+        """set_pending(False) hides the status label."""
+        row = PluginRow(
+            PluginRowData(
+                name='pdm',
+                plugin_name='pipx',
+                show_toggle=True,
+                has_update=True,
+            )
+        )
+        row.set_pending(True)
+        row.set_pending(False)
+        assert row._update_status_label is not None
+        assert row._update_status_label.isHidden()
+
+    @staticmethod
+    def test_set_updating_clears_pending() -> None:
+        """set_updating(True) hides the pending status label."""
+        row = PluginRow(
+            PluginRowData(
+                name='pdm',
+                plugin_name='pipx',
+                show_toggle=True,
+                has_update=True,
+            )
+        )
+        row.set_pending(True)
+        row.set_updating(True)
+        assert row._update_status_label is not None
+        assert row._update_status_label.isHidden()
+        assert row._row_spinner is not None
+        assert not row._row_spinner.isHidden()
 
     @staticmethod
     def test_host_tool_label_shown_when_set() -> None:

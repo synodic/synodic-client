@@ -40,6 +40,7 @@ from synodic_client.application.theme import (
     PLUGIN_ROW_PROJECT_TAG_TRANSITIVE_STYLE,
     PLUGIN_ROW_REMOVE_STYLE,
     PLUGIN_ROW_STATUS_MIN_WIDTH,
+    PLUGIN_ROW_STATUS_PENDING_STYLE,
     PLUGIN_ROW_STATUS_STYLE,
     PLUGIN_ROW_STYLE,
     PLUGIN_ROW_TIMESTAMP_MIN_WIDTH,
@@ -249,15 +250,18 @@ class PluginProviderHeader(QFrame):
             update_btn.setToolTip('Not installed \u2014 cannot update')
 
     def set_updating(self, updating: bool) -> None:
-        """Toggle the button between *Updating…* and *Update* states."""
-        if self._update_btn is None:
-            return
+        """Toggle between *Updating…* (with spinner) and *Update* states."""
         if updating:
-            self._update_btn.setText('Updating\u2026')
-            self._update_btn.setEnabled(False)
+            if self._checking_spinner is not None:
+                self._checking_spinner.start()
+            if self._update_btn is not None:
+                self._update_btn.hide()
         else:
-            self._update_btn.setText('Update')
-            self._update_btn.setEnabled(True)
+            if self._checking_spinner is not None:
+                self._checking_spinner.stop()
+            if self._update_btn is not None:
+                self._update_btn.setText('Update')
+                self._update_btn.setEnabled(True)
 
     def set_checking(self, checking: bool) -> None:
         """Show or hide the inline checking spinner."""
@@ -331,7 +335,7 @@ class PluginRow(QFrame):
         self._signal_key = f'{data.plugin_name}:{data.runtime_tag}' if data.runtime_tag else data.plugin_name
         self._update_btn: QPushButton | None = None
         self._remove_btn: QPushButton | None = None
-        self._checking_spinner: _RowSpinner | None = None
+        self._row_spinner: _RowSpinner | None = None
         self._host_label: QLabel | None = None
         self._project_paths: list[str] = list(data.project_paths)
         self._project_labels: list[str] = [p.project_label for p in data.project_instances]
@@ -386,6 +390,12 @@ class PluginRow(QFrame):
         if data.show_toggle:
             self._build_toggle(layout, data)
 
+        # Inline spinner — always created so both checking and updating
+        # flows can use it regardless of whether the toggle is shown.
+        if self._row_spinner is None:
+            self._row_spinner = _RowSpinner(self)
+            layout.addWidget(self._row_spinner)
+
         # Update button — always created for alignment, hidden when no update
         self._build_update_button(layout, data)
 
@@ -421,7 +431,7 @@ class PluginRow(QFrame):
         self._build_remove_button(layout, data)
 
     def _build_toggle(self, layout: QHBoxLayout, data: PluginRowData) -> None:
-        """Add the auto-update toggle and inline checking spinner."""
+        """Add the auto-update toggle button."""
         toggle_btn = QPushButton('Auto')
         toggle_btn.setCheckable(True)
         toggle_btn.setChecked(data.auto_update)
@@ -436,8 +446,8 @@ class PluginRow(QFrame):
         )
         layout.addWidget(toggle_btn)
 
-        self._checking_spinner = _RowSpinner(self)
-        layout.addWidget(self._checking_spinner)
+        self._row_spinner = _RowSpinner(self)
+        layout.addWidget(self._row_spinner)
 
     def _build_update_button(self, layout: QHBoxLayout, data: PluginRowData) -> None:
         """Add the per-package update button (always created, visibility toggled)."""
@@ -484,26 +494,48 @@ class PluginRow(QFrame):
         layout.addWidget(remove_btn)
 
     def set_updating(self, updating: bool) -> None:
-        """Toggle the button between *Updating…* and *Update* states."""
-        if self._update_btn is None:
-            return
+        """Toggle the inline spinner and button between updating/idle states."""
         if updating:
-            self._update_btn.setText('Updating\u2026')
-            self._update_btn.setEnabled(False)
+            if self._row_spinner is not None:
+                self._row_spinner.start()
+            if self._update_btn is not None:
+                self._update_btn.hide()
+            if self._update_status_label is not None:
+                self._update_status_label.hide()
         else:
-            self._update_btn.setText('Update')
-            self._update_btn.setEnabled(True)
+            if self._row_spinner is not None:
+                self._row_spinner.stop()
+            if self._update_btn is not None:
+                self._update_btn.setText('Update')
+                self._update_btn.setEnabled(True)
 
     def set_checking(self, checking: bool) -> None:
         """Show or hide the inline checking spinner."""
-        if self._checking_spinner is None:
+        if self._row_spinner is None:
             return
         if checking:
-            self._checking_spinner.start()
+            self._row_spinner.start()
             if self._update_btn is not None:
                 self._update_btn.hide()
         else:
-            self._checking_spinner.stop()
+            self._row_spinner.stop()
+
+    def set_pending(self, pending: bool) -> None:
+        """Show or clear the *Pending* status on this row.
+
+        When *pending* is ``True`` the update button is hidden and
+        ``Pending`` text is shown.  When ``False`` the text is cleared
+        (button visibility is restored by the next badge refresh).
+        """
+        if self._update_status_label is not None:
+            if pending:
+                self._update_status_label.setText('Pending')
+                self._update_status_label.setStyleSheet(PLUGIN_ROW_STATUS_PENDING_STYLE)
+                self._update_status_label.show()
+            else:
+                self._update_status_label.hide()
+        if pending and self._update_btn is not None:
+            self._update_btn.hide()
 
     def set_removing(self, removing: bool) -> None:
         """Toggle the remove button between *Removing…* and *×* states."""

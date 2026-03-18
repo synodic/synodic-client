@@ -217,6 +217,9 @@ PLUGIN_ROW_ERROR_STYLE = 'font-size: 11px; color: #f48771;'
 PLUGIN_ROW_STATUS_STYLE = 'font-size: 10px; color: #808080;'
 """Muted inline status text shown after an auto-update check (e.g. 'Up to date')."""
 
+PLUGIN_ROW_STATUS_PENDING_STYLE = 'font-size: 10px; color: #569cd6;'
+"""Blue status text for 'Pending' during a plugin-level update."""
+
 PLUGIN_ROW_STATUS_UP_TO_DATE_STYLE = 'font-size: 10px; color: #89d185;'
 """Green status text for 'Up to date'."""
 
