@@ -313,6 +313,25 @@ class TestResolveAutoUpdateScope:
         # No per-package filtering from composite keys
         assert packages is None
 
+    @staticmethod
+    def test_empty_config_returns_none_pair() -> None:
+        """Empty mapping → (None, None)."""
+        plugins, packages = resolve_auto_update_scope({}, ['pip'])
+        assert plugins is None
+        assert packages is None
+
+    @staticmethod
+    def test_manifest_packages_included() -> None:
+        """Manifest packages are added to the include set."""
+        _, packages = resolve_auto_update_scope(
+            {},
+            ['pip'],
+            manifest_packages={'pip': {'requests', 'flask'}},
+        )
+        assert packages is not None
+        assert 'requests' in packages
+        assert 'flask' in packages
+
 
 # ---------------------------------------------------------------------------
 # resolve_update_config

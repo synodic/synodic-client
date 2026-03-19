@@ -6,28 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.screen.schema import UpdateTarget
 from synodic_client.application.screen.tray import TrayScreen
 from synodic_client.operations.schema import UpdateResult
-from synodic_client.resolution import ResolvedConfig
-from synodic_client.schema import DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES, DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
 
-
-def _make_config() -> ResolvedConfig:
-    return ResolvedConfig(
-        update_source=None,
-        update_channel='stable',
-        auto_update_interval_minutes=DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
-        tool_update_interval_minutes=DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
-        plugin_auto_update=None,
-        prerelease_packages=None,
-        auto_apply=True,
-        auto_start=True,
-        debug_logging=False,
-        last_client_update=None,
-        last_tool_updates=None,
-    )
+from .conftest import make_config_store
 
 
 @pytest.fixture
@@ -46,7 +29,7 @@ def tray_screen():
         app = MagicMock()
         client = MagicMock()
         window = MagicMock()
-        store = ConfigStore(_make_config())
+        store = make_config_store()
         with patch('synodic_client.application.screen.tray.SettingsWindow'):
             ts = TrayScreen(app, client, window, store=store)
 

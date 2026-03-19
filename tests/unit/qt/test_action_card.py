@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import MagicMock
-
 from porringer.schema import (
-    SetupAction,
     SetupActionResult,
     SkipReason,
 )
@@ -35,64 +31,7 @@ from synodic_client.application.theme import (
 )
 from synodic_client.operations.schema import resolve_action_status
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_action(
-    *,
-    kind: PluginKind | None = PluginKind.PACKAGE,
-    description: str = 'Install requests',
-    installer: str | None = 'pip',
-    package: str = 'requests',
-    **overrides: Any,
-) -> SetupAction:
-    """Create a mock SetupAction with sensible defaults.
-
-    Extra keyword arguments are set as attributes on the mock, supporting
-    ``package_description``, ``include_prereleases``, ``command``,
-    ``cli_command``, and ``plugin_target``.
-    """
-    action = MagicMock(spec=SetupAction)
-    action.kind = kind
-    action.description = description
-    action.installer = installer
-    pkg_mock = MagicMock()
-    pkg_mock.name = package
-    pkg_mock.constraint = overrides.get('constraint')
-    pkg_mock.configure_mock(**{'__str__': MagicMock(return_value=package)})
-    action.package = pkg_mock
-    action.package_description = overrides.get('package_description', description)
-    action.command = overrides.get('command')
-    action.include_prereleases = overrides.get('include_prereleases', False)
-    action.plugin_target = overrides.get('plugin_target')
-    return action
-
-
-def _make_result(
-    *,
-    success: bool = True,
-    skipped: bool = False,
-    skip_reason: SkipReason | None = None,
-    message: str | None = None,
-    **overrides: Any,
-) -> SetupActionResult:
-    """Create a SetupActionResult.
-
-    Extra keyword arguments (``action``, ``installed_version``,
-    ``available_version``, ``cli_command``) are forwarded to the constructor.
-    """
-    return SetupActionResult(
-        action=overrides.get('action') or _make_action(),
-        success=success,
-        skipped=skipped,
-        skip_reason=skip_reason,
-        message=message,
-        installed_version=overrides.get('installed_version'),
-        available_version=overrides.get('available_version'),
-        cli_command=overrides.get('cli_command'),
-    )
+from .conftest import make_action, make_result
 
 
 def _check(card: ActionCard, result: SetupActionResult) -> None:
@@ -126,7 +65,7 @@ class TestActionCardSkeleton:
     def test_skeleton_populate_does_nothing() -> None:
         """Calling populate on a skeleton card is a no-op."""
         card = ActionCard(skeleton=True)
-        action = _make_action()
+        action = make_action()
         card.populate(action)
         assert not card.status_text()
 
@@ -134,7 +73,7 @@ class TestActionCardSkeleton:
     def test_skeleton_set_check_result_does_nothing() -> None:
         """set_check_result on skeleton is a no-op."""
         card = ActionCard(skeleton=True)
-        result = _make_result()
+        result = make_result()
         card.set_check_result(result, 'Needed')
         assert not card.status_text()
 
@@ -158,7 +97,7 @@ class TestActionCardPopulated:
     def test_populate_shows_package_name() -> None:
         """populate() fills the package label."""
         card = ActionCard()
-        action = _make_action(package='ruff')
+        action = make_action(package='ruff')
         card.populate(action)
         assert card._package_label.text() == 'ruff'
 
@@ -166,7 +105,7 @@ class TestActionCardPopulated:
     def test_populate_shows_type_badge() -> None:
         """populate() sets the type badge."""
         card = ActionCard()
-        action = _make_action(kind=PluginKind.TOOL)
+        action = make_action(kind=PluginKind.TOOL)
         card.populate(action)
         assert card._type_badge.text() == 'Tool'
 
@@ -174,7 +113,7 @@ class TestActionCardPopulated:
     def test_populate_shows_description() -> None:
         """populate() sets the description label."""
         card = ActionCard()
-        action = _make_action(package='ruff', package_description='A fast Python linter')
+        action = make_action(package='ruff', package_description='A fast Python linter')
         card.populate(action)
         assert card._desc_label.text() == 'A fast Python linter'
 
@@ -182,7 +121,7 @@ class TestActionCardPopulated:
     def test_initial_status_is_checking() -> None:
         """Card starts with 'Checking…' status (via spinner) after populate."""
         card = ActionCard()
-        action = _make_action()
+        action = make_action()
         card.populate(action)
         assert card.status_text() == 'Checking\u2026'
         assert card._checking
@@ -193,7 +132,7 @@ class TestActionCardPopulated:
     def test_installer_missing_shows_not_installed() -> None:
         """Card shows 'Not installed' when the plugin is missing."""
         card = ActionCard()
-        action = _make_action(installer='uv')
+        action = make_action(installer='uv')
         card.populate(action, plugin_installed={'uv': False})
         assert card.status_text() == 'Not installed'
 
@@ -201,7 +140,7 @@ class TestActionCardPopulated:
     def test_installer_present_shows_checking() -> None:
         """Card shows spinner (Checking) when the plugin is installed."""
         card = ActionCard()
-        action = _make_action(installer='pip')
+        action = make_action(installer='pip')
         card.populate(action, plugin_installed={'pip': True})
         assert card.status_text() == 'Checking\u2026'
         assert card._checking
@@ -210,7 +149,7 @@ class TestActionCardPopulated:
     def test_prerelease_checkbox_shown_for_packages() -> None:
         """Pre-release checkbox is visible for package actions."""
         card = ActionCard()
-        action = _make_action(package='requests')
+        action = make_action(package='requests')
         card.populate(action)
         assert not card._prerelease_cb.isHidden()
 
@@ -218,7 +157,7 @@ class TestActionCardPopulated:
     def test_prerelease_checkbox_locked_by_manifest() -> None:
         """Pre-release checkbox locked if manifest enables it and no user override."""
         card = ActionCard()
-        action = _make_action(include_prereleases=True)
+        action = make_action(include_prereleases=True)
         card.populate(action, prerelease_overrides=set())
         assert card._prerelease_cb.isChecked()
         assert not card._prerelease_cb.isEnabled()
@@ -227,7 +166,7 @@ class TestActionCardPopulated:
     def test_prerelease_checkbox_unlocked_if_user_override() -> None:
         """Pre-release checkbox unlocked when user has an override."""
         card = ActionCard()
-        action = _make_action(package='requests', include_prereleases=True)
+        action = make_action(package='requests', include_prereleases=True)
         card.populate(action, prerelease_overrides={'requests'})
         assert card._prerelease_cb.isChecked()
         assert card._prerelease_cb.isEnabled()
@@ -245,8 +184,8 @@ class TestActionCardCheckResult:
     def test_needed_status() -> None:
         """Non-skipped result shows 'Needed'."""
         card = ActionCard()
-        card.populate(_make_action())
-        result = _make_result(success=True, skipped=False)
+        card.populate(make_action())
+        result = make_result(success=True, skipped=False)
         _check(card, result)
         assert card.status_text() == 'Needed'
         assert ACTION_CARD_STATUS_NEEDED in card._status_label.styleSheet()
@@ -255,8 +194,8 @@ class TestActionCardCheckResult:
     def test_already_installed_status() -> None:
         """Skipped ALREADY_INSTALLED shows '\u2713 Already installed'."""
         card = ActionCard()
-        card.populate(_make_action())
-        result = _make_result(
+        card.populate(make_action())
+        result = make_result(
             skipped=True,
             skip_reason=SkipReason.ALREADY_INSTALLED,
             installed_version='3.5.2',
@@ -269,8 +208,8 @@ class TestActionCardCheckResult:
     def test_update_available_status() -> None:
         """Skipped UPDATE_AVAILABLE shows 'Update available'."""
         card = ActionCard()
-        card.populate(_make_action())
-        result = _make_result(
+        card.populate(make_action())
+        result = make_result(
             skipped=True,
             skip_reason=SkipReason.UPDATE_AVAILABLE,
             installed_version='1.0.0',
@@ -285,8 +224,8 @@ class TestActionCardCheckResult:
     def test_version_transition_shown() -> None:
         """Version label shows 'old → new' for update-available actions."""
         card = ActionCard()
-        card.populate(_make_action())
-        result = _make_result(
+        card.populate(make_action())
+        result = make_result(
             skipped=True,
             skip_reason=SkipReason.UPDATE_AVAILABLE,
             installed_version='1.0.0',
@@ -301,8 +240,8 @@ class TestActionCardCheckResult:
     def test_installed_version_shown() -> None:
         """Version label shows installed version for satisfied actions."""
         card = ActionCard()
-        card.populate(_make_action())
-        result = _make_result(
+        card.populate(make_action())
+        result = make_result(
             skipped=True,
             skip_reason=SkipReason.ALREADY_INSTALLED,
             installed_version='3.5.2',
@@ -314,8 +253,8 @@ class TestActionCardCheckResult:
     def test_available_version_only_shown() -> None:
         """Version label shows '→ target' when only available_version is set."""
         card = ActionCard()
-        card.populate(_make_action())
-        result = _make_result(
+        card.populate(make_action())
+        result = make_result(
             success=True,
             skipped=False,
             available_version='1.2.0',
@@ -328,7 +267,7 @@ class TestActionCardCheckResult:
     def test_finalize_checking_resolves_to_needed() -> None:
         """finalize_checking stops spinner and changes to 'Needed'."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         assert card.status_text() == 'Checking\u2026'
         assert card._checking
         card.finalize_checking()
@@ -340,7 +279,7 @@ class TestActionCardCheckResult:
     def test_finalize_checking_leaves_not_installed() -> None:
         """finalize_checking does not change 'Not installed'."""
         card = ActionCard()
-        card.populate(_make_action(installer='uv'), plugin_installed={'uv': False})
+        card.populate(make_action(installer='uv'), plugin_installed={'uv': False})
         assert card.status_text() == 'Not installed'
         card.finalize_checking()
         assert card.status_text() == 'Not installed'
@@ -358,8 +297,8 @@ class TestActionCardCheckFailure:
     def test_failed_check_shows_failed_status() -> None:
         """A check result with success=False shows 'Failed'."""
         card = ActionCard()
-        card.populate(_make_action(kind=PluginKind.SCM, package='mypackage', installer='git'))
-        result = _make_result(
+        card.populate(make_action(kind=PluginKind.SCM, package='mypackage', installer='git'))
+        result = make_result(
             success=False,
             skipped=False,
             message="No SCM plugin was found for ecosystem 'git'.",
@@ -372,10 +311,10 @@ class TestActionCardCheckFailure:
     def test_failed_check_shows_error_tooltip() -> None:
         """A failed check result surfaces the error message as a tooltip."""
         card = ActionCard()
-        action = _make_action(kind=PluginKind.SCM, package='repo', installer=None)
+        action = make_action(kind=PluginKind.SCM, package='repo', installer=None)
         card.populate(action)
         msg = "SCM environment 'None' is not available"
-        result = _make_result(success=False, skipped=False, message=msg)
+        result = make_result(success=False, skipped=False, message=msg)
         _check(card, result)
         assert card._status_label.toolTip() == msg
 
@@ -383,9 +322,9 @@ class TestActionCardCheckFailure:
     def test_failed_check_stops_spinner() -> None:
         """A failed check result stops the inline spinner."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         assert card._checking
-        result = _make_result(success=False, skipped=False, message='error')
+        result = make_result(success=False, skipped=False, message='error')
         _check(card, result)
         assert not card._checking
         assert not card._spinner_timer.isActive()
@@ -394,8 +333,8 @@ class TestActionCardCheckFailure:
     def test_failed_check_not_update_available() -> None:
         """A failed check is not considered 'Update available'."""
         card = ActionCard()
-        card.populate(_make_action())
-        result = _make_result(success=False, skipped=False, message='backend missing')
+        card.populate(make_action())
+        result = make_result(success=False, skipped=False, message='backend missing')
         _check(card, result)
         assert not card.is_update_available()
 
@@ -403,8 +342,8 @@ class TestActionCardCheckFailure:
     def test_success_true_still_needed() -> None:
         """A non-skipped, successful result still shows 'Needed'."""
         card = ActionCard()
-        card.populate(_make_action())
-        result = _make_result(success=True, skipped=False)
+        card.populate(make_action())
+        result = make_result(success=True, skipped=False)
         _check(card, result)
         assert card.status_text() == 'Needed'
         assert ACTION_CARD_STATUS_NEEDED in card._status_label.styleSheet()
@@ -422,7 +361,7 @@ class TestActionCardExecution:
     def test_set_executing_shows_running() -> None:
         """set_executing changes status to 'Running…'."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         card.set_executing()
         assert card.status_text() == 'Running\u2026'
         assert ACTION_CARD_STATUS_RUNNING in card._status_label.styleSheet()
@@ -431,7 +370,7 @@ class TestActionCardExecution:
     def test_set_executing_changes_border_style() -> None:
         """set_executing applies the executing card style."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         card.set_executing()
         assert ACTION_CARD_EXECUTING_STYLE in card.styleSheet()
 
@@ -439,9 +378,9 @@ class TestActionCardExecution:
     def test_set_result_success() -> None:
         """Successful result shows 'Done' status."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         card.set_executing()
-        result = _make_result(success=True, message='Installed ruff-0.8.0')
+        result = make_result(success=True, message='Installed ruff-0.8.0')
         card.set_result(result)
         assert card.status_text() == 'Done'
         assert ACTION_CARD_STATUS_DONE in card._status_label.styleSheet()
@@ -451,9 +390,9 @@ class TestActionCardExecution:
     def test_set_result_failure() -> None:
         """Failed result shows 'Failed' with error in log."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         card.set_executing()
-        result = _make_result(success=False, message='Network timeout')
+        result = make_result(success=False, message='Network timeout')
         card.set_result(result)
         assert card.status_text() == 'Failed'
         assert ACTION_CARD_STATUS_FAILED in card._status_label.styleSheet()
@@ -462,9 +401,9 @@ class TestActionCardExecution:
     def test_set_result_skipped() -> None:
         """Skipped result shows skip reason."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         card.set_executing()
-        result = _make_result(
+        result = make_result(
             success=True,
             skipped=True,
             skip_reason=SkipReason.ALREADY_INSTALLED,
@@ -477,9 +416,9 @@ class TestActionCardExecution:
     def test_set_result_updates_version_on_upgrade() -> None:
         """Successful upgrade updates version label to new version."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         card.set_executing()
-        result = _make_result(
+        result = make_result(
             success=True,
             installed_version='1.0.0',
             available_version='2.0.0',
@@ -515,7 +454,7 @@ class TestActionCardList:
         card_list.show_skeletons(3)
 
         action_count = 2
-        actions = [_make_action(package=f'pkg-{i}') for i in range(action_count)]
+        actions = [make_action(package=f'pkg-{i}') for i in range(action_count)]
         card_list.populate(actions)
         assert card_list.card_count() == action_count
         for i in range(action_count):
@@ -527,8 +466,8 @@ class TestActionCardList:
     def test_populate_includes_command_actions() -> None:
         """Populate includes actions with kind=None."""
         card_list = ActionCardList()
-        a1 = _make_action(package='pkg1')
-        a2 = _make_action(package='pkg2', kind=None)
+        a1 = make_action(package='pkg1')
+        a2 = make_action(package='pkg2', kind=None)
         actions = [a1, a2]
         card_list.populate(actions)
         assert card_list.card_count() == len(actions)
@@ -537,8 +476,8 @@ class TestActionCardList:
     def test_get_card_by_stable_key() -> None:
         """get_card finds the correct card by stable content key."""
         card_list = ActionCardList()
-        a1 = _make_action(package='first')
-        a2 = _make_action(package='second')
+        a1 = make_action(package='first')
+        a2 = make_action(package='second')
         card_list.populate([a1, a2])
 
         c1 = card_list.get_card(a1)
@@ -553,14 +492,14 @@ class TestActionCardList:
     def test_get_card_returns_none_for_unknown() -> None:
         """get_card returns None for an unknown action."""
         card_list = ActionCardList()
-        card_list.populate([_make_action()])
-        unknown = _make_action(package='unknown')
+        card_list.populate([make_action()])
+        unknown = make_action(package='unknown')
         assert card_list.get_card(unknown) is None
 
     @staticmethod
     def test_clear_removes_all() -> None:
         """Clear removes all cards."""
-        actions = [_make_action(package='pkg1'), _make_action(package='pkg2')]
+        actions = [make_action(package='pkg1'), make_action(package='pkg2')]
         card_list = ActionCardList()
         card_list.populate(actions)
         assert card_list.card_count() == len(actions)
@@ -572,8 +511,8 @@ class TestActionCardList:
     def test_finalize_all_checking() -> None:
         """finalize_all_checking resolves pending cards to 'Needed'."""
         card_list = ActionCardList()
-        a1 = _make_action(package='pkg1')
-        a2 = _make_action(package='pkg2')
+        a1 = make_action(package='pkg1')
+        a2 = make_action(package='pkg2')
         card_list.populate([a1, a2])
 
         # Simulate: a1 gets a check result, a2 stays as 'Checking…'
@@ -581,7 +520,7 @@ class TestActionCardList:
         assert c1 is not None
         _check(
             c1,
-            _make_result(
+            make_result(
                 skipped=True,
                 skip_reason=SkipReason.ALREADY_INSTALLED,
             ),
@@ -598,7 +537,7 @@ class TestActionCardList:
     def test_prerelease_signal_forwarded() -> None:
         """prerelease_toggled from a card is forwarded through the list."""
         card_list = ActionCardList()
-        action = _make_action(package='requests')
+        action = make_action(package='requests')
         card_list.populate([action])
 
         received: list[tuple[str, bool]] = []
@@ -624,11 +563,11 @@ class TestActionCardKindStatus:
     def test_bare_command_shows_pending_after_check() -> None:
         """Bare command (kind=None) keeps 'Pending' after dry-run check."""
         card = ActionCard()
-        action = _make_action(kind=None, package='post_sync', installer=None, command=('echo', 'done'))
+        action = make_action(kind=None, package='post_sync', installer=None, command=('echo', 'done'))
         card.populate(action)
         assert card.status_text() == 'Pending'
 
-        result = _make_result(success=True, skipped=False)
+        result = make_result(success=True, skipped=False)
         _check(card, result)
         assert card.status_text() == 'Pending'
         assert ACTION_CARD_STATUS_PENDING in card._status_label.styleSheet()
@@ -637,10 +576,10 @@ class TestActionCardKindStatus:
     def test_project_shows_ready_after_check() -> None:
         """PROJECT action shows 'Ready' after dry-run check."""
         card = ActionCard()
-        action = _make_action(kind=PluginKind.PROJECT, package='myproject')
+        action = make_action(kind=PluginKind.PROJECT, package='myproject')
         card.populate(action)
 
-        result = _make_result(success=True, skipped=False)
+        result = make_result(success=True, skipped=False)
         _check(card, result)
         assert card.status_text() == 'Ready'
         assert ACTION_CARD_STATUS_SATISFIED in card._status_label.styleSheet()
@@ -649,8 +588,8 @@ class TestActionCardKindStatus:
     def test_package_still_shows_needed() -> None:
         """A PACKAGE action with success=True still shows 'Needed'."""
         card = ActionCard()
-        card.populate(_make_action(kind=PluginKind.PACKAGE))
-        result = _make_result(success=True, skipped=False)
+        card.populate(make_action(kind=PluginKind.PACKAGE))
+        result = make_result(success=True, skipped=False)
         _check(card, result)
         assert card.status_text() == 'Needed'
 
@@ -667,8 +606,8 @@ class TestActionCardVersionSpecifier:
     def test_specifier_available_version_shows_requires() -> None:
         """available_version with a specifier shows 'requires …'."""
         card = ActionCard()
-        card.populate(_make_action())
-        result = _make_result(
+        card.populate(make_action())
+        result = make_result(
             success=True,
             skipped=False,
             available_version='>=0.8.0',
@@ -681,8 +620,8 @@ class TestActionCardVersionSpecifier:
     def test_resolved_available_version_shows_arrow() -> None:
         """available_version with a plain version shows '→ X.Y.Z'."""
         card = ActionCard()
-        card.populate(_make_action())
-        result = _make_result(
+        card.populate(make_action())
+        result = make_result(
             success=True,
             skipped=False,
             available_version='1.2.0',
@@ -694,9 +633,9 @@ class TestActionCardVersionSpecifier:
     def test_satisfied_with_constraint_shows_tooltip() -> None:
         """Satisfied action with constraint shows 'satisfies ...' tooltip."""
         card = ActionCard()
-        action = _make_action(constraint='>=0.8.0')
+        action = make_action(constraint='>=0.8.0')
         card.populate(action)
-        result = _make_result(
+        result = make_result(
             skipped=True,
             skip_reason=SkipReason.ALREADY_INSTALLED,
             installed_version='0.9.1',
@@ -709,9 +648,9 @@ class TestActionCardVersionSpecifier:
     def test_satisfied_without_constraint_no_tooltip() -> None:
         """Satisfied action without constraint has no version tooltip."""
         card = ActionCard()
-        action = _make_action()
+        action = make_action()
         card.populate(action)
-        result = _make_result(
+        result = make_result(
             skipped=True,
             skip_reason=SkipReason.ALREADY_INSTALLED,
             installed_version='0.9.1',
@@ -774,7 +713,7 @@ class TestActionCardCommandLabel:
     def test_default_package_command() -> None:
         """Package actions show 'installer install package' by default."""
         card = ActionCard()
-        action = _make_action(package='ruff', installer='pip')
+        action = make_action(package='ruff', installer='pip')
         card.populate(action)
         assert card._command_label.text() == 'pip install ruff'
         assert not card._command_row.isHidden()
@@ -783,11 +722,11 @@ class TestActionCardCommandLabel:
     def test_explicit_cli_command_from_result() -> None:
         """set_check_result with cli_command updates the command label."""
         card = ActionCard()
-        action = _make_action(package='ruff', installer='pip')
+        action = make_action(package='ruff', installer='pip')
         card.populate(action)
         assert card._command_label.text() == 'pip install ruff'
 
-        result = _make_result(
+        result = make_result(
             action=action,
             cli_command=('uv', 'tool', 'install', 'ruff'),
         )
@@ -798,7 +737,7 @@ class TestActionCardCommandLabel:
     def test_command_label_selectable() -> None:
         """Command label text is selectable by mouse."""
         card = ActionCard()
-        action = _make_action()
+        action = make_action()
         card.populate(action)
         flags = card._command_label.textInteractionFlags()
         assert flags & Qt.TextInteractionFlag.TextSelectableByMouse
@@ -807,11 +746,11 @@ class TestActionCardCommandLabel:
     def test_set_check_result_updates_command_label() -> None:
         """set_check_result with result cli_command updates the command label."""
         card = ActionCard()
-        action = _make_action(package='ruff', installer='pip')
+        action = make_action(package='ruff', installer='pip')
         card.populate(action)
         assert card._command_label.text() == 'pip install ruff'
 
-        result = _make_result(
+        result = make_result(
             action=action,
             cli_command=('uv', 'tool', 'install', 'ruff'),
         )
@@ -823,7 +762,7 @@ class TestActionCardCommandLabel:
     def test_copy_button_copies_command(monkeypatch: object) -> None:
         """Clicking the copy button copies the command text to the clipboard."""
         card = ActionCard()
-        action = _make_action(
+        action = make_action(
             package='ruff',
             installer='uv',
             command=('uv', 'tool', 'install', 'ruff'),
@@ -840,7 +779,7 @@ class TestActionCardCommandLabel:
     def test_copy_button_shows_feedback() -> None:
         """Clicking copy shows a check-mark on the button."""
         card = ActionCard()
-        action = _make_action(
+        action = make_action(
             package='ruff',
             installer='uv',
             command=('uv', 'tool', 'install', 'ruff'),
@@ -863,7 +802,7 @@ class TestActionCardSpinner:
     def test_spinner_active_during_checking() -> None:
         """Spinner timer is active while card is checking."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         assert card._checking
         assert card._spinner_timer.isActive()
 
@@ -871,9 +810,9 @@ class TestActionCardSpinner:
     def test_spinner_stops_on_check_result() -> None:
         """set_check_result stops the spinner."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         assert card._checking
-        _check(card, _make_result())
+        _check(card, make_result())
         assert not card._checking
         assert not card._spinner_timer.isActive()
         assert card._spinner_canvas.isHidden()
@@ -882,7 +821,7 @@ class TestActionCardSpinner:
     def test_spinner_stops_on_finalize() -> None:
         """finalize_checking stops the spinner."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         assert card._checking
         card.finalize_checking()
         assert not card._checking
@@ -892,7 +831,7 @@ class TestActionCardSpinner:
     def test_spinner_stops_on_executing() -> None:
         """set_executing stops the spinner if still checking."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         assert card._checking
         card.set_executing()
         assert not card._checking
@@ -902,7 +841,7 @@ class TestActionCardSpinner:
     def test_no_spinner_for_unavailable() -> None:
         """Unavailable (plugin missing) actions don't spin."""
         card = ActionCard()
-        card.populate(_make_action(installer='uv'), plugin_installed={'uv': False})
+        card.populate(make_action(installer='uv'), plugin_installed={'uv': False})
         assert not card._checking
         assert not card._spinner_timer.isActive()
 
@@ -918,29 +857,29 @@ class TestActionSortKey:
     @staticmethod
     def test_runtime_before_package() -> None:
         """Runtime actions sort before packages."""
-        runtime = _make_action(kind=PluginKind.RUNTIME, package='python')
-        package = _make_action(kind=PluginKind.PACKAGE, package='numpy')
+        runtime = make_action(kind=PluginKind.RUNTIME, package='python')
+        package = make_action(kind=PluginKind.PACKAGE, package='numpy')
         assert action_sort_key(runtime) < action_sort_key(package)
 
     @staticmethod
     def test_tool_before_scm() -> None:
         """Tool actions sort before SCM (matches execution phase order)."""
-        tool = _make_action(kind=PluginKind.TOOL, package='ruff')
-        scm = _make_action(kind=PluginKind.SCM, package='git')
+        tool = make_action(kind=PluginKind.TOOL, package='ruff')
+        scm = make_action(kind=PluginKind.SCM, package='git')
         assert action_sort_key(tool) < action_sort_key(scm)
 
     @staticmethod
     def test_package_before_tool() -> None:
         """Package actions sort before tools (matches execution phase order)."""
-        package = _make_action(kind=PluginKind.PACKAGE, package='numpy')
-        tool = _make_action(kind=PluginKind.TOOL, package='ruff')
+        package = make_action(kind=PluginKind.PACKAGE, package='numpy')
+        tool = make_action(kind=PluginKind.TOOL, package='ruff')
         assert action_sort_key(package) < action_sort_key(tool)
 
     @staticmethod
     def test_same_kind_returns_equal_key() -> None:
         """Same-kind actions get equal sort keys so stable sort preserves order."""
-        alpha = _make_action(package='alpha')
-        beta = _make_action(package='beta')
+        alpha = make_action(package='alpha')
+        beta = make_action(package='beta')
         assert action_sort_key(alpha) == action_sort_key(beta)
 
 
@@ -956,10 +895,10 @@ class TestActionCardListOrdering:
     def test_cards_grouped_by_kind_preserving_order() -> None:
         """Cards are grouped by execution phase, preserving porringer order within."""
         card_list = ActionCardList()
-        a_pkg_b = _make_action(kind=PluginKind.PACKAGE, package='beta')
-        a_tool = _make_action(kind=PluginKind.TOOL, package='ruff')
-        a_pkg_a = _make_action(kind=PluginKind.PACKAGE, package='alpha')
-        a_runtime = _make_action(kind=PluginKind.RUNTIME, package='python')
+        a_pkg_b = make_action(kind=PluginKind.PACKAGE, package='beta')
+        a_tool = make_action(kind=PluginKind.TOOL, package='ruff')
+        a_pkg_a = make_action(kind=PluginKind.PACKAGE, package='alpha')
+        a_runtime = make_action(kind=PluginKind.RUNTIME, package='python')
 
         # Populate in porringer's execution order
         card_list.populate([a_pkg_b, a_tool, a_pkg_a, a_runtime])
@@ -978,8 +917,8 @@ class TestActionCardListOrdering:
     def test_bare_commands_included() -> None:
         """Actions with kind=None are included in the card list."""
         card_list = ActionCardList()
-        pkg = _make_action(kind=PluginKind.PACKAGE, package='requests')
-        cmd = _make_action(kind=None, package='run-something')
+        pkg = make_action(kind=PluginKind.PACKAGE, package='requests')
+        cmd = make_action(kind=None, package='run-something')
         actions = [pkg, cmd]
         card_list.populate(actions)
         assert card_list.card_count() == len(actions)
@@ -988,9 +927,9 @@ class TestActionCardListOrdering:
     def test_bare_commands_sort_last() -> None:
         """Bare-command actions sort after all PluginKind phases."""
         card_list = ActionCardList()
-        cmd = _make_action(kind=None, package='post-cmd')
-        a_pkg = _make_action(kind=PluginKind.PACKAGE, package='requests')
-        a_scm = _make_action(kind=PluginKind.SCM, package='my-repo')
+        cmd = make_action(kind=None, package='post-cmd')
+        a_pkg = make_action(kind=PluginKind.PACKAGE, package='requests')
+        a_scm = make_action(kind=PluginKind.SCM, package='my-repo')
         actions = [cmd, a_pkg, a_scm]
         card_list.populate(actions)
 
@@ -1010,7 +949,7 @@ class TestActionCardListOrdering:
     def test_bare_command_shows_pending_status() -> None:
         """Bare-command card shows 'Pending' status with the pending style."""
         card = ActionCard()
-        card.populate(_make_action(kind=None, package='echo-hello'))
+        card.populate(make_action(kind=None, package='echo-hello'))
         assert card.status_text() == 'Pending'
         assert ACTION_CARD_STATUS_PENDING in card._status_label.styleSheet()
 
@@ -1027,10 +966,10 @@ class TestActionCardAlreadyLatest:
     def test_already_latest_shows_satisfied_style() -> None:
         """ALREADY_LATEST check result uses the satisfied style."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         _check(
             card,
-            _make_result(
+            make_result(
                 skipped=True,
                 skip_reason=SkipReason.ALREADY_LATEST,
             ),
@@ -1042,10 +981,10 @@ class TestActionCardAlreadyLatest:
     def test_already_latest_shows_version() -> None:
         """ALREADY_LATEST preserves the installed version label."""
         card = ActionCard()
-        card.populate(_make_action())
+        card.populate(make_action())
         _check(
             card,
-            _make_result(
+            make_result(
                 skipped=True,
                 skip_reason=SkipReason.ALREADY_LATEST,
                 installed_version='1.2.0',
@@ -1057,20 +996,20 @@ class TestActionCardAlreadyLatest:
     def test_already_installed_vs_already_latest() -> None:
         """ALREADY_INSTALLED and ALREADY_LATEST both use satisfied style."""
         card_installed = ActionCard()
-        card_installed.populate(_make_action(package='a'))
+        card_installed.populate(make_action(package='a'))
         _check(
             card_installed,
-            _make_result(
+            make_result(
                 skipped=True,
                 skip_reason=SkipReason.ALREADY_INSTALLED,
             ),
         )
 
         card_latest = ActionCard()
-        card_latest.populate(_make_action(package='b'))
+        card_latest.populate(make_action(package='b'))
         _check(
             card_latest,
-            _make_result(
+            make_result(
                 skipped=True,
                 skip_reason=SkipReason.ALREADY_LATEST,
             ),

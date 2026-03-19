@@ -16,6 +16,32 @@ from synodic_client.updater import (
 )
 
 
+def _setup_downloaded_state(updater: Updater) -> MagicMock:
+    """Put *updater* into DOWNLOADED state and return the mock velopack UpdateInfo."""
+    mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
+    updater._update_info = UpdateInfo(
+        available=True,
+        current_version=Version('1.0.0'),
+        latest_version=Version('2.0.0'),
+        _velopack_info=mock_velopack_info,
+    )
+    updater._state = UpdateState.DOWNLOADED
+    return mock_velopack_info
+
+
+def _setup_update_available_state(updater: Updater) -> MagicMock:
+    """Put *updater* into UPDATE_AVAILABLE state and return the mock velopack UpdateInfo."""
+    mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
+    updater._update_info = UpdateInfo(
+        available=True,
+        current_version=Version('1.0.0'),
+        latest_version=Version('2.0.0'),
+        _velopack_info=mock_velopack_info,
+    )
+    updater._state = UpdateState.UPDATE_AVAILABLE
+    return mock_velopack_info
+
+
 class TestUpdateConfig:
     """Tests for UpdateConfig dataclass."""
 
@@ -238,20 +264,11 @@ class TestUpdaterCheckForUpdate:
         """
         mock_target = MagicMock(spec=velopack.VelopackAsset)
         mock_target.Version = '2.0.0'
-        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
+        mock_velopack_info = _setup_downloaded_state(updater)
         mock_velopack_info.TargetFullRelease = mock_target
 
         mock_manager = MagicMock(spec=velopack.UpdateManager)
         mock_manager.check_for_updates.return_value = mock_velopack_info
-
-        # Simulate: download already completed
-        updater._state = UpdateState.DOWNLOADED
-        updater._update_info = UpdateInfo(
-            available=True,
-            current_version=Version('1.0.0'),
-            latest_version=Version('2.0.0'),
-            _velopack_info=mock_velopack_info,
-        )
 
         with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
             info = updater.check_for_update()
@@ -283,14 +300,7 @@ class TestUpdaterDownloadUpdate:
     @staticmethod
     def test_download_success(updater: Updater) -> None:
         """Verify download_update succeeds with valid update info."""
-        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
-        updater._update_info = UpdateInfo(
-            available=True,
-            current_version=Version('1.0.0'),
-            latest_version=Version('2.0.0'),
-            _velopack_info=mock_velopack_info,
-        )
-        updater._state = UpdateState.UPDATE_AVAILABLE
+        mock_velopack_info = _setup_update_available_state(updater)
 
         mock_manager = MagicMock(spec=velopack.UpdateManager)
 
@@ -307,14 +317,7 @@ class TestUpdaterDownloadUpdate:
     @staticmethod
     def test_download_with_progress_callback(updater: Updater) -> None:
         """Verify download_update passes progress callback."""
-        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
-        updater._update_info = UpdateInfo(
-            available=True,
-            current_version=Version('1.0.0'),
-            latest_version=Version('2.0.0'),
-            _velopack_info=mock_velopack_info,
-        )
-        updater._state = UpdateState.UPDATE_AVAILABLE
+        mock_velopack_info = _setup_update_available_state(updater)
 
         mock_manager = MagicMock(spec=velopack.UpdateManager)
         progress_cb = MagicMock()
@@ -331,14 +334,7 @@ class TestUpdaterDownloadUpdate:
     @staticmethod
     def test_download_error(updater: Updater) -> None:
         """Verify download_update handles errors gracefully."""
-        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
-        updater._update_info = UpdateInfo(
-            available=True,
-            current_version=Version('1.0.0'),
-            latest_version=Version('2.0.0'),
-            _velopack_info=mock_velopack_info,
-        )
-        updater._state = UpdateState.UPDATE_AVAILABLE
+        _setup_update_available_state(updater)
 
         mock_manager = MagicMock(spec=velopack.UpdateManager)
         mock_manager.download_updates.side_effect = Exception('Download failed')
@@ -351,6 +347,7 @@ class TestUpdaterDownloadUpdate:
 
         assert result is False
         assert updater.state == UpdateState.FAILED
+        assert updater._update_info is not None
         assert updater._update_info.error == 'Download failed'
 
 
@@ -376,45 +373,39 @@ class TestUpdaterApplyUpdate:
             updater.apply_update_on_exit()
 
     @staticmethod
-    def test_apply_on_exit_with_restart(updater: Updater) -> None:
-        """Verify apply_update_on_exit(restart=True) stages update via wait_exit_then_apply_updates."""
-        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
-        updater._update_info = UpdateInfo(
-            available=True,
-            current_version=Version('1.0.0'),
-            latest_version=Version('2.0.0'),
-            _velopack_info=mock_velopack_info,
-        )
-        updater._state = UpdateState.DOWNLOADED
-
+    @pytest.mark.parametrize(
+        ('restart', 'silent'),
+        [
+            (True, False),
+            (False, False),
+            (True, True),
+            (False, True),
+        ],
+        ids=['restart', 'no-restart', 'silent-restart', 'silent-no-restart'],
+    )
+    def test_apply_on_exit_matrix(updater: Updater, *, restart: bool, silent: bool) -> None:
+        """Verify apply_update_on_exit stages the update with the correct restart/silent flags."""
+        mock_velopack_info = _setup_downloaded_state(updater)
         mock_manager = MagicMock(spec=velopack.UpdateManager)
 
         with (
             patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
             patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
         ):
-            updater.apply_update_on_exit(restart=True)
+            updater.apply_update_on_exit(restart=restart, silent=silent)
 
         assert updater.state == UpdateState.APPLYING
         mock_manager.wait_exit_then_apply_updates.assert_called_once_with(
             mock_velopack_info,
-            silent=False,
-            restart=True,
+            silent=silent,
+            restart=restart,
             restart_args=[],
         )
 
     @staticmethod
     def test_apply_on_exit_with_restart_args(updater: Updater) -> None:
         """Verify restart_args are forwarded to wait_exit_then_apply_updates."""
-        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
-        updater._update_info = UpdateInfo(
-            available=True,
-            current_version=Version('1.0.0'),
-            latest_version=Version('2.0.0'),
-            _velopack_info=mock_velopack_info,
-        )
-        updater._state = UpdateState.DOWNLOADED
-
+        mock_velopack_info = _setup_downloaded_state(updater)
         mock_manager = MagicMock(spec=velopack.UpdateManager)
 
         with (
@@ -432,101 +423,9 @@ class TestUpdaterApplyUpdate:
         )
 
     @staticmethod
-    def test_apply_on_exit_no_restart(updater: Updater) -> None:
-        """Verify apply_update_on_exit(restart=False) stages update without restart."""
-        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
-        updater._update_info = UpdateInfo(
-            available=True,
-            current_version=Version('1.0.0'),
-            latest_version=Version('2.0.0'),
-            _velopack_info=mock_velopack_info,
-        )
-        updater._state = UpdateState.DOWNLOADED
-
-        mock_manager = MagicMock(spec=velopack.UpdateManager)
-
-        with (
-            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
-            patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
-        ):
-            updater.apply_update_on_exit(restart=False)
-
-        assert updater.state == UpdateState.APPLYING
-        mock_manager.wait_exit_then_apply_updates.assert_called_once_with(
-            mock_velopack_info,
-            silent=False,
-            restart=False,
-            restart_args=[],
-        )
-
-    @staticmethod
-    def test_apply_on_exit_silent_restart(updater: Updater) -> None:
-        """Verify silent=True suppresses the splash window."""
-        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
-        updater._update_info = UpdateInfo(
-            available=True,
-            current_version=Version('1.0.0'),
-            latest_version=Version('2.0.0'),
-            _velopack_info=mock_velopack_info,
-        )
-        updater._state = UpdateState.DOWNLOADED
-
-        mock_manager = MagicMock(spec=velopack.UpdateManager)
-
-        with (
-            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
-            patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
-        ):
-            updater.apply_update_on_exit(restart=True, silent=True)
-
-        assert updater.state == UpdateState.APPLYING
-        mock_manager.wait_exit_then_apply_updates.assert_called_once_with(
-            mock_velopack_info,
-            silent=True,
-            restart=True,
-            restart_args=[],
-        )
-
-    @staticmethod
-    def test_apply_on_exit_silent_no_restart(updater: Updater) -> None:
-        """Verify silent=True, restart=False stages update silently."""
-        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
-        updater._update_info = UpdateInfo(
-            available=True,
-            current_version=Version('1.0.0'),
-            latest_version=Version('2.0.0'),
-            _velopack_info=mock_velopack_info,
-        )
-        updater._state = UpdateState.DOWNLOADED
-
-        mock_manager = MagicMock(spec=velopack.UpdateManager)
-
-        with (
-            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
-            patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
-        ):
-            updater.apply_update_on_exit(restart=False, silent=True)
-
-        assert updater.state == UpdateState.APPLYING
-        mock_manager.wait_exit_then_apply_updates.assert_called_once_with(
-            mock_velopack_info,
-            silent=True,
-            restart=False,
-            restart_args=[],
-        )
-
-    @staticmethod
     def test_apply_on_exit_silent_with_restart_args(updater: Updater) -> None:
         """Verify silent mode forwards restart_args."""
-        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
-        updater._update_info = UpdateInfo(
-            available=True,
-            current_version=Version('1.0.0'),
-            latest_version=Version('2.0.0'),
-            _velopack_info=mock_velopack_info,
-        )
-        updater._state = UpdateState.DOWNLOADED
-
+        mock_velopack_info = _setup_downloaded_state(updater)
         mock_manager = MagicMock(spec=velopack.UpdateManager)
 
         with (

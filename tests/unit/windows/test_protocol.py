@@ -2,11 +2,13 @@
 
 import winreg
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from synodic_client.protocol import PROTOCOL_NAME, register_protocol, remove_protocol
+
+from .conftest import make_registry_key
 
 _EXPECTED_REGISTRY_KEY_COUNT = 2
 
@@ -20,9 +22,7 @@ class TestRegisterProtocol:
     @staticmethod
     def test_writes_registry_keys() -> None:
         """Verify correct registry keys are written on Windows."""
-        mock_key = MagicMock()
-        mock_key.__enter__ = MagicMock(return_value=mock_key)
-        mock_key.__exit__ = MagicMock(return_value=False)
+        mock_key = make_registry_key()
 
         with (
             patch.object(winreg, 'CreateKey', return_value=mock_key) as mock_create,
@@ -44,9 +44,7 @@ class TestRegisterProtocol:
     @staticmethod
     def test_sets_url_protocol_value() -> None:
         """Verify the 'URL Protocol' value is set."""
-        mock_key = MagicMock()
-        mock_key.__enter__ = MagicMock(return_value=mock_key)
-        mock_key.__exit__ = MagicMock(return_value=False)
+        mock_key = make_registry_key()
 
         with patch.object(winreg, 'CreateKey', return_value=mock_key), patch.object(winreg, 'SetValueEx') as mock_set:
             register_protocol(r'C:\Program Files\Synodic\synodic.exe')

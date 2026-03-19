@@ -10,14 +10,11 @@ from porringer.schema import (
     ActionCompletedEvent,
     ActionStartedEvent,
     ManifestLoadedEvent,
-    SetupAction,
-    SetupActionResult,
     SetupResults,
     SkipReason,
     SubActionProgress,
     SubActionProgressEvent,
 )
-from porringer.schema.plugin import PluginKind
 
 from synodic_client.application.screen.install_workers import run_install
 from synodic_client.application.screen.log_panel import (
@@ -39,50 +36,9 @@ from synodic_client.application.theme import (
     LOG_STATUS_SUCCESS,
 )
 
+from .conftest import make_action, make_result
+
 _EXPECTED_SECTION_COUNT = 2
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_action(
-    kind: PluginKind = PluginKind.PACKAGE,
-    description: str = 'Install requests',
-    installer: str = 'pip',
-    package: str = 'requests',
-    package_description: str | None = None,
-) -> SetupAction:
-    """Create a mock SetupAction with sensible defaults."""
-    action = MagicMock(spec=SetupAction)
-    action.kind = kind
-    action.description = description
-    action.installer = installer
-    pkg_mock = MagicMock()
-    pkg_mock.name = package
-    action.package = pkg_mock
-    action.package_description = package_description or description
-    action.command = None
-    action.plugin_target = None
-    return action
-
-
-def _make_result(
-    action: SetupAction | None = None,
-    *,
-    success: bool = True,
-    skipped: bool = False,
-    skip_reason: SkipReason | None = None,
-    message: str | None = None,
-) -> SetupActionResult:
-    """Create a SetupActionResult."""
-    return SetupActionResult(
-        action=action or _make_action(),
-        success=success,
-        skipped=skipped,
-        skip_reason=skip_reason,
-        message=message,
-    )
 
 
 def _output_html(section: ActionLogSection) -> str:
@@ -101,7 +57,7 @@ class TestActionLogSection:
     @staticmethod
     def test_initial_status_shows_running() -> None:
         """Section header starts with 'Running…' status."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
         assert section._status_label.text() == 'Running…'
         assert LOG_STATUS_RUNNING in section._status_label.styleSheet()
@@ -109,7 +65,7 @@ class TestActionLogSection:
     @staticmethod
     def test_initial_chevron_is_down() -> None:
         """Section starts expanded with the down-pointing chevron."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
         assert section._chevron.text() == CHEVRON_DOWN
         assert section._expanded is True
@@ -118,7 +74,7 @@ class TestActionLogSection:
     @staticmethod
     def test_toggle_collapses_and_expands() -> None:
         """Toggling collapses the output, toggling again restores it."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
 
         section._toggle()
@@ -134,7 +90,7 @@ class TestActionLogSection:
     @staticmethod
     def test_append_stdout_output() -> None:
         """Stdout lines are coloured with the stdout colour."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
         section.append_output('hello world', 'stdout')
 
@@ -145,7 +101,7 @@ class TestActionLogSection:
     @staticmethod
     def test_append_stderr_output() -> None:
         """Stderr lines use the stderr/amber colour."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
         section.append_output('warning: something', 'stderr')
 
@@ -156,7 +112,7 @@ class TestActionLogSection:
     @staticmethod
     def test_append_output_none_stream_uses_phase_colour() -> None:
         """Lines with stream=None use the phase/muted colour."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
         section.append_output('Verifying checksums', None)
 
@@ -167,7 +123,7 @@ class TestActionLogSection:
     @staticmethod
     def test_append_phase_uses_phase_colour() -> None:
         """Phase messages (stream=None) use the muted grey colour."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
         section.append_output('downloading', None)
 
@@ -178,7 +134,7 @@ class TestActionLogSection:
     @staticmethod
     def test_html_escaping_in_output() -> None:
         """Special HTML characters are escaped in output lines."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
         section.append_output('<script>alert("xss")</script>', 'stdout')
 
@@ -190,7 +146,7 @@ class TestActionLogSection:
     @staticmethod
     def test_html_escaping_in_phase() -> None:
         """Special HTML characters are escaped in phase messages."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
         section.append_output('Step <1> & "done"', None)
 
@@ -201,9 +157,9 @@ class TestActionLogSection:
     @staticmethod
     def test_set_result_success() -> None:
         """Successful result sets 'Done' status with green colour."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
-        result = _make_result(action, success=True, message='Installed ruff-0.8.0')
+        result = make_result(action=action, success=True, message='Installed ruff-0.8.0')
 
         section.set_result(result)
 
@@ -216,9 +172,9 @@ class TestActionLogSection:
     @staticmethod
     def test_set_result_success_default_message() -> None:
         """Successful result without message shows default text."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
-        result = _make_result(action, success=True)
+        result = make_result(action=action, success=True)
 
         section.set_result(result)
 
@@ -228,9 +184,9 @@ class TestActionLogSection:
     @staticmethod
     def test_set_result_failure() -> None:
         """Failed result sets 'Failed' status with red colour."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
-        result = _make_result(action, success=False, message='Network timeout')
+        result = make_result(action=action, success=False, message='Network timeout')
 
         section.set_result(result)
 
@@ -243,9 +199,9 @@ class TestActionLogSection:
     @staticmethod
     def test_set_result_failure_default_message() -> None:
         """Failed result without message shows 'Unknown error'."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
-        result = _make_result(action, success=False)
+        result = make_result(action=action, success=False)
 
         section.set_result(result)
 
@@ -255,10 +211,10 @@ class TestActionLogSection:
     @staticmethod
     def test_set_result_skipped() -> None:
         """Skipped result sets the skip reason as status text."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
-        result = _make_result(
-            action,
+        result = make_result(
+            action=action,
             success=True,
             skipped=True,
             skip_reason=SkipReason.ALREADY_INSTALLED,
@@ -274,7 +230,7 @@ class TestActionLogSection:
     @staticmethod
     def test_multiple_output_lines_accumulate() -> None:
         """Multiple append_output calls accumulate in the text edit."""
-        action = _make_action()
+        action = make_action()
         section = ActionLogSection(action, index=1)
         section.append_output('line 1', 'stdout')
         section.append_output('line 2', 'stderr')
@@ -298,7 +254,7 @@ class TestExecutionLogPanel:
     def test_add_section_returns_section() -> None:
         """add_section returns an ActionLogSection widget."""
         panel = ExecutionLogPanel()
-        action = _make_action()
+        action = make_action()
         section = panel.add_section(action)
         assert isinstance(section, ActionLogSection)
 
@@ -306,8 +262,8 @@ class TestExecutionLogPanel:
     def test_add_section_increments_index() -> None:
         """Section indices increment with each add_section call."""
         panel = ExecutionLogPanel()
-        a1 = _make_action(description='First', package='first')
-        a2 = _make_action(description='Second', package='second')
+        a1 = make_action(description='First', package='first')
+        a2 = make_action(description='Second', package='second')
 
         panel.add_section(a1)
         panel.add_section(a2)
@@ -318,7 +274,7 @@ class TestExecutionLogPanel:
     def test_get_section_returns_correct_section() -> None:
         """get_section finds the section by the same action object."""
         panel = ExecutionLogPanel()
-        action = _make_action()
+        action = make_action()
         expected = panel.add_section(action)
 
         found = panel.get_section(action)
@@ -328,14 +284,14 @@ class TestExecutionLogPanel:
     def test_get_section_returns_none_for_unknown() -> None:
         """get_section returns None for actions not in the panel."""
         panel = ExecutionLogPanel()
-        action = _make_action()
+        action = make_action()
         assert panel.get_section(action) is None
 
     @staticmethod
     def test_on_sub_progress_with_output() -> None:
         """on_sub_progress routes output lines to the correct section."""
         panel = ExecutionLogPanel()
-        action = _make_action()
+        action = make_action()
         panel.add_section(action)
 
         progress = SubActionProgress(
@@ -355,7 +311,7 @@ class TestExecutionLogPanel:
     def test_on_sub_progress_with_phase_message() -> None:
         """on_sub_progress routes phase messages when no output is set."""
         panel = ExecutionLogPanel()
-        action = _make_action()
+        action = make_action()
         panel.add_section(action)
 
         progress = SubActionProgress(
@@ -374,7 +330,7 @@ class TestExecutionLogPanel:
     def test_on_sub_progress_ignores_unknown_action() -> None:
         """on_sub_progress does nothing when the action has no section."""
         panel = ExecutionLogPanel()
-        action = _make_action()
+        action = make_action()
         progress = SubActionProgress(action=action, phase='installing')
 
         # Should not raise
@@ -384,10 +340,10 @@ class TestExecutionLogPanel:
     def test_on_action_completed_updates_section() -> None:
         """on_action_completed calls set_result on the correct section."""
         panel = ExecutionLogPanel()
-        action = _make_action()
+        action = make_action()
         panel.add_section(action)
 
-        result = _make_result(action, success=True, message='Done')
+        result = make_result(action=action, success=True, message='Done')
         panel.on_action_completed(action, result)
 
         section = panel.get_section(action)
@@ -398,8 +354,8 @@ class TestExecutionLogPanel:
     def test_on_action_completed_ignores_unknown_action() -> None:
         """on_action_completed does nothing for unknown actions."""
         panel = ExecutionLogPanel()
-        action = _make_action()
-        result = _make_result(action, success=True)
+        action = make_action()
+        result = make_result(action=action, success=True)
 
         # Should not raise
         panel.on_action_completed(action, result)
@@ -408,8 +364,8 @@ class TestExecutionLogPanel:
     def test_clear_removes_all_sections() -> None:
         """clear() removes all sections and resets the counter."""
         panel = ExecutionLogPanel()
-        a1 = _make_action(description='First', package='first')
-        a2 = _make_action(description='Second', package='second')
+        a1 = make_action(description='First', package='first')
+        a2 = make_action(description='Second', package='second')
         panel.add_section(a1)
         panel.add_section(a2)
 
@@ -424,8 +380,8 @@ class TestExecutionLogPanel:
     def test_multiple_actions_tracked_independently() -> None:
         """Different actions get independent sections with separate output."""
         panel = ExecutionLogPanel()
-        a1 = _make_action(description='First', package='first')
-        a2 = _make_action(description='Second', package='second')
+        a1 = make_action(description='First', package='first')
+        a2 = make_action(description='Second', package='second')
         panel.add_section(a1)
         panel.add_section(a2)
 
@@ -462,12 +418,12 @@ class TestRunInstallCallbackSignals:
         porringer = MagicMock()
         manifest_path = Path('/tmp/test/porringer.json')
 
-        action = _make_action()
+        action = make_action()
         manifest = SetupResults(actions=[action])
 
         manifest_event = ManifestLoadedEvent(manifest=manifest)
         started_event = ActionStartedEvent(action=action)
-        result = _make_result(action)
+        result = make_result(action=action)
         completed_event = ActionCompletedEvent(
             action=action,
             result=result,
@@ -499,7 +455,7 @@ class TestRunInstallCallbackSignals:
         porringer = MagicMock()
         manifest_path = Path('/tmp/test/porringer.json')
 
-        action = _make_action()
+        action = make_action()
         manifest = SetupResults(actions=[action])
         sub = SubActionProgress(
             action=action,
@@ -513,7 +469,7 @@ class TestRunInstallCallbackSignals:
             action=action,
             sub_action=sub,
         )
-        result = _make_result(action)
+        result = make_result(action=action)
         completed_event = ActionCompletedEvent(
             action=action,
             result=result,
@@ -548,13 +504,13 @@ class TestRunInstallCallbackSignals:
         porringer = MagicMock()
         manifest_path = Path('/tmp/test/porringer.json')
 
-        action = _make_action()
+        action = make_action()
         manifest = SetupResults(actions=[action])
 
         manifest_event = ManifestLoadedEvent(manifest=manifest)
         # ActionStartedEvent should not trigger sub_progress callback
         started_event = ActionStartedEvent(action=action)
-        result = _make_result(action)
+        result = make_result(action=action)
         completed_event = ActionCompletedEvent(
             action=action,
             result=result,
@@ -587,11 +543,11 @@ class TestRunInstallCallbackSignals:
         porringer = MagicMock()
         manifest_path = Path('/tmp/test/porringer.json')
 
-        action = _make_action()
+        action = make_action()
         manifest = SetupResults(actions=[action])
 
         manifest_event = ManifestLoadedEvent(manifest=manifest)
-        result = _make_result(action)
+        result = make_result(action=action)
         completed_event = ActionCompletedEvent(
             action=action,
             result=result,

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from synodic_client.application.screen.schema import PreviewPhase
 from synodic_client.application.screen.sidebar import ManifestItem, ManifestSidebar
 from synodic_client.application.theme import SIDEBAR_WIDTH
@@ -73,40 +75,23 @@ class TestManifestItemPhase:
     """Phase indicator updates."""
 
     @staticmethod
-    def test_phase_loading(tmp_path: Path) -> None:
-        """Verify LOADING phase shows the loading indicator."""
+    @pytest.mark.parametrize(
+        ('phase', 'expected_text'),
+        [
+            (PreviewPhase.LOADING, 'Loading\u2026'),
+            (PreviewPhase.READY, 'Ready'),
+            (PreviewPhase.ERROR, 'Error'),
+            (PreviewPhase.INSTALLING, 'Installing\u2026'),
+            (PreviewPhase.DONE, 'Done'),
+        ],
+        ids=['loading', 'ready', 'error', 'installing', 'done'],
+    )
+    def test_phase_label(tmp_path: Path, phase: PreviewPhase, expected_text: str) -> None:
+        """Verify phase label text matches the phase enum."""
         item = ManifestItem(tmp_path, 'proj')
-        item.set_phase(PreviewPhase.LOADING)
+        item.set_phase(phase)
         assert not item._phase_label.isHidden()
-        assert item._phase_label.text() == 'Loading…'
-
-    @staticmethod
-    def test_phase_ready(tmp_path: Path) -> None:
-        """Verify READY phase label text."""
-        item = ManifestItem(tmp_path, 'proj')
-        item.set_phase(PreviewPhase.READY)
-        assert item._phase_label.text() == 'Ready'
-
-    @staticmethod
-    def test_phase_error(tmp_path: Path) -> None:
-        """Verify ERROR phase label text."""
-        item = ManifestItem(tmp_path, 'proj')
-        item.set_phase(PreviewPhase.ERROR)
-        assert item._phase_label.text() == 'Error'
-
-    @staticmethod
-    def test_phase_installing(tmp_path: Path) -> None:
-        """Verify INSTALLING phase label text."""
-        item = ManifestItem(tmp_path, 'proj')
-        item.set_phase(PreviewPhase.INSTALLING)
-        assert item._phase_label.text() == 'Installing…'
-
-    @staticmethod
-    def test_phase_done(tmp_path: Path) -> None:
-        """Verify DONE phase label text."""
-        item = ManifestItem(tmp_path, 'proj')
-        item.set_phase(PreviewPhase.DONE)
-        assert item._phase_label.text() == 'Done'
+        assert item._phase_label.text() == expected_text
 
 
 class TestManifestItemSignals:

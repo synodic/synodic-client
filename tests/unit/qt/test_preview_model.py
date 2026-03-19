@@ -2,44 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import MagicMock
-
-from porringer.schema import SetupAction
-from porringer.schema.plugin import PluginKind
-
 from synodic_client.application.screen.schema import ActionState, PreviewModel, PreviewPhase
 from synodic_client.application.uri import normalize_manifest_key
 from synodic_client.operations.schema import InstallPlan, SyncStrategy
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_action(
-    *,
-    kind: PluginKind | None = PluginKind.PACKAGE,
-    description: str = 'Install requests',
-    installer: str = 'pip',
-    package: str = 'requests',
-    **overrides: Any,
-) -> SetupAction:
-    """Create a mock SetupAction with sensible defaults."""
-    action = MagicMock(spec=SetupAction)
-    action.kind = kind
-    action.description = description
-    action.installer = installer
-    pkg_mock = MagicMock()
-    pkg_mock.name = package
-    pkg_mock.configure_mock(**{'__str__': MagicMock(return_value=package)})
-    action.package = pkg_mock
-    action.package_description = overrides.get('package_description', description)
-    action.command = overrides.get('command')
-    action.include_prereleases = overrides.get('include_prereleases', False)
-    action.plugin_target = overrides.get('plugin_target')
-    return action
-
+from .conftest import make_action
 
 # ---------------------------------------------------------------------------
 # ActionState
@@ -52,7 +19,7 @@ class TestActionState:
     @staticmethod
     def test_defaults() -> None:
         """Defaults should be sensible for a freshly-created state."""
-        act = _make_action()
+        act = make_action()
         state = ActionState(action=act)
         assert state.status == 'Checking\u2026'
         assert state.log_lines == []
@@ -60,8 +27,8 @@ class TestActionState:
     @staticmethod
     def test_log_lines_are_independent() -> None:
         """Each ActionState should have its own independent log list."""
-        a = ActionState(action=_make_action())
-        b = ActionState(action=_make_action(package='ruff'))
+        a = ActionState(action=make_action())
+        b = ActionState(action=make_action(package='ruff'))
         a.log_lines.append(('hello', None))
         assert b.log_lines == []
 
@@ -91,7 +58,7 @@ class TestPreviewModel:
         """Install should be enabled when READY and install_plan says so."""
         model = PreviewModel()
         model.phase = PreviewPhase.READY
-        state = ActionState(action=_make_action())
+        state = ActionState(action=make_action())
         state.status = 'Needed'
         model.action_states.append(state)
         model.install_plan = InstallPlan(
@@ -114,7 +81,7 @@ class TestPreviewModel:
         """
         model = PreviewModel()
         model.phase = PreviewPhase.READY
-        state = ActionState(action=_make_action())
+        state = ActionState(action=make_action())
         state.status = 'Update available'
         model.action_states.append(state)
         model.install_plan = InstallPlan(
@@ -134,7 +101,7 @@ class TestPreviewModel:
         """Install should be disabled when all actions are satisfied."""
         model = PreviewModel()
         model.phase = PreviewPhase.READY
-        state = ActionState(action=_make_action())
+        state = ActionState(action=make_action())
         state.status = 'Already installed'
         model.action_states.append(state)
         assert model.install_enabled is False
@@ -144,7 +111,7 @@ class TestPreviewModel:
         """Command actions (kind=None) are tracked as post-sync."""
         model = PreviewModel()
         model.phase = PreviewPhase.READY
-        state = ActionState(action=_make_action(kind=None, description='Run setup'))
+        state = ActionState(action=make_action(kind=None, description='Run setup'))
         state.status = 'Pending'
         model.action_states.append(state)
         model.install_plan = InstallPlan(
@@ -165,7 +132,7 @@ class TestPreviewModel:
         """Install should be disabled during installation."""
         model = PreviewModel()
         model.phase = PreviewPhase.INSTALLING
-        state = ActionState(action=_make_action())
+        state = ActionState(action=make_action())
         state.status = 'Needed'
         model.action_states.append(state)
         assert model.install_enabled is False
@@ -175,11 +142,11 @@ class TestPreviewModel:
         """Install plan correctly partitions actions."""
         model = PreviewModel()
         model.phase = PreviewPhase.READY
-        needed = ActionState(action=_make_action(package='a'))
+        needed = ActionState(action=make_action(package='a'))
         needed.status = 'Needed'
-        satisfied = ActionState(action=_make_action(package='b'))
+        satisfied = ActionState(action=make_action(package='b'))
         satisfied.status = 'Already installed'
-        upgradable = ActionState(action=_make_action(package='c'))
+        upgradable = ActionState(action=make_action(package='c'))
         upgradable.status = 'Update available'
         model.action_states = [needed, satisfied, upgradable]
         model.install_plan = InstallPlan(
@@ -201,7 +168,7 @@ class TestPreviewModel:
     def test_action_state_for_found() -> None:
         """action_state_for should find a state by matching action key."""
         model = PreviewModel()
-        act = _make_action(package='ruff')
+        act = make_action(package='ruff')
         state = ActionState(action=act)
         model.action_states.append(state)
         found = model.action_state_for(act)
@@ -211,7 +178,7 @@ class TestPreviewModel:
     def test_action_state_for_not_found() -> None:
         """action_state_for should return None for unknown actions."""
         model = PreviewModel()
-        act = _make_action(package='ruff')
+        act = make_action(package='ruff')
         assert model.action_state_for(act) is None
 
     @staticmethod

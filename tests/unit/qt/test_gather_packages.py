@@ -12,7 +12,6 @@ from porringer.schema import ManifestDirectory
 from porringer.schema.plugin import PluginInfo, PluginKind, RuntimePackageResult
 from PySide6.QtWidgets import QLabel, QPushButton
 
-from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.screen.plugin_row import (
     FilterChip,
     PluginKindHeader,
@@ -28,43 +27,13 @@ from synodic_client.application.theme import (
     PLUGIN_PROVIDER_RUNTIME_TAG_DEFAULT_STYLE,
     PLUGIN_PROVIDER_RUNTIME_TAG_STYLE,
 )
-from synodic_client.resolution import ResolvedConfig
+
+from .conftest import make_config_store, make_mock_porringer
 
 # Named constants for expected counts (avoids PLR2004)
 _EXPECTED_PROJECT_INSTANCES = 2
 _EXPECTED_VISIBLE_ROWS_ALL = 3
 _EXPECTED_VISIBLE_ROWS_PIPX = 2
-
-
-def _make_config() -> ResolvedConfig:
-    """Build a minimal ResolvedConfig for tests."""
-    return ResolvedConfig(
-        update_source=None,
-        update_channel='stable',
-        auto_update_interval_minutes=60,
-        tool_update_interval_minutes=60,
-        plugin_auto_update=None,
-        prerelease_packages=None,
-        auto_apply=True,
-        auto_start=False,
-        debug_logging=False,
-        last_client_update=None,
-        last_tool_updates=None,
-    )
-
-
-def _make_store(config: ResolvedConfig | None = None) -> ConfigStore:
-    """Build a ConfigStore seeded with *config*."""
-    return ConfigStore(config or _make_config())
-
-
-def _make_porringer() -> MagicMock:
-    """Build a MagicMock standing in for the porringer API."""
-    mock = MagicMock()
-    mock.plugin.list = AsyncMock(return_value=[])
-    mock.package.list = AsyncMock(return_value=[])
-    mock.cache.list_directories.return_value = []
-    return mock
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +47,7 @@ class TestGatherPackages:
     @staticmethod
     def test_global_query_returns_packages_with_no_directories() -> None:
         """Packages from the global query appear even when no directories are cached."""
-        porringer = _make_porringer()
+        porringer = make_mock_porringer()
         porringer.package.list = AsyncMock(
             return_value=[
                 Package(name='pdm', version='2.22.4'),
@@ -86,7 +55,7 @@ class TestGatherPackages:
             ],
         )
 
-        view = ToolsView(porringer, _make_store())
+        view = ToolsView(porringer, make_config_store())
         result = asyncio.run(view._gather_packages('pipx', []))
 
         assert {e.name for e in result} == {'pdm', 'cppython'}
@@ -94,14 +63,14 @@ class TestGatherPackages:
     @staticmethod
     def test_global_query_returns_packages_with_empty_project_path() -> None:
         """Packages from the global query should have an empty project_path."""
-        porringer = _make_porringer()
+        porringer = make_mock_porringer()
         porringer.package.list = AsyncMock(
             return_value=[
                 Package(name='pdm', version='2.22.4'),
             ],
         )
 
-        view = ToolsView(porringer, _make_store())
+        view = ToolsView(porringer, make_config_store())
         result = asyncio.run(view._gather_packages('pipx', []))
 
         matching = [e for e in result if e.name == 'pdm']
@@ -111,10 +80,10 @@ class TestGatherPackages:
     @staticmethod
     def test_global_query_called_without_project_path() -> None:
         """The global query must call list_packages with no project_path arg."""
-        porringer = _make_porringer()
+        porringer = make_mock_porringer()
         porringer.package.list = AsyncMock(return_value=[])
 
-        view = ToolsView(porringer, _make_store())
+        view = ToolsView(porringer, make_config_store())
         asyncio.run(view._gather_packages('pipx', []))
 
         # At least one call should have been made with only plugin_name (no path)
@@ -131,7 +100,7 @@ class TestGatherPackages:
     @staticmethod
     def test_per_directory_queries_still_work() -> None:
         """Per-directory queries continue to run alongside the global query."""
-        porringer = _make_porringer()
+        porringer = make_mock_porringer()
 
         async def _mock_list(plugin_name: str, project_path: Path | None = None, **kwargs) -> list[Package]:
             if project_path is None:
@@ -141,7 +110,7 @@ class TestGatherPackages:
         porringer.package.list = AsyncMock(side_effect=_mock_list)
 
         directory = ManifestDirectory(path=Path('/fake/project'))
-        view = ToolsView(porringer, _make_store())
+        view = ToolsView(porringer, make_config_store())
         result = asyncio.run(view._gather_packages('pipx', [directory]))
 
         names = {entry.name for entry in result}
@@ -151,7 +120,7 @@ class TestGatherPackages:
     @staticmethod
     def test_per_directory_packages_carry_project_path() -> None:
         """Per-directory packages should include the directory path as project_path."""
-        porringer = _make_porringer()
+        porringer = make_mock_porringer()
 
         async def _mock_list(plugin_name: str, project_path: Path | None = None, **kwargs) -> list[Package]:
             if project_path is None:
@@ -161,7 +130,7 @@ class TestGatherPackages:
         porringer.package.list = AsyncMock(side_effect=_mock_list)
 
         directory = ManifestDirectory(path=Path('/fake/project'))
-        view = ToolsView(porringer, _make_store())
+        view = ToolsView(porringer, make_config_store())
         result = asyncio.run(view._gather_packages('pipx', [directory]))
 
         matching = [e for e in result if e.name == 'mylib']
@@ -171,12 +140,12 @@ class TestGatherPackages:
     @staticmethod
     def test_global_packages_have_empty_project_label() -> None:
         """Packages from the global query should have an empty project label."""
-        porringer = _make_porringer()
+        porringer = make_mock_porringer()
         porringer.package.list = AsyncMock(
             return_value=[Package(name='cppython', version='0.5.0')],
         )
 
-        view = ToolsView(porringer, _make_store())
+        view = ToolsView(porringer, make_config_store())
         result = asyncio.run(view._gather_packages('pipx', []))
 
         matching = [e for e in result if e.name == 'cppython']
@@ -187,7 +156,7 @@ class TestGatherPackages:
     @staticmethod
     def test_global_query_failure_does_not_block_directory_queries() -> None:
         """If the global query fails, per-directory results still come through."""
-        porringer = _make_porringer()
+        porringer = make_mock_porringer()
         call_count = 0
 
         async def _mock_list(plugin_name: str, project_path: Path | None = None, **kwargs) -> list[Package]:
@@ -200,7 +169,7 @@ class TestGatherPackages:
         porringer.package.list = AsyncMock(side_effect=_mock_list)
 
         directory = ManifestDirectory(path=Path('/fake/project'))
-        view = ToolsView(porringer, _make_store())
+        view = ToolsView(porringer, make_config_store())
         result = asyncio.run(view._gather_packages('pipx', [directory]))
 
         names = {entry.name for entry in result}
@@ -211,7 +180,7 @@ class TestGatherPackages:
     @staticmethod
     def test_relation_host_extracted_into_host_tool() -> None:
         """Packages with a PackageRelation populate the host_tool element."""
-        porringer = _make_porringer()
+        porringer = make_mock_porringer()
         porringer.package.list = AsyncMock(
             return_value=[
                 Package(
@@ -226,7 +195,7 @@ class TestGatherPackages:
             ],
         )
 
-        view = ToolsView(porringer, _make_store())
+        view = ToolsView(porringer, make_config_store())
         result = asyncio.run(view._gather_packages('pipx', []))
 
         by_name = {entry.name: entry.host_tool for entry in result}
@@ -245,8 +214,8 @@ class TestGatherToolPlugins:
     @staticmethod
     def test_returns_plugins_keyed_by_host_tool(monkeypatch) -> None:
         """installed_plugins() results are keyed by tool name and returned as PackageEntry."""
-        porringer = _make_porringer()
-        view = ToolsView(porringer, _make_store())
+        porringer = make_mock_porringer()
+        view = ToolsView(porringer, make_config_store())
 
         # Mock _discover_plugin_managers to return a fake manager
         mock_manager = MagicMock()
@@ -278,8 +247,8 @@ class TestGatherToolPlugins:
     @staticmethod
     def test_empty_when_no_managers(monkeypatch) -> None:
         """Returns empty dict when no PluginManager instances are discovered."""
-        porringer = _make_porringer()
-        view = ToolsView(porringer, _make_store())
+        porringer = make_mock_porringer()
+        view = ToolsView(porringer, make_config_store())
         monkeypatch.setattr(
             ToolsView,
             '_discover_plugin_managers',
@@ -292,8 +261,8 @@ class TestGatherToolPlugins:
     @staticmethod
     def test_manager_failure_does_not_propagate(monkeypatch) -> None:
         """A failing installed_plugins() call produces an empty entry, not an exception."""
-        porringer = _make_porringer()
-        view = ToolsView(porringer, _make_store())
+        porringer = make_mock_porringer()
+        view = ToolsView(porringer, make_config_store())
 
         mock_manager = MagicMock()
         mock_manager.installed_plugins = AsyncMock(side_effect=RuntimeError('boom'))
@@ -310,8 +279,8 @@ class TestGatherToolPlugins:
     @staticmethod
     def test_multiple_managers(monkeypatch) -> None:
         """Multiple PluginManager instances are queried in parallel."""
-        porringer = _make_porringer()
-        view = ToolsView(porringer, _make_store())
+        porringer = make_mock_porringer()
+        view = ToolsView(porringer, make_config_store())
 
         mgr_pdm = MagicMock()
         mgr_pdm.installed_plugins = AsyncMock(
@@ -592,9 +561,8 @@ class TestSearchFilter:
     @staticmethod
     def _make_view() -> ToolsView:
         """Build a ToolsView with a mock porringer."""
-        porringer = _make_porringer()
-        config = _make_config()
-        return ToolsView(porringer, _make_store(config))
+        porringer = make_mock_porringer()
+        return ToolsView(porringer, make_config_store())
 
     @staticmethod
     def _populate_section_widgets(view: ToolsView) -> None:
@@ -759,9 +727,8 @@ class TestFilterPanel:
     @staticmethod
     def _make_view() -> ToolsView:
         """Build a ToolsView with a mock porringer."""
-        porringer = _make_porringer()
-        config = _make_config()
-        return ToolsView(porringer, _make_store(config))
+        porringer = make_mock_porringer()
+        return ToolsView(porringer, make_config_store())
 
     def test_panel_starts_collapsed(self) -> None:
         """The filter panel is hidden and has zero max-height on init."""
@@ -874,7 +841,7 @@ class TestRuntimePluginSupport:
     @staticmethod
     def test_runtime_skips_per_directory_queries() -> None:
         """RUNTIME plugins only get a global query, not per-directory queries."""
-        porringer = _make_porringer()
+        porringer = make_mock_porringer()
 
         call_paths: list[Path | None] = []
 
@@ -896,7 +863,7 @@ class TestRuntimePluginSupport:
             MagicMock(directory=ManifestDirectory(path=Path('/fake/project'))),
         ]
 
-        view = ToolsView(porringer, _make_store())
+        view = ToolsView(porringer, make_config_store())
         # Use _gather_packages directly with an empty directory list
         # (as _gather_refresh_data would do for RUNTIME plugins)
         result = asyncio.run(view._gather_packages('pim', []))
@@ -968,7 +935,7 @@ class TestPerRuntimeDisplay:
 
     def test_runtime_sections_create_separate_provider_headers(self) -> None:
         """Each RuntimePackageResult produces its own PluginProviderHeader."""
-        view = ToolsView(_make_porringer(), _make_store())
+        view = ToolsView(make_mock_porringer(), make_config_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -988,7 +955,7 @@ class TestPerRuntimeDisplay:
 
     def test_default_runtime_comes_first(self) -> None:
         """The default runtime's provider header is the first one."""
-        view = ToolsView(_make_porringer(), _make_store())
+        view = ToolsView(make_mock_porringer(), make_config_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1010,7 +977,7 @@ class TestPerRuntimeDisplay:
 
     def test_default_runtime_packages_displayed(self) -> None:
         """Package rows for the default runtime appear after its header."""
-        view = ToolsView(_make_porringer(), _make_store())
+        view = ToolsView(make_mock_porringer(), make_config_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1033,7 +1000,7 @@ class TestPerRuntimeDisplay:
 
     def test_non_default_runtime_packages_displayed(self) -> None:
         """Package rows for the non-default runtime appear after its header."""
-        view = ToolsView(_make_porringer(), _make_store())
+        view = ToolsView(make_mock_porringer(), make_config_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1055,7 +1022,7 @@ class TestPerRuntimeDisplay:
 
     def test_venv_packages_excluded_for_runtime_probed_plugin(self) -> None:
         """Venv packages must not appear in ToolsView for runtime-probed plugins."""
-        view = ToolsView(_make_porringer(), _make_store())
+        view = ToolsView(make_mock_porringer(), make_config_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1086,7 +1053,7 @@ class TestPerRuntimeDisplay:
 
     def test_runtime_tag_uses_default_style(self) -> None:
         """The default runtime tag uses the green highlight style."""
-        view = ToolsView(_make_porringer(), _make_store())
+        view = ToolsView(make_mock_porringer(), make_config_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1109,7 +1076,7 @@ class TestPerRuntimeDisplay:
 
     def test_runtime_tag_uses_normal_style_for_non_default(self) -> None:
         """Non-default runtime tags use the blue style."""
-        view = ToolsView(_make_porringer(), _make_store())
+        view = ToolsView(make_mock_porringer(), make_config_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1133,7 +1100,7 @@ class TestPerRuntimeDisplay:
 
     def test_filter_chips_work_with_runtime_providers(self) -> None:
         """Filter chips are built from runtime provider headers and filter works."""
-        view = ToolsView(_make_porringer(), _make_store())
+        view = ToolsView(make_mock_porringer(), make_config_store())
         default_exe = Path('C:/Python314/python.exe')
         plugin = self._pip_plugin()
         rt_results = self._make_runtime_results(default_exe)
@@ -1159,19 +1126,19 @@ class TestPerRuntimeDisplay:
     @staticmethod
     def test_gather_runtime_packages_returns_none_for_non_consumer() -> None:
         """_gather_runtime_packages returns None when plugin is not a RuntimeConsumer."""
-        porringer = _make_porringer()
+        porringer = make_mock_porringer()
         porringer.package.list_by_runtime = AsyncMock(
             return_value=None,
         )
 
-        view = ToolsView(porringer, _make_store())
+        view = ToolsView(porringer, make_config_store())
         result = asyncio.run(view._gather_runtime_packages('pipx', MagicMock()))
         assert result is None
 
     @staticmethod
     def test_gather_runtime_packages_returns_results() -> None:
         """_gather_runtime_packages returns list on success."""
-        porringer = _make_porringer()
+        porringer = make_mock_porringer()
         expected = [
             RuntimePackageResult(
                 provider='pim',
@@ -1182,14 +1149,14 @@ class TestPerRuntimeDisplay:
         ]
         porringer.package.list_by_runtime = AsyncMock(return_value=expected)
 
-        view = ToolsView(porringer, _make_store())
+        view = ToolsView(porringer, make_config_store())
         result = asyncio.run(view._gather_runtime_packages('pip', MagicMock()))
         assert result == expected
 
     @staticmethod
     def test_skip_global_flag_skips_global_query() -> None:
         """_gather_packages with skip_global=True only runs per-directory queries."""
-        porringer = _make_porringer()
+        porringer = make_mock_porringer()
         call_paths: list[Path | None] = []
 
         async def _mock_list(plugin_name: str, project_path: Path | None = None, **kwargs) -> list[Package]:
@@ -1201,7 +1168,7 @@ class TestPerRuntimeDisplay:
         porringer.package.list = AsyncMock(side_effect=_mock_list)
 
         directory = ManifestDirectory(path=Path('/fake/project'))
-        view = ToolsView(porringer, _make_store())
+        view = ToolsView(porringer, make_config_store())
         result = asyncio.run(view._gather_packages('pip', [directory], skip_global=True))
 
         assert all(p is not None for p in call_paths), 'global query should not be issued'

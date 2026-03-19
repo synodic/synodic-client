@@ -12,7 +12,6 @@ from synodic_client.operations.schema import UpdateResult
 from synodic_client.operations.tool import (
     check_tool_updates,
     remove_package,
-    resolve_auto_update_scope,
     update_tool,
 )
 
@@ -193,62 +192,3 @@ class TestRemovePackage:
         api = MagicMock()
         api.package.uninstall = AsyncMock(return_value=MagicMock(success=False))
         assert asyncio.run(remove_package(api, 'pip', 'requests')) is False
-
-
-# ---------------------------------------------------------------------------
-# resolve_auto_update_scope
-# ---------------------------------------------------------------------------
-
-
-class TestResolveAutoUpdateScope:
-    """Tests for resolve_auto_update_scope()."""
-
-    @staticmethod
-    def test_none_config_returns_none_none() -> None:
-        """No config → (None, None) meaning all plugins, all packages."""
-        plugins, packages = resolve_auto_update_scope(None, ['pip', 'npm'])
-        assert plugins is None
-        assert packages is None
-
-    @staticmethod
-    def test_disabled_plugin_excluded() -> None:
-        """A plugin set to False is excluded from the enabled set."""
-        plugins, _ = resolve_auto_update_scope(
-            {'pip': False, 'npm': True},
-            ['pip', 'npm', 'cargo'],
-        )
-        assert plugins is not None
-        assert 'pip' not in plugins
-        assert 'npm' in plugins
-        assert 'cargo' in plugins
-
-    @staticmethod
-    def test_per_package_entries() -> None:
-        """Per-package granularity builds the include set."""
-        _, packages = resolve_auto_update_scope(
-            {'pip': {'requests': True, 'flask': False}},
-            ['pip'],
-            manifest_packages=None,
-        )
-        assert packages is not None
-        assert 'requests' in packages
-        assert 'flask' not in packages
-
-    @staticmethod
-    def test_manifest_packages_included() -> None:
-        """Manifest packages are added to the include set."""
-        _, packages = resolve_auto_update_scope(
-            {},
-            ['pip'],
-            manifest_packages={'pip': {'requests', 'flask'}},
-        )
-        assert packages is not None
-        assert 'requests' in packages
-        assert 'flask' in packages
-
-    @staticmethod
-    def test_empty_config_returns_none_none() -> None:
-        """Empty mapping → (None, None)."""
-        plugins, packages = resolve_auto_update_scope({}, ['pip'])
-        assert plugins is None
-        assert packages is None

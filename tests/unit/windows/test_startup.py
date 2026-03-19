@@ -17,6 +17,8 @@ from synodic_client.startup import (
     sync_startup,
 )
 
+from .conftest import make_registry_key
+
 
 class TestRegisterStartup:
     """Tests for register_startup."""
@@ -24,9 +26,7 @@ class TestRegisterStartup:
     @staticmethod
     def test_writes_registry_value() -> None:
         """Verify correct registry value is written on Windows."""
-        mock_key = MagicMock()
-        mock_key.__enter__ = MagicMock(return_value=mock_key)
-        mock_key.__exit__ = MagicMock(return_value=False)
+        mock_key = make_registry_key()
 
         with (
             patch.object(winreg, 'OpenKey', return_value=mock_key) as mock_open,
@@ -52,13 +52,9 @@ class TestRegisterStartup:
     @staticmethod
     def test_writes_startup_approved_enabled() -> None:
         """Verify the StartupApproved enabled flag is written."""
-        mock_run_key = MagicMock()
-        mock_run_key.__enter__ = MagicMock(return_value=mock_run_key)
-        mock_run_key.__exit__ = MagicMock(return_value=False)
+        mock_run_key = make_registry_key()
 
-        mock_approved_key = MagicMock()
-        mock_approved_key.__enter__ = MagicMock(return_value=mock_approved_key)
-        mock_approved_key.__exit__ = MagicMock(return_value=False)
+        mock_approved_key = make_registry_key()
 
         with (
             patch.object(winreg, 'OpenKey', return_value=mock_run_key),
@@ -93,9 +89,7 @@ class TestRemoveStartup:
     @staticmethod
     def test_deletes_registry_value() -> None:
         """Verify the startup value is deleted."""
-        mock_key = MagicMock()
-        mock_key.__enter__ = MagicMock(return_value=mock_key)
-        mock_key.__exit__ = MagicMock(return_value=False)
+        mock_key = make_registry_key()
 
         with (
             patch.object(winreg, 'OpenKey', return_value=mock_key),
@@ -108,13 +102,9 @@ class TestRemoveStartup:
     @staticmethod
     def test_clears_startup_approved() -> None:
         """Verify the StartupApproved flag is also deleted."""
-        mock_run_key = MagicMock()
-        mock_run_key.__enter__ = MagicMock(return_value=mock_run_key)
-        mock_run_key.__exit__ = MagicMock(return_value=False)
+        mock_run_key = make_registry_key()
 
-        mock_approved_key = MagicMock()
-        mock_approved_key.__enter__ = MagicMock(return_value=mock_approved_key)
-        mock_approved_key.__exit__ = MagicMock(return_value=False)
+        mock_approved_key = make_registry_key()
 
         def _open_key_side_effect(_root: int, path: str, _reserved: int, _access: int) -> MagicMock:
             if 'Explorer' in path:
@@ -136,9 +126,7 @@ class TestRemoveStartup:
     @staticmethod
     def test_handles_missing_value_gracefully() -> None:
         """Verify no error when startup value doesn't exist."""
-        mock_key = MagicMock()
-        mock_key.__enter__ = MagicMock(return_value=mock_key)
-        mock_key.__exit__ = MagicMock(return_value=False)
+        mock_key = make_registry_key()
 
         with (
             patch.object(winreg, 'OpenKey', return_value=mock_key),
@@ -161,16 +149,14 @@ class TestIsStartupRegistered:
     @staticmethod
     def test_returns_true_when_present() -> None:
         """Verify True when the value exists and no approval override."""
-        mock_key = MagicMock()
-        mock_key.__enter__ = MagicMock(return_value=mock_key)
-        mock_key.__exit__ = MagicMock(return_value=False)
+        mock_key = make_registry_key()
 
         def _open_key_side_effect(_root: int, path: str, _reserved: int, _access: int) -> MagicMock:
             return mock_key
 
         def _query_side_effect(key: MagicMock, name: str) -> tuple[object, int]:
             # Run key exists; StartupApproved key raises FileNotFoundError
-            # (no override → treated as enabled)
+            # (no override â†’ treated as enabled)
             raise FileNotFoundError
 
         with (
@@ -189,9 +175,7 @@ class TestIsStartupRegistered:
     @staticmethod
     def test_returns_true_when_startup_approved_enabled() -> None:
         """Verify True when the StartupApproved byte is 0x02 (enabled)."""
-        mock_key = MagicMock()
-        mock_key.__enter__ = MagicMock(return_value=mock_key)
-        mock_key.__exit__ = MagicMock(return_value=False)
+        mock_key = make_registry_key()
 
         enabled_data = b'\x02' + b'\x00' * 11
 
@@ -211,9 +195,7 @@ class TestIsStartupRegistered:
     @staticmethod
     def test_returns_false_when_startup_approved_disabled() -> None:
         """Verify False when the StartupApproved byte is 0x03 (disabled)."""
-        mock_key = MagicMock()
-        mock_key.__enter__ = MagicMock(return_value=mock_key)
-        mock_key.__exit__ = MagicMock(return_value=False)
+        mock_key = make_registry_key()
 
         disabled_data = b'\x03' + b'\x00' * 11
 
@@ -233,9 +215,7 @@ class TestIsStartupRegistered:
     @staticmethod
     def test_returns_false_when_missing() -> None:
         """Verify False when the value does not exist."""
-        mock_key = MagicMock()
-        mock_key.__enter__ = MagicMock(return_value=mock_key)
-        mock_key.__exit__ = MagicMock(return_value=False)
+        mock_key = make_registry_key()
 
         with (
             patch.object(winreg, 'OpenKey', return_value=mock_key),
@@ -250,9 +230,7 @@ class TestGetRegisteredStartupPath:
     @staticmethod
     def test_returns_unquoted_path() -> None:
         """Verify the returned path has surrounding quotes stripped."""
-        mock_key = MagicMock()
-        mock_key.__enter__ = MagicMock(return_value=mock_key)
-        mock_key.__exit__ = MagicMock(return_value=False)
+        mock_key = make_registry_key()
 
         with (
             patch.object(winreg, 'OpenKey', return_value=mock_key),
@@ -267,9 +245,7 @@ class TestGetRegisteredStartupPath:
     @staticmethod
     def test_returns_none_when_missing() -> None:
         """Verify None when the registry value does not exist."""
-        mock_key = MagicMock()
-        mock_key.__enter__ = MagicMock(return_value=mock_key)
-        mock_key.__exit__ = MagicMock(return_value=False)
+        mock_key = make_registry_key()
 
         with (
             patch.object(winreg, 'OpenKey', return_value=mock_key),
@@ -280,9 +256,7 @@ class TestGetRegisteredStartupPath:
     @staticmethod
     def test_returns_none_on_os_error() -> None:
         """Verify None when an OSError prevents reading the registry."""
-        mock_key = MagicMock()
-        mock_key.__enter__ = MagicMock(return_value=mock_key)
-        mock_key.__exit__ = MagicMock(return_value=False)
+        mock_key = make_registry_key()
 
         with (
             patch.object(winreg, 'OpenKey', return_value=mock_key),

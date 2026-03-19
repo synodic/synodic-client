@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock, patch
 
-from synodic_client.application.config_store import ConfigStore
 from synodic_client.application.screen.update_banner import UpdateBanner
 from synodic_client.application.theme import (
     UPDATE_STATUS_AVAILABLE_STYLE,
@@ -15,11 +13,8 @@ from synodic_client.application.theme import (
 from synodic_client.application.update_controller import UpdateController
 from synodic_client.application.update_model import UpdateModel
 from synodic_client.operations.schema import UpdateCheckResult
-from synodic_client.resolution import ResolvedConfig
-from synodic_client.schema import (
-    DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
-    DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
-)
+
+from .conftest import make_config_store, make_resolved_config
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -42,30 +37,6 @@ class ModelSpy:
         model.last_checked_changed.connect(self.last_checked.append)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_config(**overrides: Any) -> ResolvedConfig:
-    """Create a ``ResolvedConfig`` with sensible defaults and optional overrides."""
-    defaults: dict[str, Any] = {
-        'update_source': None,
-        'update_channel': 'stable',
-        'auto_update_interval_minutes': DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
-        'tool_update_interval_minutes': DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
-        'plugin_auto_update': None,
-        'prerelease_packages': None,
-        'auto_apply': True,
-        'auto_start': True,
-        'debug_logging': False,
-        'last_client_update': None,
-        'last_tool_updates': None,
-    }
-    defaults.update(overrides)
-    return ResolvedConfig(**defaults)
-
-
 def _make_controller(
     *,
     auto_apply: bool = True,
@@ -76,7 +47,7 @@ def _make_controller(
 
     Returns (controller, app_mock, client_mock, banner, model).
     """
-    config = _make_config(
+    config = make_resolved_config(
         auto_apply=auto_apply,
         auto_update_interval_minutes=auto_update_interval_minutes,
     )
@@ -87,7 +58,7 @@ def _make_controller(
     model = UpdateModel()
     banner = UpdateBanner()
     banner.connect_model(model)
-    store = ConfigStore(config)
+    store = make_config_store(config)
 
     with patch('synodic_client.application.update_controller.resolve_update_config') as mock_ucfg:
         mock_ucfg.return_value = MagicMock(
@@ -395,7 +366,7 @@ class TestConfigChanged:
         """Changing config should reinitialise the updater and check."""
         ctrl, app, client, banner, model = _make_controller()
 
-        new_config = _make_config(update_channel='dev')
+        new_config = make_resolved_config(update_channel='dev')
 
         with (
             patch.object(ctrl, '_reinitialize_updater') as mock_reinit,
@@ -411,7 +382,7 @@ class TestConfigChanged:
         """Changing config should update the auto_apply flag."""
         ctrl, app, client, banner, model = _make_controller(auto_apply=True)
 
-        new_config = _make_config(auto_apply=False)
+        new_config = make_resolved_config(auto_apply=False)
 
         with (
             patch.object(ctrl, '_reinitialize_updater'),
@@ -470,7 +441,7 @@ class TestPersistCheckTimestamp:
         ctrl, _app, _client, _banner, model = _make_controller()
         spy = ModelSpy(model)
 
-        fake_resolved = _make_config(last_client_update='2026-03-09T00:00:00+00:00')
+        fake_resolved = make_resolved_config(last_client_update='2026-03-09T00:00:00+00:00')
         with patch.object(ctrl._store, 'update', return_value=fake_resolved) as mock_update:
             ctrl._persist_check_timestamp()
             mock_update.assert_called_once()
@@ -483,7 +454,7 @@ class TestPersistCheckTimestamp:
         ctrl, _app, _client, _banner, model = _make_controller()
         result = UpdateCheckResult(available=False, current_version='1.0.0')
 
-        fake_resolved = _make_config(last_client_update='2026-03-09T00:00:00+00:00')
+        fake_resolved = make_resolved_config(last_client_update='2026-03-09T00:00:00+00:00')
         with patch.object(ctrl._store, 'update', return_value=fake_resolved) as mock_update:
             ctrl._on_check_finished(result, silent=True)
             mock_update.assert_called_once()
@@ -494,7 +465,7 @@ class TestPersistCheckTimestamp:
         ctrl, _app, _client, _banner, model = _make_controller(auto_apply=False)
         spy = ModelSpy(model)
 
-        fake_resolved = _make_config(last_client_update='2026-03-09T00:00:00+00:00')
+        fake_resolved = make_resolved_config(last_client_update='2026-03-09T00:00:00+00:00')
         with patch.object(ctrl._store, 'update', return_value=fake_resolved) as mock_update:
             ctrl._on_download_finished(True, '2.0.0')
             mock_update.assert_called_once()
@@ -520,7 +491,7 @@ class TestReinitializeUpdater:
         fake_task.done.return_value = False
         ctrl._update_task = fake_task
 
-        new_config = _make_config(update_channel='dev')
+        new_config = make_resolved_config(update_channel='dev')
         with patch('synodic_client.application.update_controller.resolve_update_config') as mock_ucfg:
             mock_ucfg.return_value = MagicMock(
                 auto_update_interval_minutes=0,
@@ -541,7 +512,7 @@ class TestReinitializeUpdater:
         ctrl, _app, _client, _banner, _model = _make_controller(auto_apply=False)
         ctrl._pending_version = '2.0.0'
 
-        new_config = _make_config(update_channel='dev')
+        new_config = make_resolved_config(update_channel='dev')
         with patch('synodic_client.application.update_controller.resolve_update_config') as mock_ucfg:
             mock_ucfg.return_value = MagicMock(
                 auto_update_interval_minutes=0,
