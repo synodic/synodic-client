@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from synodic_client.application.config_store import ConfigStore
-from synodic_client.application.schema import UpdateTarget
+from synodic_client.application.screen.schema import UpdateTarget
 from synodic_client.application.screen.tray import TrayScreen
 from synodic_client.operations.schema import UpdateResult
 from synodic_client.resolution import ResolvedConfig

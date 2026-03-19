@@ -17,6 +17,7 @@ from porringer.core.schema import PackageRef
 from porringer.schema import (
     ActionCompletedEvent,
     ActionStartedEvent,
+    SetupActionResult,
     SetupParameters,
     SkipReason,
     SyncStrategy,
@@ -48,10 +49,10 @@ def parse_plugin_key(name: str) -> tuple[str, str | None]:
     return name, None
 
 
-def _capture_versions(result: UpdateResult, pkg_name: str, action_result: object) -> None:
+def _capture_versions(result: UpdateResult, pkg_name: str, action_result: SetupActionResult) -> None:
     """Store before/after version info from *action_result* into *result*."""
-    old_ver = getattr(action_result, 'installed_version', '') or ''
-    new_ver = getattr(action_result, 'available_version', '') or ''
+    old_ver = action_result.installed_version or ''
+    new_ver = action_result.available_version or ''
     if pkg_name and (old_ver or new_ver):
         result.version_map[pkg_name] = (old_ver, new_ver)
 
@@ -316,17 +317,17 @@ async def remove_package(
 
 def _record_completed_event(
     result: UpdateResult,
-    ar: object,
+    ar: SetupActionResult,
     pkg_name: str,
     on_package_completed: Callable[[str, bool, bool], None] | None,
 ) -> None:
     """Record a single completed-event into *result* and fire the callback."""
-    if ar.skipped:  # type: ignore[union-attr]
-        if ar.skip_reason in {SkipReason.ALREADY_LATEST, SkipReason.ALREADY_INSTALLED}:  # type: ignore[union-attr]
+    if ar.skipped:
+        if ar.skip_reason in {SkipReason.ALREADY_LATEST, SkipReason.ALREADY_INSTALLED}:
             result.already_latest.append(pkg_name)
         if on_package_completed is not None and pkg_name:
             on_package_completed(pkg_name, False, True)
-    elif ar.success:  # type: ignore[union-attr]
+    elif ar.success:
         result.packages_updated.append(pkg_name)
         if pkg_name:
             result.updated_packages.add(pkg_name)

@@ -18,7 +18,7 @@ from porringer.api import API
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QSystemTrayIcon
 
-from synodic_client.application.schema import UpdateTarget
+from synodic_client.application.screen.schema import UpdateTarget
 from synodic_client.application.screen.screen import MainWindow, ToolsView
 from synodic_client.operations.schema import UpdateResult
 from synodic_client.operations.tool import (

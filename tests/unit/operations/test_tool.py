@@ -163,9 +163,8 @@ class TestUpdateTool:
         action_result = MagicMock()
         action_result.skipped = False
         action_result.success = True
-        # Simulate older porringer without version attributes
-        del action_result.installed_version
-        del action_result.available_version
+        action_result.installed_version = None
+        action_result.available_version = None
         api.package.upgrade = AsyncMock(return_value=action_result)
 
         result = asyncio.run(update_tool(api, 'pip', 'requests'))

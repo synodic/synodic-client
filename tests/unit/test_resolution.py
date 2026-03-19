@@ -4,9 +4,9 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from synodic_client.operations.tool import resolve_auto_update_scope
 from synodic_client.resolution import (
     ResolvedConfig,
-    resolve_auto_update_scope,
     resolve_config,
     resolve_update_config,
     seed_user_config_from_build,
@@ -231,7 +231,7 @@ class TestResolveAutoUpdateScope:
     def test_no_mapping_returns_none_pair() -> None:
         """Verify (None, None) when plugin_auto_update is unset."""
         config = _make_resolved()
-        plugins, packages = resolve_auto_update_scope(config, ['pip', 'uv'])
+        plugins, packages = resolve_auto_update_scope(config.plugin_auto_update, ['pip', 'uv'])
         assert plugins is None
         assert packages is None
 
@@ -239,7 +239,7 @@ class TestResolveAutoUpdateScope:
     def test_all_enabled_returns_none_pair() -> None:
         """Verify (None, None) when all entries are True."""
         config = _make_resolved(plugin_auto_update={'pip': True, 'uv': True})
-        plugins, packages = resolve_auto_update_scope(config, ['pip', 'uv'])
+        plugins, packages = resolve_auto_update_scope(config.plugin_auto_update, ['pip', 'uv'])
         assert plugins is None
         assert packages is None
 
@@ -247,7 +247,7 @@ class TestResolveAutoUpdateScope:
     def test_plugin_disabled() -> None:
         """Verify a disabled plugin is excluded."""
         config = _make_resolved(plugin_auto_update={'pip': False})
-        plugins, packages = resolve_auto_update_scope(config, ['pip', 'uv'])
+        plugins, packages = resolve_auto_update_scope(config.plugin_auto_update, ['pip', 'uv'])
         assert plugins is not None
         assert 'pip' not in plugins
         assert 'uv' in plugins
@@ -261,7 +261,7 @@ class TestResolveAutoUpdateScope:
             plugin_auto_update={'uv': {'ruff': True, 'mypy': False}},
         )
         plugins, packages = resolve_auto_update_scope(
-            config,
+            config.plugin_auto_update,
             ['uv', 'pip'],
             manifest_packages={'uv': {'ruff', 'black'}},
         )
@@ -284,7 +284,7 @@ class TestResolveAutoUpdateScope:
             },
         )
         plugins, packages = resolve_auto_update_scope(
-            config,
+            config.plugin_auto_update,
             ['pip', 'uv', 'git'],
         )
         assert plugins is not None
@@ -305,7 +305,7 @@ class TestResolveAutoUpdateScope:
             },
         )
         plugins, packages = resolve_auto_update_scope(
-            config,
+            config.plugin_auto_update,
             ['pip', 'uv'],
         )
         # Neither bare plugin should be disabled

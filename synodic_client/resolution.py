@@ -182,30 +182,3 @@ def resolve_update_config(config: ResolvedConfig) -> UpdateConfig:
         auto_update_interval_minutes=config.auto_update_interval_minutes,
         tool_update_interval_minutes=config.tool_update_interval_minutes,
     )
-
-
-def resolve_auto_update_scope(
-    config: ResolvedConfig,
-    all_plugin_names: list[str],
-    manifest_packages: dict[str, set[str]] | None = None,
-) -> tuple[set[str] | None, set[str] | None]:
-    """Derive plugin and package include-lists for auto-update.
-
-    Convenience wrapper around
-    :func:`synodic_client.operations.tool.resolve_auto_update_scope`
-    that extracts ``plugin_auto_update`` from a resolved config.
-
-    Args:
-        config: A resolved configuration snapshot.
-        all_plugin_names: Every known (installed) plugin name.
-        manifest_packages: Mapping of ``plugin_name`` → set of package
-            names declared in cached manifests.  ``None`` means treat
-            all packages as manifest-referenced (conservative default).
-
-    Returns:
-        A ``(enabled_plugins, include_packages)`` tuple.  Either element
-        may be ``None`` meaning "no filtering".
-    """
-    from synodic_client.operations.tool import resolve_auto_update_scope as _resolve
-
-    return _resolve(config.plugin_auto_update, all_plugin_names, manifest_packages)

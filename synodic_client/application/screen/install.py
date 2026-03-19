@@ -50,7 +50,6 @@ from synodic_client.application.screen.schema import (
     ActionState,
     InstallCallbacks,
     InstallConfig,
-    PreviewCallbacks,
     PreviewConfig,
     PreviewModel,
     PreviewPhase,
@@ -499,12 +498,7 @@ class SetupPreviewWidget(QWidget):
                     project_directory=project_directory,
                     prerelease_packages=prerelease_packages,
                 ),
-                callbacks=PreviewCallbacks(
-                    on_manifest_parsed=self._on_manifest_parsed,
-                    on_plugins_queried=self._on_plugins_queried,
-                    on_preview_ready=self._on_preview_resolved,
-                    on_action_checked=self._on_action_checked,
-                ),
+                on_event=self._on_preview_event,
                 plugins=self._discovered_plugins,
             )
             self._on_preview_finished()
@@ -539,6 +533,26 @@ class SetupPreviewWidget(QWidget):
         except Exception as exc:
             logger.exception('Install execution failed')
             self._on_install_error(str(exc))
+
+    # --- Preview event dispatcher ---
+
+    def _on_preview_event(self, event: object) -> None:
+        """Route a :data:`PreviewEvent` to the appropriate handler."""
+        from synodic_client.operations.schema import (
+            PreviewActionChecked,
+            PreviewManifestParsed,
+            PreviewPluginsQueried,
+            PreviewReady,
+        )
+
+        if isinstance(event, PreviewManifestParsed):
+            self._on_manifest_parsed(event.manifest, event.manifest_path, event.temp_dir)
+        elif isinstance(event, PreviewPluginsQueried):
+            self._on_plugins_queried(event.availability, event.capabilities)
+        elif isinstance(event, PreviewReady):
+            self._on_preview_resolved(event.manifest, event.manifest_path, event.temp_dir)
+        elif isinstance(event, PreviewActionChecked):
+            self._on_action_checked(event.index, event.result, event.status)
 
     # --- Preview callbacks (wired by load()) ---
 
@@ -576,9 +590,6 @@ class SetupPreviewWidget(QWidget):
         self._metadata_skeleton.hide()
 
         self._show_metadata(preview)
-
-        if preview.metadata:
-            self.metadata_ready.emit(preview)
 
         if not preview.actions:
             self._card_list.clear()
@@ -618,15 +629,12 @@ class SetupPreviewWidget(QWidget):
 
         Called after ``MANIFEST_LOADED`` — cards are already visible
         from the earlier ``_on_manifest_parsed`` handler.  This updates
-        the temp-dir reference and emits metadata.
+        the temp-dir reference.
         """
         if self._model.preview is None:
             return
 
         self._model.temp_dir = temp_dir_path
-
-        if preview.metadata:
-            self.metadata_ready.emit(preview)
 
     def _on_action_checked(self, row: int, result: SetupActionResult, status: str) -> None:
         """Update the model and action card with a dry-run result.
@@ -976,9 +984,7 @@ class SetupPreviewWidget(QWidget):
         pre_skipped = len(m.install_plan.satisfied_indices) if m.install_plan else 0
 
         # If we have stashed install results (auto-run path), use combined summary
-        install_results = (
-            list(self._install_results.results) if hasattr(self, '_install_results') and self._install_results else None
-        )
+        install_results = list(self._install_results.results) if self._install_results else None
         summary = format_install_summary(
             install_results=install_results,
             post_sync_results=m.post_sync_results,
@@ -988,7 +994,12 @@ class SetupPreviewWidget(QWidget):
         self._install_btn.setEnabled(False)
         self._run_commands_btn.setEnabled(False)
         self._close_btn.setEnabled(True)
-        self.install_finished.emit(results)
+
+        # Only emit when coming from the auto-run path (install_finished
+        # was not yet emitted).  On the manual "Run Commands" path the
+        # signal was already emitted by _on_install_finished.
+        if self._install_results is not None:
+            self.install_finished.emit(results)
 
 
 # ---------------------------------------------------------------------------

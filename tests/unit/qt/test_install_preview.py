@@ -28,8 +28,14 @@ from synodic_client.application.screen import (
     skip_reason_label,
 )
 from synodic_client.application.screen.install_workers import run_install, run_preview
-from synodic_client.application.screen.schema import InstallConfig, PreviewCallbacks, PreviewConfig
+from synodic_client.application.screen.schema import InstallConfig, PreviewConfig
 from synodic_client.application.uri import normalize_manifest_key, resolve_local_path
+from synodic_client.operations.schema import (
+    PreviewActionChecked,
+    PreviewManifestParsed,
+    PreviewPluginsQueried,
+    PreviewReady,
+)
 
 _DOWNLOAD_PATCH = 'synodic_client.application.screen.install_workers.API.download'
 _EXPECTED_CHECKED_COUNT = 2
@@ -288,8 +294,8 @@ class TestPreviewWorkerLocal:
             run_preview(
                 porringer,
                 str(manifest),
-                callbacks=PreviewCallbacks(
-                    on_preview_ready=lambda r, p, t: results.append((r, p, t)),
+                on_event=lambda e: (
+                    isinstance(e, PreviewReady) and results.append((e.manifest, e.manifest_path, e.temp_dir))
                 ),
             ),
         )
@@ -364,8 +370,8 @@ class TestPreviewWorker:
             run_preview(
                 porringer,
                 'https://example.com/good.json',
-                callbacks=PreviewCallbacks(
-                    on_preview_ready=lambda r, p, t: results.append((r, p, t)),
+                on_event=lambda e: (
+                    isinstance(e, PreviewReady) and results.append((e.manifest, e.manifest_path, e.temp_dir))
                 ),
             ),
         )
@@ -412,9 +418,9 @@ class TestPreviewWorkerSignals:
             await run_preview(
                 porringer,
                 str(manifest),
-                callbacks=PreviewCallbacks(
-                    on_preview_ready=lambda p, m, t: ready_calls.append((p, m, t)),
-                    on_action_checked=lambda row, r, s: checked.append((row, r, s)),
+                on_event=lambda e: (
+                    (isinstance(e, PreviewReady) and ready_calls.append((e.manifest, e.manifest_path, e.temp_dir)))
+                    or (isinstance(e, PreviewActionChecked) and checked.append((e.index, e.result, e.status)))
                 ),
             )
             finished = True
@@ -496,8 +502,8 @@ class TestPreviewWorkerSignals:
             run_preview(
                 porringer,
                 str(manifest),
-                callbacks=PreviewCallbacks(
-                    on_action_checked=lambda row, r, s: checked.append((row, r, s)),
+                on_event=lambda e: (
+                    isinstance(e, PreviewActionChecked) and checked.append((e.index, e.result, e.status))
                 ),
             ),
         )
@@ -555,8 +561,8 @@ class TestPreviewWorkerSignals:
             run_preview(
                 porringer,
                 str(manifest),
-                callbacks=PreviewCallbacks(
-                    on_plugins_queried=lambda avail, caps: captured.append((avail, caps)),
+                on_event=lambda e: (
+                    isinstance(e, PreviewPluginsQueried) and captured.append((e.availability, e.capabilities))
                 ),
             ),
         )
@@ -590,9 +596,9 @@ class TestPreviewWorkerSignals:
             run_preview(
                 porringer,
                 str(manifest),
-                callbacks=PreviewCallbacks(
-                    on_plugins_queried=lambda _avail, _caps: order.append('plugins'),
-                    on_preview_ready=lambda *_: order.append('preview'),
+                on_event=lambda e: (
+                    (isinstance(e, PreviewPluginsQueried) and order.append('plugins'))
+                    or (isinstance(e, PreviewReady) and order.append('preview'))
                 ),
             ),
         )
@@ -625,8 +631,9 @@ class TestPreviewWorkerSignals:
             run_preview(
                 porringer,
                 str(manifest),
-                callbacks=PreviewCallbacks(
-                    on_manifest_parsed=lambda *a: parsed_data.append(a),
+                on_event=lambda e: (
+                    isinstance(e, PreviewManifestParsed)
+                    and parsed_data.append((e.manifest, e.manifest_path, e.temp_dir))
                 ),
             ),
         )
@@ -665,10 +672,10 @@ class TestPreviewWorkerSignals:
             run_preview(
                 porringer,
                 str(manifest),
-                callbacks=PreviewCallbacks(
-                    on_manifest_parsed=lambda *_: order.append('parsed'),
-                    on_plugins_queried=lambda _avail, _caps: order.append('plugins'),
-                    on_preview_ready=lambda *_: order.append('ready'),
+                on_event=lambda e: (
+                    (isinstance(e, PreviewManifestParsed) and order.append('parsed'))
+                    or (isinstance(e, PreviewPluginsQueried) and order.append('plugins'))
+                    or (isinstance(e, PreviewReady) and order.append('ready'))
                 ),
             ),
         )
@@ -866,8 +873,8 @@ class TestSCMPreviewActions:
                 porringer,
                 str(manifest),
                 config=PreviewConfig(project_directory=tmp_path),
-                callbacks=PreviewCallbacks(
-                    on_action_checked=lambda row, r, s: checked.append((row, r, s)),
+                on_event=lambda e: (
+                    isinstance(e, PreviewActionChecked) and checked.append((e.index, e.result, e.status))
                 ),
             ),
         )
@@ -912,8 +919,8 @@ class TestSCMPreviewActions:
                 porringer,
                 str(manifest),
                 config=PreviewConfig(project_directory=tmp_path),
-                callbacks=PreviewCallbacks(
-                    on_action_checked=lambda row, r, s: checked.append((row, r, s)),
+                on_event=lambda e: (
+                    isinstance(e, PreviewActionChecked) and checked.append((e.index, e.result, e.status))
                 ),
             ),
         )

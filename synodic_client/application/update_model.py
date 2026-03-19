@@ -75,28 +75,35 @@ class UpdateModel(QObject):
 
     # --- Lifecycle transitions (controller writes) ---
 
+    def _transition(self, phase: UpdatePhase) -> None:
+        """Common transition logic — clears stale error state and emits."""
+        if phase != UpdatePhase.ERROR:
+            self._error_message = ''
+        self._phase = phase
+        self.phase_changed.emit(self._phase)
+
+    def set_checking(self) -> None:
+        """Enter the *CHECKING* phase."""
+        self._transition(UpdatePhase.CHECKING)
+
     def set_downloading(self, version: str) -> None:
         """Enter the *DOWNLOADING* phase for *version*."""
         self._version = version
-        self._phase = UpdatePhase.DOWNLOADING
-        self.phase_changed.emit(self._phase)
+        self._transition(UpdatePhase.DOWNLOADING)
 
     def set_ready(self, version: str) -> None:
         """Enter the *READY* phase for *version*."""
         self._version = version
-        self._phase = UpdatePhase.READY
-        self.phase_changed.emit(self._phase)
+        self._transition(UpdatePhase.READY)
 
     def set_error(self, message: str) -> None:
         """Enter the *ERROR* phase with *message*."""
         self._error_message = message
-        self._phase = UpdatePhase.ERROR
-        self.phase_changed.emit(self._phase)
+        self._transition(UpdatePhase.ERROR)
 
     def set_idle(self) -> None:
         """Return to the *IDLE* phase."""
-        self._phase = UpdatePhase.IDLE
-        self.phase_changed.emit(self._phase)
+        self._transition(UpdatePhase.IDLE)
 
     def set_progress(self, percentage: int) -> None:
         """Update download progress (0--100)."""

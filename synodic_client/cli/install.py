@@ -86,18 +86,12 @@ async def _process_install_stream(
     """Run the install stream and collect results."""
     from porringer.schema import ActionCompletedEvent, ActionStartedEvent, ManifestLoadedEvent
 
-    from synodic_client.operations.install import execute_install
+    from synodic_client.operations.install import collect_install
 
-    results: list[SetupActionResult] = []
     action_count = 0
 
-    async for stage, event in execute_install(
-        porringer,
-        manifest_path,
-        project_directory=project_directory,
-        strategy=strategy,
-        prerelease_packages=prerelease_packages,
-    ):
+    def _on_progress(stage: str, event: object) -> None:
+        nonlocal action_count
         if stage == 'manifest_loaded' and isinstance(event, ManifestLoadedEvent):
             action_count = len(event.manifest.actions)
             if not json_output:
@@ -106,14 +100,22 @@ async def _process_install_stream(
             if not json_output:
                 typer.echo(f'  Starting: {event.action.description}')
         elif stage == 'action_completed' and isinstance(event, ActionCompletedEvent):
-            results.append(event.result)
             if not json_output:
                 status = 'OK' if event.result.success else 'FAILED'
                 if event.result.skipped:
                     status = 'SKIPPED'
                 typer.echo(f'  {status}: {event.action.description}')
 
-    return results, action_count
+    results = await collect_install(
+        porringer,
+        manifest_path,
+        project_directory=project_directory,
+        strategy=strategy,
+        prerelease_packages=prerelease_packages,
+        on_progress=_on_progress,
+    )
+
+    return list(results.results), action_count
 
 
 async def _process_post_sync_stream(
@@ -126,28 +128,27 @@ async def _process_post_sync_stream(
     """Run the post-sync stream and collect results."""
     from porringer.schema import ActionCompletedEvent, ActionStartedEvent
 
-    from synodic_client.operations.install import execute_post_sync
-
-    results: list[SetupActionResult] = []
+    from synodic_client.operations.install import collect_post_sync
 
     if not json_output:
         typer.echo('Running post-sync commands...')
 
-    async for stage, event in execute_post_sync(
-        porringer,
-        manifest_path,
-        project_directory=project_directory,
-    ):
+    def _on_progress(stage: str, event: object) -> None:
         if stage == 'action_started' and isinstance(event, ActionStartedEvent):
             if not json_output:
                 typer.echo(f'  Running: {event.action.description}')
-        elif stage == 'action_completed' and isinstance(event, ActionCompletedEvent):
-            results.append(event.result)
-            if not json_output:
-                status = 'OK' if event.result.success else 'FAILED'
-                typer.echo(f'  {status}: {event.action.description}')
+        elif stage == 'action_completed' and isinstance(event, ActionCompletedEvent) and not json_output:
+            status = 'OK' if event.result.success else 'FAILED'
+            typer.echo(f'  {status}: {event.action.description}')
 
-    return results
+    results = await collect_post_sync(
+        porringer,
+        manifest_path,
+        project_directory=project_directory,
+        on_progress=_on_progress,
+    )
+
+    return list(results.results)
 
 
 async def _run(
@@ -175,17 +176,13 @@ async def _run(
             json_output=json_output,
         )
 
-        # Post-sync phase
-        has_post_sync = manifest_path.read_text(encoding='utf-8').find('"post_sync"') != -1
-        post_sync_results = (
-            await _process_post_sync_stream(
-                porringer,
-                manifest_path,
-                project_directory=project_directory,
-                json_output=json_output,
-            )
-            if has_post_sync
-            else []
+        # Post-sync phase — execute_post_sync no-ops when the manifest
+        # has no post_sync block, so we always call it.
+        post_sync_results = await _process_post_sync_stream(
+            porringer,
+            manifest_path,
+            project_directory=project_directory,
+            json_output=json_output,
         )
 
         summary = format_install_summary(

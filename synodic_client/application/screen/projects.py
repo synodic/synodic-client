@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from porringer.api import API
 from porringer.backend.command.core.discovery import DiscoveredPlugins
+from porringer.schema import DirectoryValidationResult, ManifestDirectory
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -138,15 +139,11 @@ class ProjectsView(QWidget):
                 # Convert ProjectInfo list to the same shape as validated_directories
                 results = []
                 for p in projects:
-                    result = type(
-                        '_Result',
-                        (),
-                        {
-                            'directory': type('_Dir', (), {'path': p.path, 'name': p.name})(),
-                            'exists': p.exists,
-                            'has_manifest': p.has_manifest,
-                        },
-                    )()
+                    result = DirectoryValidationResult(
+                        directory=ManifestDirectory(path=Path(p.path), name=p.name),
+                        exists=p.exists,
+                        has_manifest=p.has_manifest,
+                    )
                     results.append(result)
                 discovered = None
 
@@ -154,7 +151,7 @@ class ProjectsView(QWidget):
             current_paths: set[Path] = set()
             for result in results:
                 d = result.directory
-                valid = bool(result.exists and result.has_manifest is not False)
+                valid = bool(result.exists and result.has_manifest)
                 path = Path(d.path)
                 directories.append((path, d.name or '', valid))
                 current_paths.add(path)

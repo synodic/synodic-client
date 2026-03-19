@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,7 +22,9 @@ from porringer.schema import (
     PluginsDiscoveredEvent,
     ProgressEvent,
     SetupAction,
+    SetupActionResult,
     SetupParameters,
+    SetupResults,
     SubActionProgressEvent,
     SyncStrategy,
 )
@@ -343,8 +345,98 @@ async def execute_post_sync(
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers for manifest filtering
+# Batch collect helpers — consume a stream and return SetupResults
 # ---------------------------------------------------------------------------
+
+InstallProgressCallback = Callable[[str, ProgressEvent], None]
+
+
+async def collect_install(
+    porringer: API,
+    manifest_path: Path,
+    *,
+    project_directory: Path | None = None,
+    strategy: SyncStrategy = SyncStrategy.MINIMAL,
+    prerelease_packages: set[str] | None = None,
+    discovered: DiscoveredPlugins | None = None,
+    exclude_post_sync: bool = False,
+    on_progress: InstallProgressCallback | None = None,
+) -> SetupResults:
+    """Execute install actions and return collected results.
+
+    Consumes :func:`execute_install` internally, collecting action
+    results and optionally forwarding each ``(stage, event)`` to
+    *on_progress* for UI updates.
+    """
+    actions: list[SetupAction] = []
+    collected: list[SetupActionResult] = []
+    manifest_result: SetupResults | None = None
+
+    async for stage, event in execute_install(
+        porringer,
+        manifest_path,
+        project_directory=project_directory,
+        strategy=strategy,
+        prerelease_packages=prerelease_packages,
+        discovered=discovered,
+        exclude_post_sync=exclude_post_sync,
+    ):
+        if stage == 'manifest_loaded' and isinstance(event, ManifestLoadedEvent):
+            manifest_result = event.manifest
+            actions = list(event.manifest.actions)
+        elif stage == 'action_completed' and isinstance(event, ActionCompletedEvent):
+            collected.append(event.result)
+
+        if on_progress is not None:
+            on_progress(stage, event)
+
+    return SetupResults(
+        actions=actions,
+        results=collected,
+        manifest_path=manifest_result.manifest_path if manifest_result else None,
+        metadata=manifest_result.metadata if manifest_result else None,
+    )
+
+
+async def collect_post_sync(
+    porringer: API,
+    manifest_path: Path,
+    *,
+    project_directory: Path | None = None,
+    discovered: DiscoveredPlugins | None = None,
+    on_progress: InstallProgressCallback | None = None,
+) -> SetupResults:
+    """Execute post-sync commands and return collected results.
+
+    Consumes :func:`execute_post_sync` internally, collecting action
+    results and optionally forwarding each ``(stage, event)`` to
+    *on_progress* for UI updates.
+    """
+    actions: list[SetupAction] = []
+    collected: list[SetupActionResult] = []
+    manifest_result: SetupResults | None = None
+
+    async for stage, event in execute_post_sync(
+        porringer,
+        manifest_path,
+        project_directory=project_directory,
+        discovered=discovered,
+    ):
+        if stage == 'manifest_loaded' and isinstance(event, ManifestLoadedEvent):
+            manifest_result = event.manifest
+            actions = list(event.manifest.actions)
+        elif stage == 'action_completed' and isinstance(event, ActionCompletedEvent):
+            collected.append(event.result)
+
+        if on_progress is not None:
+            on_progress(stage, event)
+
+    return SetupResults(
+        actions=actions,
+        results=collected,
+        manifest_path=manifest_result.manifest_path if manifest_result else None,
+        metadata=manifest_result.metadata if manifest_result else None,
+    )
 
 
 def _strip_post_sync(manifest_path: Path) -> Path:

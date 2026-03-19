@@ -30,7 +30,7 @@ from synodic_client.application.theme import (
 )
 from synodic_client.application.update_model import UpdateModel
 from synodic_client.operations.schema import UpdateCheckResult
-from synodic_client.operations.update import check_self_update, download_self_update
+from synodic_client.operations.update import apply_self_update, check_self_update, download_self_update
 from synodic_client.resolution import (
     ResolvedConfig,
     resolve_update_config,
@@ -288,6 +288,7 @@ class UpdateController:
         self._model.set_check_button_enabled(False)
         if self._pending_version is None:
             self._model.set_restart_visible(False)
+            self._model.set_checking()
             self._model.set_status('Checking\u2026', UPDATE_STATUS_CHECKING_STYLE)
 
         self._set_task(self._async_check(silent=silent))
@@ -436,7 +437,7 @@ class UpdateController:
             # the next launch.
             sync_startup(sys.executable, auto_start=self._store.config.auto_start)
 
-            self._client.apply_update_on_exit(restart=True, silent=silent)
+            apply_self_update(self._client, restart=True, silent=silent)
             self._pending_version = None
             logger.info('Update scheduled — restarting application')
             self._app.quit()

@@ -238,8 +238,6 @@ class PreviewModel:
 
     def __init__(self) -> None:
         """Initialise a blank preview model."""
-        self._normalize = normalize_manifest_key
-
         self.phase: PreviewPhase = PreviewPhase.IDLE
         self.preview: SetupResults | None = None
         self.manifest_path: Path | None = None
@@ -295,7 +293,7 @@ class PreviewModel:
 
     def has_same_manifest(self, key: str) -> bool:
         """Return ``True`` if *key* matches the current manifest key."""
-        return self.manifest_key is not None and self.manifest_key == self._normalize(key)
+        return self.manifest_key is not None and self.manifest_key == normalize_manifest_key(key)
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,25 +320,29 @@ class InstallCallbacks:
 
 
 @dataclass(frozen=True, slots=True)
-class PreviewCallbacks:
-    """Callbacks for :func:`run_preview` progress reporting."""
-
-    on_manifest_parsed: Callable[[SetupResults, str, str], None] | None = None
-    """``(SetupResults, manifest_path, temp_dir)`` — after JSON load."""
-
-    on_plugins_queried: Callable[[dict[str, bool], dict[str, frozenset[PluginCapability]]], None] | None = None
-    """``(dict[str, bool], dict[str, frozenset[PluginCapability]])`` — plugin → installed + capabilities mappings."""
-
-    on_preview_ready: Callable[[SetupResults, str, str], None] | None = None
-    """``(SetupResults, manifest_path, temp_dir)`` — CLI commands resolved."""
-
-    on_action_checked: Callable[[int, SetupActionResult, str], None] | None = None
-    """``(row_index, SetupActionResult, status)`` — per-action dry-run result with resolved status."""
-
-
-@dataclass(frozen=True, slots=True)
 class PreviewConfig:
     """Optional execution parameters for :func:`run_preview`."""
 
     project_directory: Path | None = None
     prerelease_packages: set[str] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateTarget:
+    """Identifies the scope of a manual tool update.
+
+    Passed to the shared completion handler so it can clear the correct
+    updating state and derive timestamp keys.  ``None`` (the default in
+    the handler) means the update was periodic / automatic.
+
+    When *package* is empty the update targeted an entire plugin;
+    otherwise it targeted one specific package within the plugin.
+    *plugin* always carries the signal key (possibly composite
+    ``"plugin:tag"``).
+    """
+
+    plugin: str
+    """Signal key for the plugin (may be composite ``"name:tag"``)."""
+
+    package: str = ''
+    """Package name, or empty when the whole plugin was updated."""

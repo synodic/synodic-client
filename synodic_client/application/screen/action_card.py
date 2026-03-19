@@ -79,6 +79,15 @@ _SPINNER_INTERVAL = 50
 #: display order always matches the order actions actually execute.
 _KIND_ORDER: dict[PluginKind | None, int] = {kind: i for i, kind in enumerate(PHASE_ORDER)}
 
+#: Mapping of resolved status label → stylesheet for dry-run badge styling.
+_STATUS_STYLES: dict[str, str] = {
+    'Update available': ACTION_CARD_STATUS_UPDATE,
+    'Failed': ACTION_CARD_STATUS_FAILED,
+    'Pending': ACTION_CARD_STATUS_PENDING,
+    'Ready': ACTION_CARD_STATUS_SATISFIED,
+    'Needed': ACTION_CARD_STATUS_NEEDED,
+}
+
 
 def action_sort_key(action: SetupAction) -> int:
     """Return a sort key that groups cards by execution phase.
@@ -464,15 +473,6 @@ class ActionCard(QFrame):
             return
 
         self._stop_spinner()
-
-        # Status-to-style mapping
-        _STATUS_STYLES: dict[str, str] = {
-            'Update available': ACTION_CARD_STATUS_UPDATE,
-            'Failed': ACTION_CARD_STATUS_FAILED,
-            'Pending': ACTION_CARD_STATUS_PENDING,
-            'Ready': ACTION_CARD_STATUS_SATISFIED,
-            'Needed': ACTION_CARD_STATUS_NEEDED,
-        }
 
         style = _STATUS_STYLES.get(status, ACTION_CARD_STATUS_SATISFIED)
         display = status

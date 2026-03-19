@@ -81,9 +81,6 @@ def classify_status(status: str) -> str:
 # Install plan computation
 # ---------------------------------------------------------------------------
 
-#: Statuses that mean the action is already handled — nothing to install.
-_SATISFIED_STATUSES: frozenset[str] = frozenset({'Already installed', 'Already latest'})
-
 
 @dataclass(frozen=True, slots=True)
 class ActionCheckResult:

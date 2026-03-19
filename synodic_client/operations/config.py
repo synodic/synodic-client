@@ -12,6 +12,15 @@ from synodic_client.operations.schema import ConfigKeyInfo
 from synodic_client.resolution import resolve_config, update_user_config
 from synodic_client.schema import ResolvedConfig
 
+_VALID_KEYS: frozenset[str] = frozenset(f.name for f in dataclasses.fields(ResolvedConfig))
+
+
+def _validate_key(key: str) -> None:
+    """Raise :class:`KeyError` if *key* is not a recognised config field."""
+    if key not in _VALID_KEYS:
+        msg = f'Unknown config key: {key!r}. Valid keys: {sorted(_VALID_KEYS)}'
+        raise KeyError(msg)
+
 
 def get_config() -> ResolvedConfig:
     """Load and return the current resolved configuration.
@@ -34,10 +43,7 @@ def get_config_value(key: str) -> object:
     Raises:
         KeyError: If *key* is not a recognised config field.
     """
-    valid_keys = {f.name for f in dataclasses.fields(ResolvedConfig)}
-    if key not in valid_keys:
-        msg = f'Unknown config key: {key!r}. Valid keys: {sorted(valid_keys)}'
-        raise KeyError(msg)
+    _validate_key(key)
 
     config = resolve_config()
     return getattr(config, key)
@@ -56,10 +62,7 @@ def set_config(key: str, value: object) -> ResolvedConfig:
     Raises:
         KeyError: If *key* is not a recognised config field.
     """
-    valid_keys = {f.name for f in dataclasses.fields(ResolvedConfig)}
-    if key not in valid_keys:
-        msg = f'Unknown config key: {key!r}. Valid keys: {sorted(valid_keys)}'
-        raise KeyError(msg)
+    _validate_key(key)
 
     return update_user_config(**{key: value})
 
@@ -79,11 +82,8 @@ def update_config(**changes: object) -> ResolvedConfig:
     Raises:
         KeyError: If any key is not a recognised config field.
     """
-    valid_keys = {f.name for f in dataclasses.fields(ResolvedConfig)}
     for key in changes:
-        if key not in valid_keys:
-            msg = f'Unknown config key: {key!r}. Valid keys: {sorted(valid_keys)}'
-            raise KeyError(msg)
+        _validate_key(key)
     return update_user_config(**changes)
 
 
