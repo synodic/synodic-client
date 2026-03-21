@@ -227,18 +227,18 @@ class TestUpdaterCheckForUpdate:
 
     @staticmethod
     def test_check_404_returns_friendly_message(updater: Updater) -> None:
-        """Verify a 404 from GitHub returns a friendly no-releases message."""
+        """Verify a 404 from GitHub falls back to manifest check gracefully."""
         mock_manager = MagicMock(spec=velopack.UpdateManager)
         mock_manager.check_for_updates.side_effect = RuntimeError('Network error: Http error: http status: 404')
 
-        with patch.object(updater, '_get_velopack_manager', return_value=mock_manager):
+        with (
+            patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
+            patch.object(updater, '_check_manifest_fallback', return_value=None),
+        ):
             info = updater.check_for_update()
 
         assert info.available is False
-        assert info.error is not None
-        assert 'No releases found' in info.error
-        assert updater._config.channel_name in info.error
-        # A missing channel is informational, not a hard failure
+        # Fallback returned None, so no error — just no update.
         assert updater.state == UpdateState.NO_UPDATE
 
     @staticmethod

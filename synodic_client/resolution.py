@@ -31,7 +31,6 @@ from synodic_client.schema import (
     UpdateConfig,
     UserConfig,
 )
-from synodic_client.updater import github_release_asset_url
 
 logger = logging.getLogger(__name__)
 
@@ -171,14 +170,9 @@ def resolve_update_config(config: ResolvedConfig) -> UpdateConfig:
     """
     channel = UpdateChannel.DEVELOPMENT if config.update_channel == 'dev' else UpdateChannel.STABLE
 
-    repo_url = github_release_asset_url(
-        config.update_source or GITHUB_REPO_URL,
-        channel,
-    )
-
     return UpdateConfig(
         channel=channel,
-        repo_url=repo_url,
+        repo_url=config.update_source or GITHUB_REPO_URL,
         auto_update_interval_minutes=config.auto_update_interval_minutes,
         tool_update_interval_minutes=config.tool_update_interval_minutes,
     )

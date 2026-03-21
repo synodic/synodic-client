@@ -8,8 +8,10 @@ For non-installed (development) environments, updates are not supported.
 """
 
 import contextlib
+import json
 import logging
 import sys
+import urllib.request
 from collections.abc import Callable
 from typing import Any
 
@@ -173,7 +175,19 @@ class Updater:
                     error='Not installed via Velopack',
                 )
 
-            velopack_info = manager.check_for_updates()
+            try:
+                velopack_info = manager.check_for_updates()
+            except Exception as sdk_err:
+                if '404' in str(sdk_err):
+                    logger.debug('SDK check failed with 404, trying manifest fallback: %s', sdk_err)
+                    velopack_info = self._check_manifest_fallback()
+                else:
+                    raise
+
+            if velopack_info is None:
+                # SDK returned no update; try the manual manifest fallback
+                # in case the SDK's GithubSource skipped prerelease entries.
+                velopack_info = self._check_manifest_fallback()
 
             if velopack_info is not None:
                 latest = Version(velopack_info.TargetFullRelease.Version)
@@ -202,20 +216,6 @@ class Updater:
             return self._update_info
 
         except Exception as e:
-            if '404' in str(e):
-                channel = self._config.channel_name
-                msg = (
-                    f"No releases found for the '{channel}' channel. "
-                    "Try switching to the 'Development' channel in Settings \u2192 Channel."
-                )
-                logger.debug('No releases for channel %s: %s', channel, e)
-                self._state = UpdateState.NO_UPDATE
-                return UpdateInfo(
-                    available=False,
-                    current_version=self._current_version,
-                    error=msg,
-                )
-
             logger.exception('Failed to check for updates')
             self._state = UpdateState.FAILED
             return UpdateInfo(
@@ -223,6 +223,93 @@ class Updater:
                 current_version=self._current_version,
                 error=str(e),
             )
+
+    def _check_manifest_fallback(self) -> Any:
+        """Download the release manifest directly and check for updates.
+
+        The Velopack SDK's ``GithubSource`` handler cannot discover
+        updates from prerelease GitHub Releases.  This fallback
+        downloads ``releases.{channel}.json`` via Python's stdlib and
+        constructs a ``velopack.UpdateInfo`` when a newer version
+        exists.
+
+        Returns:
+            A ``velopack.UpdateInfo`` if an update is available,
+            ``None`` otherwise.
+        """
+        asset_base = github_release_asset_url(self._config.repo_url, self._config.channel)
+        manifest_url = f'{asset_base}/releases.{self._config.channel_name}.json'
+        logger.debug('Manifest fallback: fetching %s', manifest_url)
+
+        try:
+            req = urllib.request.Request(manifest_url, headers={'User-Agent': 'synodic-client'})
+            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 — URL is derived from a known repo constant
+                data = json.loads(resp.read())
+        except Exception:
+            logger.debug('Manifest fallback failed for %s', manifest_url, exc_info=True)
+            return None
+
+        current_semver = pep440_to_semver(str(self._current_version))
+        best: dict[str, Any] | None = None
+        best_ver: str | None = None
+
+        for asset in data.get('Assets', []):
+            if asset.get('Type') != 'Full':
+                continue
+            ver = asset.get('Version', '')
+            if not ver:
+                continue
+            # Simple semver comparison via packaging.version (accepts
+            # semver pre-release tags like ``0.1.0-dev.79``).
+            try:
+                if Version(ver) > Version(current_semver):
+                    if best_ver is None or Version(ver) > Version(best_ver):
+                        best = asset
+                        best_ver = ver
+            except Exception:
+                continue
+
+        if best is None:
+            logger.debug('Manifest fallback: no newer version found')
+            return None
+
+        logger.debug('Manifest fallback: found %s', best_ver)
+
+        target = velopack.VelopackAsset(
+            PackageId=best['PackageId'],
+            Version=best['Version'],
+            Type=best['Type'],
+            FileName=best['FileName'],
+            SHA1=best.get('SHA1', ''),
+            SHA256=best.get('SHA256', ''),
+            Size=best.get('Size', 0),
+            NotesMarkdown='',
+            NotesHtml='',
+        )
+
+        # Collect matching delta assets for the same version.
+        deltas = []
+        for asset in data.get('Assets', []):
+            if asset.get('Type') == 'Delta' and asset.get('Version') == best['Version']:
+                deltas.append(
+                    velopack.VelopackAsset(
+                        PackageId=asset['PackageId'],
+                        Version=asset['Version'],
+                        Type=asset['Type'],
+                        FileName=asset['FileName'],
+                        SHA1=asset.get('SHA1', ''),
+                        SHA256=asset.get('SHA256', ''),
+                        Size=asset.get('Size', 0),
+                        NotesMarkdown='',
+                        NotesHtml='',
+                    )
+                )
+
+        return velopack.UpdateInfo(
+            TargetFullRelease=target,
+            DeltasToTarget=deltas,
+            IsDowngrade=False,
+        )
 
     def download_update(self, progress_callback: Callable[[int], None] | None = None) -> bool:
         """Download the update.

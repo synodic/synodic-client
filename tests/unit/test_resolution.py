@@ -364,17 +364,17 @@ class TestResolveUpdateConfig:
 
     @staticmethod
     def test_default_source_dev() -> None:
-        """Verify default dev source uses GitHub download path with dev tag."""
+        """Verify default dev source uses raw GitHub repo URL."""
         config = _make_resolved(update_channel='dev')
         result = resolve_update_config(config)
-        assert result.repo_url == f'{GITHUB_REPO_URL}/releases/download/dev'
+        assert result.repo_url == GITHUB_REPO_URL
 
     @staticmethod
     def test_default_source_stable() -> None:
-        """Verify default stable source uses GitHub latest download path."""
+        """Verify default stable source uses raw GitHub repo URL."""
         config = _make_resolved(update_channel='stable')
         result = resolve_update_config(config)
-        assert result.repo_url == f'{GITHUB_REPO_URL}/releases/latest/download'
+        assert result.repo_url == GITHUB_REPO_URL
 
     @staticmethod
     def test_default_auto_update_interval() -> None:

@@ -124,7 +124,13 @@ class UpdateController:
         """Cancel any in-flight task and start *coro* as the active task."""
         if self._update_task is not None and not self._update_task.done():
             self._update_task.cancel()
-        self._update_task = asyncio.create_task(coro)
+        try:
+            self._update_task = asyncio.create_task(coro)
+        except RuntimeError:
+            # No running event loop yet (e.g. during early init).
+            # The periodic timer will retry once the loop is running.
+            coro.close()
+            logger.debug('Deferred update check — event loop not yet running')
 
     # ------------------------------------------------------------------
     # Config helpers
