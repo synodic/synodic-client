@@ -295,14 +295,41 @@ class TestUpdateCli:
     @staticmethod
     def test_update_apply() -> None:
         """Update apply calls apply_self_update."""
+        mock_config = MagicMock(auto_start=True)
         with (
-            patch('synodic_client.cli.context.get_services', return_value=(MagicMock(), None, None)),
+            patch('synodic_client.cli.context.get_services', return_value=(MagicMock(), None, mock_config)),
             patch('synodic_client.operations.update.apply_self_update') as mock_apply,
+            patch('synodic_client.startup.sync_startup'),
         ):
             result = runner.invoke(app, ['update', 'apply'])
             assert result.exit_code == 0
             assert 'applied' in result.output.lower()
             mock_apply.assert_called_once()
+
+    @staticmethod
+    def test_update_apply_calls_sync_startup_before_apply() -> None:
+        """sync_startup is called with the config's auto_start before apply_self_update."""
+        call_order: list[str] = []
+        mock_config = MagicMock(auto_start=False)
+
+        def _record_sync(*args: object, **kwargs: object) -> None:
+            call_order.append('sync_startup')
+
+        def _record_apply(*args: object, **kwargs: object) -> None:
+            call_order.append('apply_self_update')
+
+        with (
+            patch('synodic_client.cli.context.get_services', return_value=(MagicMock(), None, mock_config)),
+            patch('synodic_client.startup.sync_startup', side_effect=_record_sync) as mock_sync,
+            patch('synodic_client.operations.update.apply_self_update', side_effect=_record_apply),
+        ):
+            result = runner.invoke(app, ['update', 'apply'])
+            assert result.exit_code == 0
+
+        mock_sync.assert_called_once()
+        # auto_start=False should be forwarded from config
+        assert mock_sync.call_args.kwargs['auto_start'] is False
+        assert call_order == ['sync_startup', 'apply_self_update']
 
 
 # ---------------------------------------------------------------------------

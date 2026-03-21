@@ -8,9 +8,11 @@ timeouts (15–30 s) and must complete before the process is killed.
 Import order matters:
     1. stdlib + config (pure-Python, fast)
     2. configure_logging() — now Qt-free
-    3. initialize_velopack() — hooks run with logging active
-    4. run_startup_preamble() — protocol, config seed, auto-startup
-    5. import qt.application — PySide6 / porringer loaded here
+    3. sync_startup() — refresh Windows auto-startup registry **before**
+       Velopack, which may exit the process during post-update hooks
+    4. initialize_velopack() — hooks run with logging active
+    5. run_startup_preamble() — protocol, config seed, auto-startup
+    6. import qt.application — PySide6 / porringer loaded here
 """
 
 import logging
@@ -46,6 +48,17 @@ def bootstrap() -> None:
 
     logger = logging.getLogger(__name__)
     logger.info('Bootstrap started (exe=%s, argv=%s)', sys.executable, sys.argv)
+
+    # Refresh the Windows auto-startup registry entry BEFORE Velopack
+    # initialisation.  App.run() may exit the current process during
+    # post-update lifecycle hooks, so sync_startup must run first to
+    # ensure the registry path stays current after an update.
+    if not dev_mode:
+        from synodic_client.resolution import resolve_config
+        from synodic_client.startup import sync_startup
+
+        config = resolve_config()
+        sync_startup(sys.executable, auto_start=config.auto_start)
 
     initialize_velopack()
 

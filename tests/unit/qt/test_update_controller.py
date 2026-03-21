@@ -40,6 +40,7 @@ class ModelSpy:
 def _make_controller(
     *,
     auto_apply: bool = True,
+    auto_start: bool = True,
     auto_update_interval_minutes: int = 0,
     is_user_active: bool = False,
 ) -> tuple[UpdateController, MagicMock, MagicMock, UpdateBanner, UpdateModel]:
@@ -49,6 +50,7 @@ def _make_controller(
     """
     config = make_resolved_config(
         auto_apply=auto_apply,
+        auto_start=auto_start,
         auto_update_interval_minutes=auto_update_interval_minutes,
     )
 
@@ -351,6 +353,21 @@ class TestApplyUpdate:
         mock_sync.assert_called_once_with(r'C:\app\synodic.exe', auto_start=True)
         client.apply_update_on_exit.assert_called_once()
         app.quit.assert_called_once()
+
+    @staticmethod
+    def test_apply_update_passes_auto_start_false_from_config() -> None:
+        """sync_startup receives auto_start=False when config says so."""
+        ctrl, app, client, banner, model = _make_controller(auto_start=False)
+        ctrl._pending_version = '2.0.0'
+
+        with (
+            patch('synodic_client.application.update_controller.sync_startup') as mock_sync,
+            patch('synodic_client.application.update_controller.sys') as mock_sys,
+        ):
+            mock_sys.executable = r'C:\app\synodic.exe'
+            ctrl._apply_update()
+
+        mock_sync.assert_called_once_with(r'C:\app\synodic.exe', auto_start=False)
 
 
 # ---------------------------------------------------------------------------

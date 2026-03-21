@@ -8,6 +8,7 @@ synodic-c update apply
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import Annotated
 
 import typer
@@ -75,7 +76,13 @@ def update_apply(
     """Apply a downloaded self-update."""
     from synodic_client.cli.context import get_services
     from synodic_client.operations.update import apply_self_update
+    from synodic_client.startup import sync_startup
 
-    client, _, _ = get_services()
+    client, _, config = get_services()
+
+    # Refresh the Windows auto-startup registry entry before the update
+    # replaces the executable, so the path stays current.
+    sync_startup(sys.executable, auto_start=config.auto_start)
+
     apply_self_update(client, restart=not no_restart, silent=silent)
     typer.echo('Update applied.')
