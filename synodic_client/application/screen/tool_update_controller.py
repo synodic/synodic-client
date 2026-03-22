@@ -148,6 +148,7 @@ class ToolUpdateOrchestrator:
     def connect_tools_view(self, tools_view: ToolsView) -> None:
         """Wire ToolsView signals once the view is lazily created."""
         tools_view.update_all_requested.connect(self.on_tool_update)
+        tools_view.plugin_check_requested.connect(self.on_single_plugin_update)
         tools_view.plugin_update_requested.connect(self.on_single_plugin_update)
         tools_view.package_update_requested.connect(self.on_single_package_update)
         tools_view.package_remove_requested.connect(self.on_single_package_remove)

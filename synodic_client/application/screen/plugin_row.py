@@ -25,6 +25,7 @@ from synodic_client.application.screen.schema import PluginRowData, ProjectInsta
 from synodic_client.application.screen.spinner import SpinnerCanvas
 from synodic_client.application.theme import (
     FILTER_CHIP_STYLE,
+    PLUGIN_CHECK_STYLE,
     PLUGIN_KIND_HEADER_STYLE,
     PLUGIN_PROVIDER_NAME_STYLE,
     PLUGIN_PROVIDER_RUNTIME_TAG_DEFAULT_STYLE,
@@ -138,6 +139,9 @@ class PluginProviderHeader(QFrame):
     auto_update_toggled = Signal(str, bool)
     """Emitted with ``(plugin_name, enabled)`` when the auto-update toggle changes."""
 
+    check_requested = Signal(str)
+    """Emitted with the plugin name when the manual check-for-updates button is clicked."""
+
     update_requested = Signal(str)
     """Emitted with the plugin name when the per-plugin *Update* button is clicked."""
 
@@ -159,6 +163,7 @@ class PluginProviderHeader(QFrame):
         self._runtime_tag = ''
         self._signal_key = plugin.name
         self._update_btn: QPushButton | None = None
+        self._check_btn: QPushButton | None = None
         self._checking_spinner: _RowSpinner | None = None
 
         self._layout = QHBoxLayout(self)
@@ -230,8 +235,8 @@ class PluginProviderHeader(QFrame):
         auto_update: bool,
         has_updates: bool,
     ) -> None:
-        """Build Auto/Update control buttons."""
-        toggle_btn = QPushButton('Auto')
+        """Build auto-update toggle, check, and Update control buttons."""
+        toggle_btn = QPushButton('\u21ba')
         toggle_btn.setCheckable(True)
         toggle_btn.setChecked(auto_update)
         toggle_btn.setStyleSheet(PLUGIN_TOGGLE_STYLE)
@@ -240,6 +245,15 @@ class PluginProviderHeader(QFrame):
             lambda checked: self.auto_update_toggled.emit(self._signal_key, checked),
         )
         layout.addWidget(toggle_btn)
+
+        check_btn = QPushButton('\u27f3')
+        check_btn.setStyleSheet(PLUGIN_CHECK_STYLE)
+        check_btn.setToolTip('Check for updates now')
+        check_btn.clicked.connect(
+            lambda: self.check_requested.emit(self._signal_key),
+        )
+        self._check_btn = check_btn
+        layout.addWidget(check_btn)
 
         self._checking_spinner = _RowSpinner(self)
         layout.addWidget(self._checking_spinner)
@@ -258,6 +272,8 @@ class PluginProviderHeader(QFrame):
             toggle_btn.setEnabled(False)
             toggle_btn.setChecked(False)
             toggle_btn.setToolTip('Not installed \u2014 cannot auto-update')
+            check_btn.setEnabled(False)
+            check_btn.setToolTip('Not installed \u2014 cannot check for updates')
             update_btn.setEnabled(False)
             update_btn.setToolTip('Not installed \u2014 cannot update')
 
@@ -281,10 +297,14 @@ class PluginProviderHeader(QFrame):
             return
         if checking:
             self._checking_spinner.start()
+            if self._check_btn is not None:
+                self._check_btn.hide()
             if self._update_btn is not None:
                 self._update_btn.hide()
         else:
             self._checking_spinner.stop()
+            if self._check_btn is not None:
+                self._check_btn.show()
 
     def set_error(self, message: str) -> None:
         """Show a transient inline error that auto-hides after ~5 seconds."""
@@ -443,7 +463,7 @@ class PluginRow(QFrame):
 
     def _build_toggle(self, layout: QHBoxLayout, data: PluginRowData) -> None:
         """Add the auto-update toggle button."""
-        toggle_btn = QPushButton('Auto')
+        toggle_btn = QPushButton('\u21ba')
         toggle_btn.setCheckable(True)
         toggle_btn.setChecked(data.auto_update)
         toggle_btn.setStyleSheet(PLUGIN_ROW_TOGGLE_STYLE)

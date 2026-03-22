@@ -95,6 +95,9 @@ class ToolsView(QWidget):
     update_all_requested = Signal()
     """Emitted when the global *Update All* button is clicked."""
 
+    plugin_check_requested = Signal(str)
+    """Emitted with a plugin name when its manual check-for-updates button is clicked."""
+
     plugin_update_requested = Signal(str)
     """Emitted with a plugin name when its per-plugin *Update* button is clicked."""
 
@@ -495,6 +498,7 @@ class ToolsView(QWidget):
             )
             provider.set_runtime(rt.tag, label=tag_text)
             provider.auto_update_toggled.connect(self._on_auto_update_toggled)
+            provider.check_requested.connect(self.plugin_check_requested.emit)
             provider.update_requested.connect(self.plugin_update_requested.emit)
             self._insert_section_widget(provider)
 
@@ -558,6 +562,7 @@ class ToolsView(QWidget):
             parent=self._container,
         )
         provider.auto_update_toggled.connect(self._on_auto_update_toggled)
+        provider.check_requested.connect(self.plugin_check_requested.emit)
         provider.update_requested.connect(self.plugin_update_requested.emit)
         self._insert_section_widget(provider)
 

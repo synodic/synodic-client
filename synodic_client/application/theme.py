@@ -187,13 +187,16 @@ PLUGIN_ROW_HOST_STYLE = 'font-size: 11px; color: #808080;'
 """Host-tool annotation label (e.g. "→ pdm") for injected packages."""
 
 PLUGIN_ROW_TOGGLE_STYLE = (
-    'QPushButton { padding: 1px 4px; border: 1px solid palette(mid); border-radius: 2px;'
-    '  font-size: 10px; min-width: 36px; max-width: 36px; }'
-    'QPushButton:checked { background: #89d185; color: black; }'
-    'QPushButton:disabled { color: palette(mid); border-color: palette(mid); background: transparent; }'
-    'QPushButton:checked:disabled { background: transparent; color: palette(mid); }'
+    'QPushButton { padding: 0px; border: 1px solid palette(mid); border-radius: 11px;'
+    '  font-size: 14px; min-width: 22px; max-width: 22px; min-height: 22px; max-height: 22px;'
+    '  color: palette(mid); background: transparent; }'
+    'QPushButton:hover { border-color: palette(light); color: palette(light); }'
+    'QPushButton:checked { background: #89d185; color: black; border-color: #89d185; }'
+    'QPushButton:checked:hover { background: #a0d896; border-color: #a0d896; }'
+    'QPushButton:disabled { color: palette(dark); border-color: palette(dark); background: transparent; }'
+    'QPushButton:checked:disabled { background: transparent; color: palette(dark); border-color: palette(dark); }'
 )
-"""Small inline auto-update toggle for individual package rows."""
+"""Small circular auto-update toggle (↺ icon) for individual package rows."""
 
 PLUGIN_ROW_UPDATE_STYLE = (
     'QPushButton { padding: 1px 4px; border: 1px solid palette(mid); border-radius: 2px;'
@@ -345,14 +348,28 @@ FILTER_TOGGLE_ACTIVE_STYLE = (
 )
 """Filter toggle button style when an active filter is in effect."""
 
-# Retained from previous design — auto-update & per-plugin update buttons
+# Auto-update toggle button for plugin provider header rows — circular, stateful
 PLUGIN_TOGGLE_STYLE = (
-    'QPushButton { padding: 2px 8px; border: 1px solid palette(mid); border-radius: 3px;'
-    '  min-width: 60px; max-width: 60px; }'
-    'QPushButton:checked { background: #89d185; color: black; }'
-    'QPushButton:disabled { color: palette(mid); border-color: palette(mid); background: transparent; }'
-    'QPushButton:checked:disabled { background: transparent; color: palette(mid); }'
+    'QPushButton { padding: 0px; border: 1px solid palette(mid); border-radius: 12px;'
+    '  font-size: 15px; min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px;'
+    '  color: palette(mid); background: transparent; }'
+    'QPushButton:hover { border-color: palette(light); color: palette(light); }'
+    'QPushButton:checked { background: #89d185; color: black; border-color: #89d185; }'
+    'QPushButton:checked:hover { background: #a0d896; border-color: #a0d896; }'
+    'QPushButton:disabled { color: palette(dark); border-color: palette(dark); background: transparent; }'
+    'QPushButton:checked:disabled { background: transparent; color: palette(dark); border-color: palette(dark); }'
 )
+
+# Manual check-for-updates button for plugin provider header rows — rect, one-shot action
+PLUGIN_CHECK_STYLE = (
+    'QPushButton { padding: 0px; border: 1px solid palette(mid); border-radius: 3px;'
+    '  font-size: 15px; min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px;'
+    '  color: palette(mid); background: transparent; }'
+    'QPushButton:hover { border-color: #569cd6; color: #569cd6; }'
+    'QPushButton:pressed { background: rgba(86, 156, 214, 0.15); }'
+    'QPushButton:disabled { color: palette(dark); border-color: palette(dark); background: transparent; }'
+)
+"""One-shot check-for-updates icon button used in the plugin provider header."""
 
 PLUGIN_UPDATE_STYLE = (
     'QPushButton { padding: 2px 8px; border: 1px solid palette(mid); border-radius: 3px;'
