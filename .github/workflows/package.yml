@@ -85,6 +85,7 @@ jobs:
                     --mainExe ${{ matrix.main_exe }} \
                     --packTitle "${{ env.VELOPACK_APP_TITLE }}" \
                     --channel ${{ inputs.channel }}-${{ matrix.platform }} \
+                    --shortcutLocations StartMenuRoot \
                     --outputDir releases
 
             - name: Upload release artifacts
