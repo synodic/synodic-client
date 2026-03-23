@@ -225,6 +225,7 @@ async def preview_manifest(
                         package=str(act.package.name) if act.package else None,
                         constraint=act.package.constraint if act.package else None,
                         installer=act.installer,
+                        distro=act.distro,
                     )
                 )
 

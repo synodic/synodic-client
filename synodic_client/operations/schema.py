@@ -355,6 +355,8 @@ class ActionInfo:
     package: str | None = None
     constraint: str | None = None
     installer: str | None = None
+    distro: str | None = None
+    """WSL2 distro name, or ``None`` for native host actions."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -40,6 +40,7 @@ from synodic_client.application.screen.spinner import SpinnerCanvas
 from synodic_client.application.theme import (
     ACTION_CARD_COMMAND_STYLE,
     ACTION_CARD_DESC_STYLE,
+    ACTION_CARD_DISTRO_BADGE_STYLE,
     ACTION_CARD_EXECUTING_STYLE,
     ACTION_CARD_PACKAGE_STYLE,
     ACTION_CARD_SKELETON_BAR_STYLE,
@@ -64,6 +65,7 @@ from synodic_client.application.theme import (
     COPY_BTN_STYLE,
     COPY_FEEDBACK_MS,
     COPY_ICON,
+    WSL_DISTRO_HEADER_STYLE,
 )
 
 logger = logging.getLogger(__name__)
@@ -224,13 +226,18 @@ class ActionCard(QFrame):
         outer.addWidget(self._build_command_row())
 
     def _build_top_row(self) -> QHBoxLayout:
-        """Build the top row: type badge | package name ... version | status/spinner | prerelease."""
+        """Build the top row: type badge | [distro badge] | package name ... version | status/spinner | prerelease."""
         top = QHBoxLayout()
         top.setSpacing(8)
 
         self._type_badge = QLabel()
         self._type_badge.setStyleSheet(ACTION_CARD_TYPE_BADGE_STYLE)
         top.addWidget(self._type_badge)
+
+        self._distro_badge = QLabel()
+        self._distro_badge.setStyleSheet(ACTION_CARD_DISTRO_BADGE_STYLE)
+        self._distro_badge.hide()
+        top.addWidget(self._distro_badge)
 
         self._package_label = QLabel()
         self._package_label.setStyleSheet(ACTION_CARD_PACKAGE_STYLE)
@@ -359,6 +366,12 @@ class ActionCard(QFrame):
         self._type_badge.setText(kind_label)
         if action.installer:
             self._type_badge.setToolTip(f'Plugin: {action.installer}')
+
+        if action.distro:
+            self._distro_badge.setText(action.distro)
+            self._distro_badge.show()
+        else:
+            self._distro_badge.hide()
 
         package_text = str(action.package) if action.package else action.description
         self._package_label.setText(package_text)
@@ -636,6 +649,32 @@ class ActionCard(QFrame):
 
 
 # ---------------------------------------------------------------------------
+# _DistroGroupHeader — section divider between native and WSL action groups
+# ---------------------------------------------------------------------------
+
+
+class _DistroGroupHeader(QLabel):
+    """Thin section divider between native and per-distro action groups.
+
+    Shows ``HOST`` for the native group or ``WSL — <distro>`` for each
+    WSL2 distro group.  Only inserted when both native and WSL actions
+    are present.
+    """
+
+    def __init__(self, distro_name: str | None, parent: QWidget | None = None) -> None:
+        """Initialise the header.
+
+        Args:
+            distro_name: WSL distro name, or ``None`` for the native group.
+            parent: Optional parent widget.
+        """
+        label = 'HOST' if distro_name is None else f'WSL \u2014 {distro_name}'.upper()
+        super().__init__(label, parent)
+        self.setObjectName('wslDistroHeader')
+        self.setStyleSheet(WSL_DISTRO_HEADER_STYLE)
+
+
+# ---------------------------------------------------------------------------
 # ActionCardList — card container
 # ---------------------------------------------------------------------------
 
@@ -667,6 +706,7 @@ class ActionCardList(QWidget):
         self._layout.addStretch()
 
         self._cards: list[ActionCard] = []
+        self._group_headers: list[QLabel] = []
         self._action_map: dict[SetupAction, ActionCard] = {}
         self._index_map: dict[int, ActionCard] = {}
 
@@ -701,25 +741,58 @@ class ActionCardList(QWidget):
     ) -> None:
         """Replace skeleton cards with real action cards.
 
+        When actions include WSL distro entries (``action.distro is not
+        None``), the list is split into groups.  Native host actions
+        appear first under a ``HOST`` section header; each WSL distro
+        gets its own ``WSL — <distro>`` section header below.  If all
+        actions are native, no headers are inserted.
+
         Args:
             actions: The setup actions to display.
             plugin_installed: Plugin name → installed mapping.
             prerelease_overrides: Package names with user pre-release overrides.
         """
         self.clear()
-        sorted_actions = sorted(actions, key=action_sort_key)
-        for act in sorted_actions:
-            card = ActionCard(self)
-            card.populate(
-                act,
-                plugin_installed=plugin_installed,
-                prerelease_overrides=prerelease_overrides,
-            )
-            card.prerelease_toggled.connect(self.prerelease_toggled.emit)
-            card.navigate_to_tool.connect(self.navigate_to_tool.emit)
-            self._layout.insertWidget(self._layout.count() - 1, card)
-            self._cards.append(card)
-            self._action_map[act] = card
+
+        # Partition into native and per-distro groups.
+        native_actions: list[SetupAction] = []
+        distro_actions: dict[str, list[SetupAction]] = {}
+        for act in actions:
+            if act.distro is None:
+                native_actions.append(act)
+            else:
+                distro_actions.setdefault(act.distro, []).append(act)
+
+        has_wsl = bool(distro_actions)
+
+        def _add_group(group_actions: list[SetupAction]) -> None:
+            for act in sorted(group_actions, key=action_sort_key):
+                card = ActionCard(self)
+                card.populate(
+                    act,
+                    plugin_installed=plugin_installed,
+                    prerelease_overrides=prerelease_overrides,
+                )
+                card.prerelease_toggled.connect(self.prerelease_toggled.emit)
+                card.navigate_to_tool.connect(self.navigate_to_tool.emit)
+                self._layout.insertWidget(self._layout.count() - 1, card)
+                self._cards.append(card)
+                self._action_map[act] = card
+
+        def _add_header(distro_name: str | None) -> None:
+            header = _DistroGroupHeader(distro_name, self)
+            self._layout.insertWidget(self._layout.count() - 1, header)
+            self._group_headers.append(header)
+
+        # Native actions (with host header only when WSL groups also exist)
+        if has_wsl and native_actions:
+            _add_header(None)
+        _add_group(native_actions)
+
+        # Per-distro groups
+        for distro_name in sorted(distro_actions):
+            _add_header(distro_name)
+            _add_group(distro_actions[distro_name])
 
         # Build original-index → card mapping so callers can look up by
         # the action index porringer emits, which is independent of the
@@ -776,7 +849,11 @@ class ActionCardList(QWidget):
             card.finalize_checking()
 
     def clear(self) -> None:
-        """Remove all cards."""
+        """Remove all cards and group headers."""
+        for header in self._group_headers:
+            self._layout.removeWidget(header)
+            header.deleteLater()
+        self._group_headers.clear()
         for card in self._cards:
             self._layout.removeWidget(card)
             card.deleteLater()

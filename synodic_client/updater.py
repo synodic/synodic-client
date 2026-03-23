@@ -262,10 +262,9 @@ class Updater:
             # Simple semver comparison via packaging.version (accepts
             # semver pre-release tags like ``0.1.0-dev.79``).
             try:
-                if Version(ver) > Version(current_semver):
-                    if best_ver is None or Version(ver) > Version(best_ver):
-                        best = asset
-                        best_ver = ver
+                if Version(ver) > Version(current_semver) and (best_ver is None or Version(ver) > Version(best_ver)):
+                    best = asset
+                    best_ver = ver
             except Exception:
                 continue
 

@@ -448,6 +448,22 @@ ACTION_CARD_TYPE_BADGE_STYLE = (
 )
 """Small type badge (Package, Tool, Runtime, etc.) on each action card."""
 
+ACTION_CARD_DISTRO_BADGE_STYLE = (
+    'QLabel { font-size: 10px;  padding: 1px 6px; border-radius: 3px;  background: #3d2a50; color: #c5a0e0; }'
+)
+"""Muted purple pill showing the WSL distro name on a WSL action card."""
+
+WSL_DISTRO_HEADER_STYLE = (
+    'QLabel#wslDistroHeader {'
+    '  font-size: 11px;'
+    '  font-weight: bold;'
+    '  color: #c5a0e0;'
+    '  padding: 8px 4px 4px 4px;'
+    '  border-bottom: 1px solid palette(mid);'
+    '}'
+)
+"""Section divider for WSL distro groups inside the action card list."""
+
 ACTION_CARD_PACKAGE_STYLE = 'font-weight: bold; font-size: 12px;'
 """Primary line: package name."""
 

@@ -50,6 +50,7 @@ from synodic_client.application.screen.schema import (
 )
 from synodic_client.application.screen.spinner import LoadingIndicator
 from synodic_client.application.screen.update_banner import UpdateBanner
+from synodic_client.application.screen.wsl import WslView
 from synodic_client.application.theme import (
     COMPACT_MARGINS,
     FILTER_CHIP_SPACING,
@@ -1434,6 +1435,7 @@ class MainWindow(QMainWindow):
     _tabs: QTabWidget | None = None
     _tools_view: ToolsView | None = None
     _projects_view: ProjectsView | None = None
+    _wsl_view: WslView | None = None
 
     def __init__(
         self,
@@ -1517,6 +1519,22 @@ class MainWindow(QMainWindow):
             self._tabs.addTab(self._tools_view, 'Tools')
             self.tools_view_created.emit(self._tools_view)
 
+            # WSL tab — only on Windows hosts with WSL available.
+            try:
+                from porringer.plugin.wsl.utility import is_wsl_host
+
+                if is_wsl_host():
+                    self._wsl_view = WslView(
+                        self._porringer,
+                        self._store,
+                        self,
+                        coordinator=self._coordinator,
+                        package_store=self._package_store,
+                    )
+                    self._tabs.addTab(self._wsl_view, 'WSL')
+            except Exception:
+                logger.debug('Could not initialise WSL tab', exc_info=True)
+
             # Navigate-to-project: switch to Projects tab and select directory
             self._tools_view.navigate_to_project_requested.connect(self._navigate_to_project)
 
@@ -1546,6 +1564,8 @@ class MainWindow(QMainWindow):
             self._tools_view.refresh()
         if self._projects_view is not None:
             self._projects_view.refresh()
+        if self._wsl_view is not None:
+            self._wsl_view.refresh()
 
     def _navigate_to_project(self, path_str: str) -> None:
         """Switch to the Projects tab and select the given directory."""
