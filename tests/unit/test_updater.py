@@ -1,5 +1,8 @@
 """Tests for the self-update functionality using Velopack."""
 
+import io
+import json
+from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -597,3 +600,267 @@ class TestPep440ToSemver:
         """SemVer-style pre-release input is normalised via PEP 440."""
         # packaging.version.Version normalises '0.1.0-dev.5' to '0.1.0.dev5'
         assert pep440_to_semver('0.1.0-dev.5') == '0.1.0-dev.5'
+
+
+# ---------------------------------------------------------------------------
+# Realistic dev-channel manifest payload (mirrors the real GitHub Release).
+# The ``dev`` tag on GitHub is marked ``"prerelease": true``, which
+# Velopack's GithubSource filters out (it hard-codes prerelease=false).
+# ---------------------------------------------------------------------------
+
+_DEV_MANIFEST: dict[str, object] = {
+    'Assets': [
+        {
+            'PackageId': 'synodic',
+            'Version': '0.1.0-dev.83',
+            'Type': 'Full',
+            'FileName': 'synodic-0.1.0-dev.83-dev-win-full.nupkg',
+            'SHA1': 'aabbccdd',
+            'SHA256': '07badc6414dc5d87b009a7ecaa4ee446febe0d15275aa86465a9720762ceab80',
+            'Size': 66358200,
+        },
+        {
+            'PackageId': 'synodic',
+            'Version': '0.1.0-dev.83',
+            'Type': 'Delta',
+            'FileName': 'synodic-0.1.0-dev.83-dev-win-delta.nupkg',
+            'SHA1': '11223344',
+            'SHA256': '5305031a791e0de45f517eda0d2cf827951ec603380ba740fe58fbac4b6246cd',
+            'Size': 15560939,
+        },
+        {
+            'PackageId': 'synodic',
+            'Version': '0.1.0-dev.80',
+            'Type': 'Full',
+            'FileName': 'synodic-0.1.0-dev.80-dev-win-full.nupkg',
+            'SHA1': 'deadbeef',
+            'SHA256': '09bc2032a6a374e1d722cb3c42d1e586a9113c7fd6877721ad5e1ecb611dbbc3',
+            'Size': 65808335,
+        },
+    ],
+}
+
+
+def _make_urlopen_response(data: dict[str, object]) -> MagicMock:
+    """Build a mock ``urlopen`` return value that reads as JSON."""
+    body = json.dumps(data).encode()
+    resp = MagicMock()
+    resp.read.return_value = body
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+    resp.headers = {'Content-Length': str(len(body))}
+    return resp
+
+
+@pytest.fixture
+def dev_updater() -> Updater:
+    """Create an Updater on the dev channel at version 0.1.0-dev.80."""
+    config = UpdateConfig(
+        repo_url=GITHUB_REPO_URL,
+        channel=UpdateChannel.DEVELOPMENT,
+    )
+    u = Updater(current_version=Version('0.1.0.dev80'), config=config)
+    u._velopack_manager = None
+    u._velopack_not_installed = False
+    return u
+
+
+class TestDevChannelGithubPrerelease:
+    """Regression tests: dev channel uses a GitHub prerelease that Velopack's
+    GithubSource silently ignores (``prerelease=false``).
+
+    The check path already has ``_check_manifest_fallback``.  These tests
+    verify that the *download* path also works when the update was discovered
+    via the fallback.
+    """
+
+    @staticmethod
+    def test_check_finds_update_via_manifest_fallback(dev_updater: Updater) -> None:
+        """check_for_update discovers dev.83 via manifest fallback when SDK returns None."""
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
+        # SDK's GithubSource filters prereleases → returns None
+        mock_manager.check_for_updates.return_value = None
+
+        manifest_resp = _make_urlopen_response(_DEV_MANIFEST)
+
+        with (
+            patch.object(dev_updater, '_get_velopack_manager', return_value=mock_manager),
+            patch('synodic_client.updater.urllib.request.urlopen', return_value=manifest_resp),
+        ):
+            info = dev_updater.check_for_update()
+
+        assert info.available is True
+        assert info.latest_version == Version('0.1.0.dev83')
+        assert dev_updater.state == UpdateState.UPDATE_AVAILABLE
+
+    @staticmethod
+    def test_check_sets_manifest_fallback_flag(dev_updater: Updater) -> None:
+        """check_for_update sets _used_manifest_fallback when fallback discovered the update."""
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
+        mock_manager.check_for_updates.return_value = None
+
+        manifest_resp = _make_urlopen_response(_DEV_MANIFEST)
+
+        with (
+            patch.object(dev_updater, '_get_velopack_manager', return_value=mock_manager),
+            patch('synodic_client.updater.urllib.request.urlopen', return_value=manifest_resp),
+        ):
+            info = dev_updater.check_for_update()
+
+        assert info._used_manifest_fallback is True
+
+    @staticmethod
+    def test_check_sdk_success_does_not_set_fallback_flag(dev_updater: Updater) -> None:
+        """_used_manifest_fallback stays False when the SDK itself found the update."""
+        mock_target = MagicMock(spec=velopack.VelopackAsset)
+        mock_target.Version = '0.1.0-dev.83'
+        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
+        mock_velopack_info.TargetFullRelease = mock_target
+
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
+        mock_manager.check_for_updates.return_value = mock_velopack_info
+
+        with patch.object(dev_updater, '_get_velopack_manager', return_value=mock_manager):
+            info = dev_updater.check_for_update()
+
+        assert info.available is True
+        assert info._used_manifest_fallback is False
+
+    @staticmethod
+    def test_download_succeeds_after_manifest_fallback(dev_updater: Updater) -> None:
+        """download_update routes to _download_direct when the manifest fallback was used."""
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
+        mock_manager.check_for_updates.return_value = None
+
+        manifest_resp = _make_urlopen_response(_DEV_MANIFEST)
+
+        with (
+            patch.object(dev_updater, '_get_velopack_manager', return_value=mock_manager),
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
+            patch('synodic_client.updater.urllib.request.urlopen', return_value=manifest_resp),
+        ):
+            info = dev_updater.check_for_update()
+            assert info.available is True
+            assert info._used_manifest_fallback is True
+
+        # Now mock the direct download — _download_direct is called instead of
+        # manager.download_updates, so the SDK never touches GithubSource.
+        with (
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
+            patch.object(dev_updater, '_download_direct') as mock_direct,
+        ):
+            result = dev_updater.download_update()
+
+        assert result is True
+        assert dev_updater.state == UpdateState.DOWNLOADED
+        mock_direct.assert_called_once_with(info._velopack_info, None)
+        # The SDK's download_updates should NOT have been called
+        mock_manager.download_updates.assert_not_called()
+
+    @staticmethod
+    def test_sdk_download_used_when_sdk_found_update(dev_updater: Updater) -> None:
+        """download_update uses the SDK when the update was found without the fallback."""
+        mock_target = MagicMock(spec=velopack.VelopackAsset)
+        mock_target.Version = '0.1.0-dev.83'
+        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
+        mock_velopack_info.TargetFullRelease = mock_target
+
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
+        mock_manager.check_for_updates.return_value = mock_velopack_info
+
+        with (
+            patch.object(dev_updater, '_get_velopack_manager', return_value=mock_manager),
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
+        ):
+            info = dev_updater.check_for_update()
+            assert info._used_manifest_fallback is False
+
+            result = dev_updater.download_update()
+
+        assert result is True
+        assert dev_updater.state == UpdateState.DOWNLOADED
+        mock_manager.download_updates.assert_called_once_with(mock_velopack_info, None)
+
+    @staticmethod
+    def test_download_direct_constructs_correct_url(dev_updater: Updater, tmp_path: Path) -> None:
+        """_download_direct fetches from the correct GitHub release asset URL."""
+        mock_velopack_info = MagicMock()
+        mock_velopack_info.TargetFullRelease.FileName = 'synodic-0.1.0-dev.83-dev-win-full.nupkg'
+        mock_velopack_info.TargetFullRelease.SHA256 = ''
+        mock_velopack_info.TargetFullRelease.SHA1 = ''
+        mock_velopack_info.TargetFullRelease.Size = 0
+
+        nupkg_content = b'fake-nupkg-content'
+        resp = MagicMock()
+        resp.read.side_effect = [nupkg_content, b'']
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        resp.headers = {'Content-Length': str(len(nupkg_content))}
+
+        with (
+            patch('synodic_client.updater.sys') as mock_sys,
+            patch('synodic_client.updater.urllib.request.urlopen', return_value=resp) as mock_urlopen,
+        ):
+            mock_sys.executable = str(tmp_path / 'current' / 'synodic.exe')
+            (tmp_path / 'current').mkdir()
+
+            dev_updater._download_direct(mock_velopack_info)
+
+        # Verify the URL
+        call_args = mock_urlopen.call_args
+        req = call_args[0][0]
+        expected_url = (
+            f'{GITHUB_REPO_URL}/releases/download/dev'
+            '/synodic-0.1.0-dev.83-dev-win-full.nupkg'
+        )
+        assert req.full_url == expected_url
+
+        # Verify the file was written
+        target_file = tmp_path / 'packages' / 'synodic-0.1.0-dev.83-dev-win-full.nupkg'
+        assert target_file.exists()
+        assert target_file.read_bytes() == nupkg_content
+
+    @staticmethod
+    def test_download_direct_sha256_mismatch(dev_updater: Updater, tmp_path: Path) -> None:
+        """_download_direct raises on SHA256 mismatch and cleans up the partial."""
+        mock_velopack_info = MagicMock()
+        mock_velopack_info.TargetFullRelease.FileName = 'test.nupkg'
+        mock_velopack_info.TargetFullRelease.SHA256 = 'wrong_hash'
+        mock_velopack_info.TargetFullRelease.SHA1 = ''
+        mock_velopack_info.TargetFullRelease.Size = 0
+
+        resp = MagicMock()
+        resp.read.side_effect = [b'some content', b'']
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        resp.headers = {'Content-Length': '12'}
+
+        with (
+            patch('synodic_client.updater.sys') as mock_sys,
+            patch('synodic_client.updater.urllib.request.urlopen', return_value=resp),
+            pytest.raises(RuntimeError, match='SHA256 mismatch'),
+        ):
+            mock_sys.executable = str(tmp_path / 'current' / 'synodic.exe')
+            (tmp_path / 'current').mkdir()
+
+            dev_updater._download_direct(mock_velopack_info)
+
+        # Partial file should be cleaned up
+        assert not (tmp_path / 'packages' / 'test.nupkg.partial').exists()
+        assert not (tmp_path / 'packages' / 'test.nupkg').exists()
+
+    @staticmethod
+    def test_download_direct_skips_existing(dev_updater: Updater, tmp_path: Path) -> None:
+        """_download_direct skips download if the package already exists on disk."""
+        mock_velopack_info = MagicMock()
+        mock_velopack_info.TargetFullRelease.FileName = 'already-there.nupkg'
+
+        with patch('synodic_client.updater.sys') as mock_sys:
+            mock_sys.executable = str(tmp_path / 'current' / 'synodic.exe')
+            (tmp_path / 'current').mkdir()
+            packages = tmp_path / 'packages'
+            packages.mkdir()
+            (packages / 'already-there.nupkg').write_bytes(b'existing')
+
+            # Should not hit network at all
+            dev_updater._download_direct(mock_velopack_info)

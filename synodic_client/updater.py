@@ -8,11 +8,13 @@ For non-installed (development) environments, updates are not supported.
 """
 
 import contextlib
+import hashlib
 import json
 import logging
 import sys
 import urllib.request
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import velopack
@@ -175,12 +177,14 @@ class Updater:
                     error='Not installed via Velopack',
                 )
 
+            used_fallback = False
             try:
                 velopack_info = manager.check_for_updates()
             except Exception as sdk_err:
                 if '404' in str(sdk_err):
                     logger.debug('SDK check failed with 404, trying manifest fallback: %s', sdk_err)
                     velopack_info = self._check_manifest_fallback()
+                    used_fallback = velopack_info is not None
                 else:
                     raise
 
@@ -188,6 +192,7 @@ class Updater:
                 # SDK returned no update; try the manual manifest fallback
                 # in case the SDK's GithubSource skipped prerelease entries.
                 velopack_info = self._check_manifest_fallback()
+                used_fallback = velopack_info is not None
 
             if velopack_info is not None:
                 latest = Version(velopack_info.TargetFullRelease.Version)
@@ -197,6 +202,7 @@ class Updater:
                     current_version=self._current_version,
                     latest_version=latest,
                     _velopack_info=velopack_info,
+                    _used_manifest_fallback=used_fallback,
                 )
                 # Only advance to UPDATE_AVAILABLE if we haven't already
                 # moved past it.  A periodic re-check that discovers the
@@ -310,6 +316,85 @@ class Updater:
             IsDowngrade=False,
         )
 
+    def _download_direct(
+        self,
+        velopack_info: Any,
+        progress_callback: Callable[[int], None] | None = None,
+    ) -> None:
+        """Download the update package directly via HTTP.
+
+        Used when the update was discovered via ``_check_manifest_fallback``
+        instead of the Velopack SDK.  The SDK's ``GithubSource`` cannot
+        download assets from prerelease GitHub Releases, so this method
+        fetches the ``.nupkg`` from the known GitHub Release asset URL
+        and places it in the Velopack packages directory where the SDK's
+        apply step expects to find it.
+
+        Args:
+            velopack_info: A ``velopack.UpdateInfo`` whose
+                ``TargetFullRelease`` describes the package to download.
+            progress_callback: Optional callback for percentage progress
+                (0–100).
+
+        Raises:
+            RuntimeError: If the packages directory cannot be determined,
+                the download fails, or the checksum does not match.
+        """
+        asset = velopack_info.TargetFullRelease
+        asset_base = github_release_asset_url(self._config.repo_url, self._config.channel)
+        download_url = f'{asset_base}/{asset.FileName}'
+
+        # Velopack stores packages under ``{root}/packages/`` where
+        # ``{root}`` is the parent of the ``current/`` directory that
+        # contains the running executable.
+        packages_dir = Path(sys.executable).resolve().parent.parent / 'packages'
+        packages_dir.mkdir(parents=True, exist_ok=True)
+
+        target_file = packages_dir / asset.FileName
+        if target_file.exists():
+            logger.info('Package already exists, skipping download: %s', target_file)
+            return
+
+        partial_file = target_file.with_suffix('.partial')
+
+        logger.info('Direct download: %s -> %s', download_url, partial_file)
+
+        req = urllib.request.Request(download_url, headers={'User-Agent': 'synodic-client'})
+        with urllib.request.urlopen(req, timeout=300) as resp:  # noqa: S310 — URL from known repo
+            total = int(resp.headers.get('Content-Length', 0))
+            sha256_hash = hashlib.sha256()
+            downloaded = 0
+
+            with partial_file.open('wb') as f:
+                while True:
+                    chunk = resp.read(256 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    sha256_hash.update(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback is not None and total > 0:
+                        progress_callback(int(downloaded * 100 / total))
+
+        # Verify checksum — prefer SHA256, fall back to SHA1.
+        if asset.SHA256:
+            actual = sha256_hash.hexdigest()
+            if not actual.lower() == asset.SHA256.lower():
+                partial_file.unlink(missing_ok=True)
+                raise RuntimeError(
+                    f'SHA256 mismatch for {asset.FileName}: expected {asset.SHA256}, got {actual}'
+                )
+        elif asset.SHA1:
+            actual_sha1 = hashlib.sha1(partial_file.read_bytes()).hexdigest()  # noqa: S324 — verifying known digest
+            if not actual_sha1.lower() == asset.SHA1.lower():
+                partial_file.unlink(missing_ok=True)
+                raise RuntimeError(
+                    f'SHA1 mismatch for {asset.FileName}: expected {asset.SHA1}, got {actual_sha1}'
+                )
+
+        partial_file.rename(target_file)
+        logger.info('Direct download complete: %s', target_file)
+
     def download_update(self, progress_callback: Callable[[int], None] | None = None) -> bool:
         """Download the update.
 
@@ -334,11 +419,13 @@ class Updater:
         logger.info('Starting update download for %s', self._update_info._velopack_info)
 
         try:
-            manager = self._get_velopack_manager()
-            if manager is None:
-                raise RuntimeError('Velopack manager not available')
-
-            manager.download_updates(self._update_info._velopack_info, progress_callback)
+            if self._update_info._used_manifest_fallback:
+                self._download_direct(self._update_info._velopack_info, progress_callback)
+            else:
+                manager = self._get_velopack_manager()
+                if manager is None:
+                    raise RuntimeError('Velopack manager not available')
+                manager.download_updates(self._update_info._velopack_info, progress_callback)
 
             self._state = UpdateState.DOWNLOADED
             logger.info('Update downloaded successfully')

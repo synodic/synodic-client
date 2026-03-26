@@ -151,6 +151,12 @@ class UpdateInfo:
     # Internal: Velopack update info for download/apply
     _velopack_info: Any = field(default=None, repr=False)
 
+    # Internal: True when the update was discovered via the manifest
+    # fallback rather than the Velopack SDK.  The download path uses
+    # this to route to a direct HTTP download instead of the SDK's
+    # GithubSource (which cannot find prerelease assets).
+    _used_manifest_fallback: bool = field(default=False, repr=False)
+
 
 # Default interval for automatic update checks (minutes)
 DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES = 5
