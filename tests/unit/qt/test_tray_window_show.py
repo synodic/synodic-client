@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PySide6.QtWidgets import QSystemTrayIcon
 
 from synodic_client.application.screen.schema import UpdateTarget
 from synodic_client.application.screen.tray import TrayScreen
@@ -68,4 +69,33 @@ class TestToolUpdateWindowShow:
         """An automatic check with nothing to update must stay hidden."""
         result = UpdateResult(manifests_processed=1, already_latest=['pkg'])
         tray_screen._tool_orchestrator._on_tool_update_finished(result)
+        tray_screen._window.show.assert_not_called()
+
+
+class TestTrayActivation:
+    """_on_tray_activated should dispatch correctly by reason."""
+
+    @staticmethod
+    def test_double_click_shows_window(tray_screen) -> None:
+        """Double-clicking the tray icon should show and raise the window."""
+        tray_screen._on_tray_activated(QSystemTrayIcon.ActivationReason.DoubleClick)
+        tray_screen._window.show.assert_called_once()
+        tray_screen._window.raise_.assert_called_once()
+        tray_screen._window.activateWindow.assert_called_once()
+
+    @staticmethod
+    def test_context_defers_menu_via_timer(tray_screen) -> None:
+        """Right-clicking should defer the menu popup via a single-shot timer."""
+        with patch('synodic_client.application.screen.tray.QTimer') as mock_timer:
+            tray_screen._on_tray_activated(QSystemTrayIcon.ActivationReason.Context)
+            mock_timer.singleShot.assert_called_once()
+            delay, callback = mock_timer.singleShot.call_args[0]
+            assert delay == TrayScreen._MENU_POPUP_DELAY_MS
+            assert callback == tray_screen._show_tray_menu
+
+    @staticmethod
+    def test_context_does_not_show_window(tray_screen) -> None:
+        """Right-clicking should not bring the main window forward."""
+        with patch('synodic_client.application.screen.tray.QTimer'):
+            tray_screen._on_tray_activated(QSystemTrayIcon.ActivationReason.Context)
         tray_screen._window.show.assert_not_called()

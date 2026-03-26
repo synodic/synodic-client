@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QCursor
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -126,10 +126,10 @@ class TrayScreen:
         self._menu.addSeparator()
 
         self._quit_action = QAction('Quit', self._menu)
-        self._quit_action.triggered.connect(app.quit)
+        self._quit_action.triggered.connect(self._on_quit_triggered)
         self._menu.addAction(self._quit_action)
 
-        self.tray.setContextMenu(self._menu)
+        self._menu.aboutToShow.connect(lambda: logger.debug('Tray context menu about to show'))
 
     # Maximum number of tray-visibility retries at startup.
     _TRAY_MAX_RETRIES = 5
@@ -162,12 +162,29 @@ class TrayScreen:
             )
             self.tray.setVisible(True)
 
+    # Delay before showing the context menu, in milliseconds.
+    # Absorbs residual mouse-up events from touchpad two-finger taps
+    # that would otherwise land on a menu item (typically "Quit").
+    _MENU_POPUP_DELAY_MS = 80
+
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
-        """Handle tray icon activation (e.g. double-click)."""
+        """Handle tray icon activation."""
+        logger.debug('Tray activated: reason=%s', reason.name)
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self._window.show()
             self._window.raise_()
             self._window.activateWindow()
+        elif reason == QSystemTrayIcon.ActivationReason.Context:
+            QTimer.singleShot(self._MENU_POPUP_DELAY_MS, self._show_tray_menu)
+
+    def _show_tray_menu(self) -> None:
+        """Show the tray context menu at the current cursor position."""
+        self._menu.exec(QCursor.pos())
+
+    def _on_quit_triggered(self) -> None:
+        """Handle the Quit menu action."""
+        logger.info('Quit requested via tray menu')
+        self._app.quit()
 
     def _show_settings(self) -> None:
         """Show the settings window."""
