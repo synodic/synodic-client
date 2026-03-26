@@ -4,92 +4,92 @@ name: Build and Package
 # Velopack on each platform. Produces one artifact per platform.
 
 on:
-    workflow_call:
-        inputs:
-            version:
-                description: "Version string for the package"
-                required: true
-                type: string
-            channel:
-                description: "Velopack channel base (stable or dev)"
-                required: true
-                type: string
+  workflow_call:
+    inputs:
+      version:
+        description: "Version string for the package"
+        required: true
+        type: string
+      channel:
+        description: "Velopack channel base (stable or dev)"
+        required: true
+        type: string
 
 env:
-    VELOPACK_APP_ID: synodic
-    VELOPACK_APP_TITLE: Synodic Client
+  VELOPACK_APP_ID: synodic
+  VELOPACK_APP_TITLE: Synodic Client
 
 jobs:
-    build-and-package:
-        if: github.repository_owner == 'synodic'
-        runs-on: ${{ matrix.runner }}
-        strategy:
-            matrix:
-                include:
-                    - runner: windows-latest
-                      main_exe: synodic.exe
-                      platform: win
-                    - runner: ubuntu-latest
-                      main_exe: synodic
-                      platform: linux
-                    - runner: macos-latest
-                      main_exe: synodic
-                      platform: osx
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v6
+  build-and-package:
+    if: github.repository_owner == 'synodic'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: windows-latest
+            main_exe: synodic.exe
+            platform: win
+          - runner: ubuntu-latest
+            main_exe: synodic
+            platform: linux
+          - runner: macos-latest
+            main_exe: synodic
+            platform: osx
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
 
-            - name: Install system dependencies
-              if: matrix.platform == 'linux'
-              run: |
-                  sudo apt-get update
-                  sudo apt-get install -y libxcb-cursor0 libxkbcommon-x11-0 libfuse2
+      - name: Install system dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-cursor0 libxkbcommon-x11-0 libfuse2
 
-            - name: Install PDM
-              uses: pdm-project/setup-pdm@v4
-              with:
-                  python-version: "3.14"
-                  cache: true
+      - name: Install PDM
+        uses: pdm-project/setup-pdm@v4
+        with:
+          python-version: "3.14"
+          cache: true
 
-            - name: Install dependencies
-              run: pdm install -G build
+      - name: Install dependencies
+        run: pdm install -G build
 
-            - name: Build executable
-              run: pdm run pyinstaller tool/pyinstaller/synodic.spec --distpath dist
+      - name: Build executable
+        run: pdm run pyinstaller tool/pyinstaller/synodic.spec --distpath dist
 
-            - name: Setup .NET
-              uses: actions/setup-dotnet@v4
-              with:
-                  dotnet-version: "9.0"
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0"
 
-            - name: Install Velopack CLI
-              run: dotnet tool install -g vpk
+      - name: Install Velopack CLI
+        run: dotnet tool install -g vpk
 
-            - name: Download previous release (for delta packages)
-              continue-on-error: true
-              shell: bash
-              run: |
-                  vpk download github \
-                    --repoUrl https://github.com/${{ github.repository }} \
-                    --channel ${{ inputs.channel }}-${{ matrix.platform }} \
-                    --token ${{ secrets.GITHUB_TOKEN }} \
-                    ${{ inputs.channel == 'dev' && '--pre' || '' }}
+      - name: Download previous release (for delta packages)
+        continue-on-error: true
+        shell: bash
+        run: |
+          vpk download github \
+            --repoUrl https://github.com/${{ github.repository }} \
+            --channel ${{ inputs.channel }}-${{ matrix.platform }} \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            ${{ inputs.channel == 'dev' && '--pre' || '' }}
 
-            - name: Create Velopack package
-              shell: bash
-              run: |
-                  vpk pack \
-                    --packId ${{ env.VELOPACK_APP_ID }} \
-                    --packVersion ${{ inputs.version }} \
-                    --packDir dist/synodic \
-                    --mainExe ${{ matrix.main_exe }} \
-                    --packTitle "${{ env.VELOPACK_APP_TITLE }}" \
-                    --channel ${{ inputs.channel }}-${{ matrix.platform }} \
-                    --shortcutLocations StartMenuRoot \
-                    --outputDir releases
+      - name: Create Velopack package
+        shell: bash
+        run: |
+          vpk pack \
+            --packId ${{ env.VELOPACK_APP_ID }} \
+            --packVersion ${{ inputs.version }} \
+            --packDir dist/synodic \
+            --mainExe ${{ matrix.main_exe }} \
+            --packTitle "${{ env.VELOPACK_APP_TITLE }}" \
+            --channel ${{ inputs.channel }}-${{ matrix.platform }} \
+            ${{ matrix.platform == 'win' && '--shortcuts StartMenuRoot' || '' }} \
+            --outputDir releases
 
-            - name: Upload release artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: velopack-release-${{ matrix.platform }}
-                  path: releases/*
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: velopack-release-${{ matrix.platform }}
+          path: releases/*
