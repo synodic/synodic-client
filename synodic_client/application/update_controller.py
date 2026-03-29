@@ -31,7 +31,8 @@ from synodic_client.application.theme import (
 from synodic_client.application.update_model import UpdateModel
 from synodic_client.operations.schema import UpdateCheckResult
 from synodic_client.operations.update import apply_self_update, check_self_update, download_self_update
-from synodic_client.schema import ResolvedConfig, UpdateConfig, UpdateState
+from synodic_client.resolution import resolve_update_config
+from synodic_client.schema import ResolvedConfig, UpdateState
 from synodic_client.startup import sync_startup
 
 if TYPE_CHECKING:
@@ -90,7 +91,7 @@ class UpdateController:
 
         # Track update-relevant config fields to avoid reinitialising
         # on every config save (e.g. timestamp-only changes).
-        self._update_config_key = UpdateConfig.from_resolved(store.config)
+        self._update_config_key = resolve_update_config(store.config)
 
         # Periodic auto-update timer
         self._auto_update_timer: QTimer | None = None
@@ -166,7 +167,7 @@ class UpdateController:
 
     def _restart_auto_update_timer(self) -> None:
         """Start (or restart) the periodic auto-update timer from config."""
-        config = UpdateConfig.from_resolved(self._store.config)
+        config = resolve_update_config(self._store.config)
 
         if self._auto_update_timer is not None:
             self._auto_update_timer.stop()
@@ -222,7 +223,7 @@ class UpdateController:
             return
         self._auto_apply = config.auto_apply
 
-        new_key = UpdateConfig.from_resolved(config)
+        new_key = resolve_update_config(config)
         if new_key == self._update_config_key:
             return
         self._update_config_key = new_key
@@ -246,7 +247,7 @@ class UpdateController:
         self._pending_version = None
         self._failed_version = None
 
-        update_cfg = UpdateConfig.from_resolved(config)
+        update_cfg = resolve_update_config(config)
         self._client.initialize_updater(update_cfg)
         self._restart_auto_update_timer()
         logger.info(

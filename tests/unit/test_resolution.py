@@ -8,6 +8,7 @@ from synodic_client.operations.tool import resolve_auto_update_scope
 from synodic_client.resolution import (
     ResolvedConfig,
     resolve_config,
+    resolve_update_config,
     seed_user_config_from_build,
     update_user_config,
 )
@@ -17,7 +18,6 @@ from synodic_client.schema import (
     GITHUB_REPO_URL,
     BuildConfig,
     UpdateChannel,
-    UpdateConfig,
     UserConfig,
 )
 
@@ -334,53 +334,53 @@ class TestResolveAutoUpdateScope:
 
 
 # ---------------------------------------------------------------------------
-# UpdateConfig.from_resolved
+# resolve_update_config
 # ---------------------------------------------------------------------------
 
 
-class TestUpdateConfigFromResolved:
-    """Tests for UpdateConfig.from_resolved."""
+class TestResolveUpdateConfig:
+    """Tests for resolve_update_config."""
 
     @staticmethod
     def test_dev_channel_from_config() -> None:
         """Verify dev channel is set from config."""
         config = _make_resolved(update_channel='dev')
-        result = UpdateConfig.from_resolved(config)
+        result = resolve_update_config(config)
         assert result.channel == UpdateChannel.DEVELOPMENT
 
     @staticmethod
     def test_stable_channel_from_config() -> None:
         """Verify stable channel is set from config."""
         config = _make_resolved(update_channel='stable')
-        result = UpdateConfig.from_resolved(config)
+        result = resolve_update_config(config)
         assert result.channel == UpdateChannel.STABLE
 
     @staticmethod
     def test_custom_source_non_github() -> None:
         """Verify non-GitHub custom source passes through unchanged."""
         config = _make_resolved(update_source='https://custom.example.com')
-        result = UpdateConfig.from_resolved(config)
+        result = resolve_update_config(config)
         assert result.repo_url == 'https://custom.example.com'
 
     @staticmethod
     def test_default_source_dev() -> None:
         """Verify default dev source uses raw GitHub repo URL."""
         config = _make_resolved(update_channel='dev')
-        result = UpdateConfig.from_resolved(config)
+        result = resolve_update_config(config)
         assert result.repo_url == GITHUB_REPO_URL
 
     @staticmethod
     def test_default_source_stable() -> None:
         """Verify default stable source uses raw GitHub repo URL."""
         config = _make_resolved(update_channel='stable')
-        result = UpdateConfig.from_resolved(config)
+        result = resolve_update_config(config)
         assert result.repo_url == GITHUB_REPO_URL
 
     @staticmethod
     def test_default_auto_update_interval() -> None:
         """Verify default auto-update interval in minutes."""
         config = _make_resolved()
-        result = UpdateConfig.from_resolved(config)
+        result = resolve_update_config(config)
         assert result.auto_update_interval_minutes == DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES
 
     @staticmethod
@@ -388,14 +388,14 @@ class TestUpdateConfigFromResolved:
         """Verify custom auto-update interval is passed through."""
         custom = DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES * 2
         config = _make_resolved(auto_update_interval_minutes=custom)
-        result = UpdateConfig.from_resolved(config)
+        result = resolve_update_config(config)
         assert result.auto_update_interval_minutes == custom
 
     @staticmethod
     def test_default_tool_update_interval() -> None:
         """Verify default tool update interval in minutes."""
         config = _make_resolved()
-        result = UpdateConfig.from_resolved(config)
+        result = resolve_update_config(config)
         assert result.tool_update_interval_minutes == DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
 
     @staticmethod
@@ -403,13 +403,13 @@ class TestUpdateConfigFromResolved:
         """Verify custom tool update interval is passed through."""
         custom = DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES * 2
         config = _make_resolved(tool_update_interval_minutes=custom)
-        result = UpdateConfig.from_resolved(config)
+        result = resolve_update_config(config)
         assert result.tool_update_interval_minutes == custom
 
     @staticmethod
     def test_disabled_intervals() -> None:
         """Verify zero disables both intervals."""
         config = _make_resolved(auto_update_interval_minutes=0, tool_update_interval_minutes=0)
-        result = UpdateConfig.from_resolved(config)
+        result = resolve_update_config(config)
         assert result.auto_update_interval_minutes == 0
         assert result.tool_update_interval_minutes == 0

@@ -29,7 +29,7 @@ from synodic_client.operations.tool import (
     update_all_tools,
     update_tool,
 )
-from synodic_client.schema import UpdateConfig
+from synodic_client.resolution import resolve_update_config
 
 if TYPE_CHECKING:
     from synodic_client.application.config_store import ConfigStore
@@ -126,7 +126,7 @@ class ToolUpdateOrchestrator:
 
     def restart_tool_update_timer(self) -> None:
         """Start (or restart) the periodic tool update timer from config."""
-        config = UpdateConfig.from_resolved(self._store.config)
+        config = resolve_update_config(self._store.config)
         self._tool_update_timer = self._restart_timer(
             self._tool_update_timer,
             config.tool_update_interval_minutes,

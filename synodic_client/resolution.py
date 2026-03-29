@@ -26,6 +26,7 @@ from synodic_client.schema import (
     DEFAULT_AUTO_UPDATE_INTERVAL_MINUTES,
     DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES,
     ResolvedConfig,
+    UpdateConfig,
     UserConfig,
 )
 
@@ -149,3 +150,24 @@ def update_user_config(**changes: object) -> ResolvedConfig:
         setattr(user, field_name, value)
     save_user_config(user)
     return _resolve_from_user(user)
+
+
+# ---------------------------------------------------------------------------
+# Derived helpers
+# ---------------------------------------------------------------------------
+
+
+def resolve_update_config(config: ResolvedConfig) -> UpdateConfig:
+    """Derive an :class:`UpdateConfig` from resolved configuration values.
+
+    Delegates to :meth:`UpdateConfig.from_resolved` so the type owns
+    its own construction while this module stays the canonical entry
+    point for all resolution logic.
+
+    Args:
+        config: A resolved configuration snapshot.
+
+    Returns:
+        An ``UpdateConfig`` ready to initialise the updater.
+    """
+    return UpdateConfig.from_resolved(config)

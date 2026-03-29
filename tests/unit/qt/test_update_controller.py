@@ -15,7 +15,7 @@ from synodic_client.application.theme import (
 from synodic_client.application.update_controller import UpdateController
 from synodic_client.application.update_model import UpdateModel
 from synodic_client.operations.schema import UpdateCheckResult
-from synodic_client.schema import UpdateConfig, UpdateState
+from synodic_client.schema import UpdateState
 
 from .conftest import make_config_store, make_resolved_config
 
@@ -65,7 +65,7 @@ def _make_controller(
     banner.connect_model(model)
     store = make_config_store(config)
 
-    with patch.object(UpdateConfig, 'from_resolved') as mock_ucfg:
+    with patch('synodic_client.application.update_controller.resolve_update_config') as mock_ucfg:
         mock_ucfg.return_value = MagicMock(
             auto_update_interval_minutes=auto_update_interval_minutes,
         )
@@ -512,7 +512,7 @@ class TestReinitializeUpdater:
         ctrl._update_task = fake_task
 
         new_config = make_resolved_config(update_channel='dev')
-        with patch.object(UpdateConfig, 'from_resolved') as mock_ucfg:
+        with patch('synodic_client.application.update_controller.resolve_update_config') as mock_ucfg:
             mock_ucfg.return_value = MagicMock(
                 auto_update_interval_minutes=0,
                 channel=MagicMock(name='DEVELOPMENT'),
@@ -533,7 +533,7 @@ class TestReinitializeUpdater:
         ctrl._pending_version = '2.0.0'
 
         new_config = make_resolved_config(update_channel='dev')
-        with patch.object(UpdateConfig, 'from_resolved') as mock_ucfg:
+        with patch('synodic_client.application.update_controller.resolve_update_config') as mock_ucfg:
             mock_ucfg.return_value = MagicMock(
                 auto_update_interval_minutes=0,
                 channel=MagicMock(name='DEVELOPMENT'),
