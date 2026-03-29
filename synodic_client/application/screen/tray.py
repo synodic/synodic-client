@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QAction, QCursor
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -54,13 +54,15 @@ class TrayScreen:
         self.tray.setIcon(app_icon())
         self.tray.activated.connect(self._on_tray_activated)
 
-        # At early Windows login the notification area may not be ready.
-        # Retry with back-off so the icon eventually appears.
-        self._tray_retry_count = 0
-        self._tray_retry_timer: QTimer | None = None
-        self._show_tray_icon()
+        self._build_menu()
+        self.tray.setContextMenu(self._menu)
 
-        self._build_menu(app, window)
+        # At early Windows login the notification area may not be ready.
+        # Poll until the tray is available, then show the icon.
+        self._tray_poll = QTimer()
+        self._tray_poll.setInterval(2000)
+        self._tray_poll.timeout.connect(self._try_show_tray_icon)
+        self._try_show_tray_icon()
 
         # Settings window (created once, shown/hidden on demand)
         self._settings_window = SettingsWindow(
@@ -109,13 +111,13 @@ class TrayScreen:
         # Connect ToolsView signals - deferred because ToolsView is created lazily
         window.tools_view_created.connect(self._tool_orchestrator.connect_tools_view)
 
-    def _build_menu(self, app: QApplication, window: MainWindow) -> None:
+    def _build_menu(self) -> None:
         """Build the tray context menu."""
         self._menu = QMenu()
 
         self._open_action = QAction('Open', self._menu)
         self._menu.addAction(self._open_action)
-        self._open_action.triggered.connect(window.show)
+        self._open_action.triggered.connect(self._show_window)
 
         self._menu.addSeparator()
 
@@ -131,55 +133,27 @@ class TrayScreen:
 
         self._menu.aboutToShow.connect(lambda: logger.debug('Tray context menu about to show'))
 
-    # Maximum number of tray-visibility retries at startup.
-    _TRAY_MAX_RETRIES = 5
-    # Delay between retries in milliseconds.
-    _TRAY_RETRY_DELAY_MS = 2000
-
-    def _show_tray_icon(self) -> None:
-        """Show the tray icon, retrying if the system tray is not ready."""
+    def _try_show_tray_icon(self) -> None:
+        """Show the tray icon once the system tray is available."""
         if QSystemTrayIcon.isSystemTrayAvailable():
+            self._tray_poll.stop()
             self.tray.setVisible(True)
             logger.debug('System tray icon shown')
-            return
-
-        if self._tray_retry_count < self._TRAY_MAX_RETRIES:
-            self._tray_retry_count += 1
-            logger.warning(
-                'System tray not available, retrying (%d/%d)',
-                self._tray_retry_count,
-                self._TRAY_MAX_RETRIES,
-            )
-            self._tray_retry_timer = QTimer()
-            self._tray_retry_timer.setSingleShot(True)
-            self._tray_retry_timer.timeout.connect(self._show_tray_icon)
-            self._tray_retry_timer.start(self._TRAY_RETRY_DELAY_MS)
-        else:
-            # Exhausted retries — show anyway as a best-effort fallback.
-            logger.warning(
-                'System tray still not available after %d retries, forcing visibility',
-                self._TRAY_MAX_RETRIES,
-            )
-            self.tray.setVisible(True)
-
-    # Delay before showing the context menu, in milliseconds.
-    # Absorbs residual mouse-up events from touchpad two-finger taps
-    # that would otherwise land on a menu item (typically "Quit").
-    _MENU_POPUP_DELAY_MS = 80
+        elif not self._tray_poll.isActive():
+            logger.warning('System tray not available, polling until ready')
+            self._tray_poll.start()
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         """Handle tray icon activation."""
         logger.debug('Tray activated: reason=%s', reason.name)
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
-            self._window.show()
-            self._window.raise_()
-            self._window.activateWindow()
-        elif reason == QSystemTrayIcon.ActivationReason.Context:
-            QTimer.singleShot(self._MENU_POPUP_DELAY_MS, self._show_tray_menu)
+            self._show_window()
 
-    def _show_tray_menu(self) -> None:
-        """Show the tray context menu at the current cursor position."""
-        self._menu.exec(QCursor.pos())
+    def _show_window(self) -> None:
+        """Show, raise, and focus the main window."""
+        self._window.show()
+        self._window.raise_()
+        self._window.activateWindow()
 
     def _on_quit_triggered(self) -> None:
         """Handle the Quit menu action."""
@@ -189,6 +163,8 @@ class TrayScreen:
     def _show_settings(self) -> None:
         """Show the settings window."""
         self._settings_window.show()
+        self._settings_window.raise_()
+        self._settings_window.activateWindow()
 
     @staticmethod
     def _is_user_active() -> bool:
@@ -222,6 +198,7 @@ class TrayScreen:
 
     def shutdown(self) -> None:
         """Stop all timers and cancel in-flight tasks for a clean exit."""
+        self._tray_poll.stop()
         self._update_controller.shutdown()
         self._tool_orchestrator.shutdown()
         logger.info('TrayScreen shut down')
