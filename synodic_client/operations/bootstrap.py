@@ -13,8 +13,8 @@ from porringer.api import API
 from porringer.schema import LocalConfiguration
 
 from synodic_client.client import Client
-from synodic_client.resolution import resolve_config, resolve_update_config
-from synodic_client.schema import ResolvedConfig
+from synodic_client.resolution import resolve_config
+from synodic_client.schema import ResolvedConfig, UpdateConfig
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ def init_services() -> tuple[Client, API, ResolvedConfig]:
     local_config = LocalConfiguration()
     porringer = API(local_config)
 
-    update_config = resolve_update_config(config)
+    update_config = UpdateConfig.from_resolved(config)
     client.initialize_updater(update_config)
 
     cached_dirs = porringer.cache.list_directories()

@@ -1,8 +1,9 @@
 """Tests for the self-update functionality using Velopack."""
 
-import io
 import json
+import urllib.error
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -15,6 +16,7 @@ from synodic_client.updater import (
     Updater,
     github_release_asset_url,
     initialize_velopack,
+    on_before_uninstall,
     pep440_to_semver,
 )
 
@@ -257,18 +259,29 @@ class TestUpdaterCheckForUpdate:
         assert updater.state == UpdateState.FAILED
 
     @staticmethod
-    def test_check_preserves_downloaded_state(updater: Updater) -> None:
-        """Re-checking after download must not regress DOWNLOADED → UPDATE_AVAILABLE.
+    @pytest.mark.parametrize(
+        'guarded_state',
+        [UpdateState.DOWNLOADING, UpdateState.DOWNLOADED, UpdateState.APPLYING, UpdateState.APPLIED],
+        ids=lambda s: s.name.lower(),
+    )
+    def test_check_preserves_advanced_state(updater: Updater, guarded_state: UpdateState) -> None:
+        """Re-checking must not regress any advanced state back to UPDATE_AVAILABLE.
 
-        Regression test: when the periodic auto-check timer fires between
-        download completion and the user clicking "Restart Now", the state
-        was incorrectly reset to UPDATE_AVAILABLE, causing apply_update_on_exit
-        to reject the update with "No downloaded update to apply".
+        Regression test: when the periodic auto-check timer fires during or
+        after a download, the state must remain at the higher-priority state.
         """
         mock_target = MagicMock(spec=velopack.VelopackAsset)
         mock_target.Version = '2.0.0'
-        mock_velopack_info = _setup_downloaded_state(updater)
+        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
         mock_velopack_info.TargetFullRelease = mock_target
+
+        updater._state = guarded_state
+        updater._update_info = UpdateInfo(
+            available=True,
+            current_version=Version('1.0.0'),
+            latest_version=Version('2.0.0'),
+            _velopack_info=mock_velopack_info,
+        )
 
         mock_manager = MagicMock(spec=velopack.UpdateManager)
         mock_manager.check_for_updates.return_value = mock_velopack_info
@@ -277,7 +290,7 @@ class TestUpdaterCheckForUpdate:
             info = updater.check_for_update()
 
         assert info.available is True
-        assert updater.state == UpdateState.DOWNLOADED
+        assert updater.state == guarded_state
 
 
 class TestUpdaterDownloadUpdate:
@@ -377,17 +390,32 @@ class TestUpdaterApplyUpdate:
 
     @staticmethod
     @pytest.mark.parametrize(
-        ('restart', 'silent'),
+        ('restart', 'silent', 'restart_args'),
         [
-            (True, False),
-            (False, False),
-            (True, True),
-            (False, True),
+            (True, False, []),
+            (False, False, []),
+            (True, True, []),
+            (False, True, []),
+            (True, False, ['--minimized']),
+            (True, True, ['--minimized']),
         ],
-        ids=['restart', 'no-restart', 'silent-restart', 'silent-no-restart'],
+        ids=[
+            'restart',
+            'no-restart',
+            'silent-restart',
+            'silent-no-restart',
+            'restart-with-args',
+            'silent-restart-with-args',
+        ],
     )
-    def test_apply_on_exit_matrix(updater: Updater, *, restart: bool, silent: bool) -> None:
-        """Verify apply_update_on_exit stages the update with the correct restart/silent flags."""
+    def test_apply_on_exit_matrix(
+        updater: Updater,
+        *,
+        restart: bool,
+        silent: bool,
+        restart_args: list[str],
+    ) -> None:
+        """Verify apply_update_on_exit stages the update with the correct flags."""
         mock_velopack_info = _setup_downloaded_state(updater)
         mock_manager = MagicMock(spec=velopack.UpdateManager)
 
@@ -395,54 +423,14 @@ class TestUpdaterApplyUpdate:
             patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
             patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
         ):
-            updater.apply_update_on_exit(restart=restart, silent=silent)
+            updater.apply_update_on_exit(restart=restart, silent=silent, restart_args=restart_args)
 
         assert updater.state == UpdateState.APPLYING
         mock_manager.wait_exit_then_apply_updates.assert_called_once_with(
             mock_velopack_info,
             silent=silent,
             restart=restart,
-            restart_args=[],
-        )
-
-    @staticmethod
-    def test_apply_on_exit_with_restart_args(updater: Updater) -> None:
-        """Verify restart_args are forwarded to wait_exit_then_apply_updates."""
-        mock_velopack_info = _setup_downloaded_state(updater)
-        mock_manager = MagicMock(spec=velopack.UpdateManager)
-
-        with (
-            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
-            patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
-        ):
-            updater.apply_update_on_exit(restart=True, restart_args=['--minimized'])
-
-        assert updater.state == UpdateState.APPLYING
-        mock_manager.wait_exit_then_apply_updates.assert_called_once_with(
-            mock_velopack_info,
-            silent=False,
-            restart=True,
-            restart_args=['--minimized'],
-        )
-
-    @staticmethod
-    def test_apply_on_exit_silent_with_restart_args(updater: Updater) -> None:
-        """Verify silent mode forwards restart_args."""
-        mock_velopack_info = _setup_downloaded_state(updater)
-        mock_manager = MagicMock(spec=velopack.UpdateManager)
-
-        with (
-            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
-            patch.object(updater, '_get_velopack_manager', return_value=mock_manager),
-        ):
-            updater.apply_update_on_exit(restart=True, silent=True, restart_args=['--minimized'])
-
-        assert updater.state == UpdateState.APPLYING
-        mock_manager.wait_exit_then_apply_updates.assert_called_once_with(
-            mock_velopack_info,
-            silent=True,
-            restart=True,
-            restart_args=['--minimized'],
+            restart_args=restart_args,
         )
 
 
@@ -641,7 +629,7 @@ _DEV_MANIFEST: dict[str, object] = {
 }
 
 
-def _make_urlopen_response(data: dict[str, object]) -> MagicMock:
+def _make_urlopen_response(data: dict[str, Any]) -> MagicMock:
     """Build a mock ``urlopen`` return value that reads as JSON."""
     body = json.dumps(data).encode()
     resp = MagicMock()
@@ -666,8 +654,10 @@ def dev_updater() -> Updater:
 
 
 class TestDevChannelGithubPrerelease:
-    """Regression tests: dev channel uses a GitHub prerelease that Velopack's
-    GithubSource silently ignores (``prerelease=false``).
+    """Regression: dev channel prerelease ignored by Velopack GithubSource.
+
+    The dev channel uses a GitHub prerelease that Velopack's GithubSource
+    silently ignores (``prerelease=false``).
 
     The check path already has ``_check_manifest_fallback``.  These tests
     verify that the *download* path also works when the update was discovered
@@ -809,10 +799,7 @@ class TestDevChannelGithubPrerelease:
         # Verify the URL
         call_args = mock_urlopen.call_args
         req = call_args[0][0]
-        expected_url = (
-            f'{GITHUB_REPO_URL}/releases/download/dev'
-            '/synodic-0.1.0-dev.83-dev-win-full.nupkg'
-        )
+        expected_url = f'{GITHUB_REPO_URL}/releases/download/dev/synodic-0.1.0-dev.83-dev-win-full.nupkg'
         assert req.full_url == expected_url
 
         # Verify the file was written
@@ -838,12 +825,12 @@ class TestDevChannelGithubPrerelease:
         with (
             patch('synodic_client.updater.sys') as mock_sys,
             patch('synodic_client.updater.urllib.request.urlopen', return_value=resp),
-            pytest.raises(RuntimeError, match='SHA256 mismatch'),
         ):
             mock_sys.executable = str(tmp_path / 'current' / 'synodic.exe')
             (tmp_path / 'current').mkdir()
 
-            dev_updater._download_direct(mock_velopack_info)
+            with pytest.raises(RuntimeError, match='SHA256 mismatch'):
+                dev_updater._download_direct(mock_velopack_info)
 
         # Partial file should be cleaned up
         assert not (tmp_path / 'packages' / 'test.nupkg.partial').exists()
@@ -855,12 +842,400 @@ class TestDevChannelGithubPrerelease:
         mock_velopack_info = MagicMock()
         mock_velopack_info.TargetFullRelease.FileName = 'already-there.nupkg'
 
-        with patch('synodic_client.updater.sys') as mock_sys:
+        with (
+            patch('synodic_client.updater.sys') as mock_sys,
+            patch('synodic_client.updater.urllib.request.urlopen') as mock_urlopen,
+        ):
             mock_sys.executable = str(tmp_path / 'current' / 'synodic.exe')
             (tmp_path / 'current').mkdir()
             packages = tmp_path / 'packages'
             packages.mkdir()
             (packages / 'already-there.nupkg').write_bytes(b'existing')
 
-            # Should not hit network at all
             dev_updater._download_direct(mock_velopack_info)
+
+        # Must not have opened any network connection
+        mock_urlopen.assert_not_called()
+
+    @staticmethod
+    def test_download_direct_uses_replace_not_rename(dev_updater: Updater, tmp_path: Path) -> None:
+        """_download_direct must use Path.replace() — not rename() — for atomicity.
+
+        Regression: ``Path.rename()`` raises ``FileExistsError`` on Windows
+        (WinError 183) when a concurrent download has already placed the
+        target file.  ``Path.replace()`` overwrites atomically.
+        """
+        mock_velopack_info = MagicMock()
+        mock_velopack_info.TargetFullRelease.FileName = 'race.nupkg'
+        mock_velopack_info.TargetFullRelease.SHA256 = ''
+        mock_velopack_info.TargetFullRelease.SHA1 = ''
+        mock_velopack_info.TargetFullRelease.Size = 0
+
+        nupkg_content = b'new-package-data'
+        resp = MagicMock()
+        resp.read.side_effect = [nupkg_content, b'']
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        resp.headers = {'Content-Length': str(len(nupkg_content))}
+
+        with (
+            patch('synodic_client.updater.sys') as mock_sys,
+            patch('synodic_client.updater.urllib.request.urlopen', return_value=resp),
+            patch.object(Path, 'replace') as mock_replace,
+            patch.object(Path, 'rename') as mock_rename,
+        ):
+            mock_sys.executable = str(tmp_path / 'current' / 'synodic.exe')
+            (tmp_path / 'current').mkdir()
+            dev_updater._download_direct(mock_velopack_info)
+
+        # replace() must be used for atomic overwrite
+        mock_replace.assert_called_once()
+        # rename() must NOT be used (it fails on Windows when target exists)
+        mock_rename.assert_not_called()
+
+    @staticmethod
+    def test_check_does_not_regress_downloading_state(dev_updater: Updater) -> None:
+        """check_for_update must not regress DOWNLOADING → UPDATE_AVAILABLE.
+
+        Regression: a periodic re-check during an active download was
+        resetting state to UPDATE_AVAILABLE, which allowed a second
+        concurrent download_update() call.
+        """
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
+        mock_manager.check_for_updates.return_value = None
+        manifest_resp = _make_urlopen_response(_DEV_MANIFEST)
+
+        # First: put the updater into DOWNLOADING state
+        dev_updater._state = UpdateState.DOWNLOADING
+
+        with (
+            patch.object(dev_updater, '_get_velopack_manager', return_value=mock_manager),
+            patch('synodic_client.updater.urllib.request.urlopen', return_value=manifest_resp),
+        ):
+            info = dev_updater.check_for_update()
+
+        # The check should still report the update, but must NOT
+        # regress the state from DOWNLOADING to UPDATE_AVAILABLE.
+        assert info.available is True
+        assert dev_updater.state == UpdateState.DOWNLOADING
+
+
+class TestDownloadDirectSHA1:
+    """Verify _download_direct SHA1 verification paths."""
+
+    @staticmethod
+    def test_sha1_only_success(dev_updater: Updater, tmp_path: Path) -> None:
+        """When SHA256 is empty but SHA1 is provided, SHA1 is verified."""
+        content = b'sha1-verified-content'
+        expected_sha1 = 'c1e63f162617f1685471d477b99de2532580ea97'
+
+        mock_velopack_info = MagicMock()
+        mock_velopack_info.TargetFullRelease.FileName = 'sha1-only.nupkg'
+        mock_velopack_info.TargetFullRelease.SHA256 = ''
+        mock_velopack_info.TargetFullRelease.SHA1 = expected_sha1
+        mock_velopack_info.TargetFullRelease.Size = len(content)
+
+        resp = MagicMock()
+        resp.read.side_effect = [content, b'']
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        resp.headers = {'Content-Length': str(len(content))}
+
+        with (
+            patch('synodic_client.updater.sys') as mock_sys,
+            patch('synodic_client.updater.urllib.request.urlopen', return_value=resp),
+        ):
+            mock_sys.executable = str(tmp_path / 'current' / 'synodic.exe')
+            (tmp_path / 'current').mkdir()
+            dev_updater._download_direct(mock_velopack_info)
+
+        target = tmp_path / 'packages' / 'sha1-only.nupkg'
+        assert target.exists()
+        assert target.read_bytes() == content
+
+    @staticmethod
+    def test_sha1_mismatch(dev_updater: Updater, tmp_path: Path) -> None:
+        """SHA1 mismatch raises RuntimeError and cleans up the partial file."""
+        mock_velopack_info = MagicMock()
+        mock_velopack_info.TargetFullRelease.FileName = 'sha1-bad.nupkg'
+        mock_velopack_info.TargetFullRelease.SHA256 = ''
+        mock_velopack_info.TargetFullRelease.SHA1 = 'wrong_sha1_hash'
+        mock_velopack_info.TargetFullRelease.Size = 0
+
+        resp = MagicMock()
+        resp.read.side_effect = [b'some content', b'']
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        resp.headers = {'Content-Length': '12'}
+
+        with (
+            patch('synodic_client.updater.sys') as mock_sys,
+            patch('synodic_client.updater.urllib.request.urlopen', return_value=resp),
+        ):
+            mock_sys.executable = str(tmp_path / 'current' / 'synodic.exe')
+            (tmp_path / 'current').mkdir()
+
+            with pytest.raises(RuntimeError, match='SHA1 mismatch'):
+                dev_updater._download_direct(mock_velopack_info)
+
+        assert not (tmp_path / 'packages' / 'sha1-bad.nupkg.partial').exists()
+        assert not (tmp_path / 'packages' / 'sha1-bad.nupkg').exists()
+
+    @staticmethod
+    def test_no_checksums_skips_verification(dev_updater: Updater, tmp_path: Path) -> None:
+        """When both SHA256 and SHA1 are empty, download succeeds without verification."""
+        content = b'no-checksum-content'
+
+        mock_velopack_info = MagicMock()
+        mock_velopack_info.TargetFullRelease.FileName = 'no-hash.nupkg'
+        mock_velopack_info.TargetFullRelease.SHA256 = ''
+        mock_velopack_info.TargetFullRelease.SHA1 = ''
+        mock_velopack_info.TargetFullRelease.Size = 0
+
+        resp = MagicMock()
+        resp.read.side_effect = [content, b'']
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        resp.headers = {'Content-Length': str(len(content))}
+
+        with (
+            patch('synodic_client.updater.sys') as mock_sys,
+            patch('synodic_client.updater.urllib.request.urlopen', return_value=resp),
+        ):
+            mock_sys.executable = str(tmp_path / 'current' / 'synodic.exe')
+            (tmp_path / 'current').mkdir()
+            dev_updater._download_direct(mock_velopack_info)
+
+        assert (tmp_path / 'packages' / 'no-hash.nupkg').exists()
+
+
+class TestCheckManifestFallbackEdgeCases:
+    """Direct unit tests for _check_manifest_fallback edge cases."""
+
+    @staticmethod
+    def test_empty_assets_returns_none(dev_updater: Updater) -> None:
+        """A manifest with no Assets returns None."""
+        manifest = {'Assets': []}
+        resp = _make_urlopen_response(manifest)
+
+        with (
+            patch.object(dev_updater, '_get_velopack_manager', return_value=None),
+            patch('synodic_client.updater.urllib.request.urlopen', return_value=resp),
+        ):
+            result = dev_updater._check_manifest_fallback()
+
+        assert result is None
+
+    @staticmethod
+    def test_no_full_assets_returns_none(dev_updater: Updater) -> None:
+        """A manifest with only Delta assets returns None."""
+        manifest = {
+            'Assets': [
+                {
+                    'PackageId': 'synodic',
+                    'Version': '0.1.0-dev.83',
+                    'Type': 'Delta',
+                    'FileName': 'delta.nupkg',
+                },
+            ],
+        }
+        resp = _make_urlopen_response(manifest)
+
+        with patch('synodic_client.updater.urllib.request.urlopen', return_value=resp):
+            result = dev_updater._check_manifest_fallback()
+
+        assert result is None
+
+    @staticmethod
+    def test_older_version_returns_none(dev_updater: Updater) -> None:
+        """A manifest with only older versions returns None."""
+        manifest = {
+            'Assets': [
+                {
+                    'PackageId': 'synodic',
+                    'Version': '0.1.0-dev.79',
+                    'Type': 'Full',
+                    'FileName': 'old.nupkg',
+                },
+            ],
+        }
+        resp = _make_urlopen_response(manifest)
+
+        with patch('synodic_client.updater.urllib.request.urlopen', return_value=resp):
+            result = dev_updater._check_manifest_fallback()
+
+        assert result is None
+
+    @staticmethod
+    def test_network_error_returns_none(dev_updater: Updater) -> None:
+        """A network error during manifest fetch returns None."""
+        with patch(
+            'synodic_client.updater.urllib.request.urlopen',
+            side_effect=urllib.error.URLError('connection refused'),
+        ):
+            result = dev_updater._check_manifest_fallback()
+
+        assert result is None
+
+    @staticmethod
+    def test_invalid_version_skipped(dev_updater: Updater) -> None:
+        """An asset with an unparseable version is skipped without crashing."""
+        manifest = {
+            'Assets': [
+                {
+                    'PackageId': 'synodic',
+                    'Version': 'not-a-version',
+                    'Type': 'Full',
+                    'FileName': 'bad.nupkg',
+                },
+                {
+                    'PackageId': 'synodic',
+                    'Version': '0.1.0-dev.83',
+                    'Type': 'Full',
+                    'FileName': 'good.nupkg',
+                    'SHA256': 'abc',
+                },
+            ],
+        }
+        resp = _make_urlopen_response(manifest)
+
+        with patch('synodic_client.updater.urllib.request.urlopen', return_value=resp):
+            result = dev_updater._check_manifest_fallback()
+
+        assert result is not None
+        assert result.TargetFullRelease.Version == '0.1.0-dev.83'
+
+    @staticmethod
+    def test_picks_highest_version(dev_updater: Updater) -> None:
+        """When multiple Full assets are newer, the highest version wins."""
+        manifest = {
+            'Assets': [
+                {
+                    'PackageId': 'synodic',
+                    'Version': '0.1.0-dev.81',
+                    'Type': 'Full',
+                    'FileName': 'v81.nupkg',
+                },
+                {
+                    'PackageId': 'synodic',
+                    'Version': '0.1.0-dev.85',
+                    'Type': 'Full',
+                    'FileName': 'v85.nupkg',
+                },
+                {
+                    'PackageId': 'synodic',
+                    'Version': '0.1.0-dev.83',
+                    'Type': 'Full',
+                    'FileName': 'v83.nupkg',
+                },
+            ],
+        }
+        resp = _make_urlopen_response(manifest)
+
+        with patch('synodic_client.updater.urllib.request.urlopen', return_value=resp):
+            result = dev_updater._check_manifest_fallback()
+
+        assert result is not None
+        assert result.TargetFullRelease.Version == '0.1.0-dev.85'
+        assert result.TargetFullRelease.FileName == 'v85.nupkg'
+
+    @staticmethod
+    def test_collects_matching_deltas(dev_updater: Updater) -> None:
+        """Delta assets matching the best version are included in DeltasToTarget."""
+        resp = _make_urlopen_response(_DEV_MANIFEST)
+
+        with patch('synodic_client.updater.urllib.request.urlopen', return_value=resp):
+            result = dev_updater._check_manifest_fallback()
+
+        assert result is not None
+        assert len(result.DeltasToTarget) == 1
+        assert result.DeltasToTarget[0].Type == 'Delta'
+        assert result.DeltasToTarget[0].Version == '0.1.0-dev.83'
+
+
+class TestDownloadUpdateGuards:
+    """Test edge-case guards in download_update()."""
+
+    @staticmethod
+    def test_velopack_info_none_returns_false() -> None:
+        """download_update returns False when _velopack_info is None."""
+        config = UpdateConfig(repo_url=GITHUB_REPO_URL, channel=UpdateChannel.STABLE)
+        u = Updater(current_version=Version('1.0.0'), config=config)
+        u._state = UpdateState.UPDATE_AVAILABLE
+        u._update_info = UpdateInfo(
+            available=True,
+            current_version=Version('1.0.0'),
+            latest_version=Version('2.0.0'),
+            _velopack_info=None,
+        )
+
+        with patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True):
+            result = u.download_update()
+
+        assert result is False
+        # State should NOT advance to DOWNLOADING
+        assert u.state == UpdateState.UPDATE_AVAILABLE
+
+    @staticmethod
+    def test_download_transitions_through_downloading_state() -> None:
+        """download_update sets DOWNLOADING state during the download."""
+        config = UpdateConfig(repo_url=GITHUB_REPO_URL, channel=UpdateChannel.STABLE)
+        u = Updater(current_version=Version('1.0.0'), config=config)
+        mock_velopack_info = MagicMock(spec=velopack.UpdateInfo)
+        u._state = UpdateState.UPDATE_AVAILABLE
+        u._update_info = UpdateInfo(
+            available=True,
+            current_version=Version('1.0.0'),
+            latest_version=Version('2.0.0'),
+            _velopack_info=mock_velopack_info,
+        )
+
+        observed_states: list[UpdateState] = []
+        mock_manager = MagicMock(spec=velopack.UpdateManager)
+        mock_manager.download_updates.side_effect = lambda info, cb: observed_states.append(u.state)
+
+        with (
+            patch.object(Updater, 'is_installed', new_callable=PropertyMock, return_value=True),
+            patch.object(u, '_get_velopack_manager', return_value=mock_manager),
+        ):
+            u.download_update()
+
+        assert UpdateState.DOWNLOADING in observed_states
+
+
+class TestOnBeforeUninstall:
+    """Tests for the Velopack uninstall hook."""
+
+    @staticmethod
+    def test_removes_protocol_and_startup() -> None:
+        """Both remove_protocol and remove_startup are called."""
+        with (
+            patch('synodic_client.updater.remove_protocol') as mock_proto,
+            patch('synodic_client.updater.remove_startup') as mock_startup,
+        ):
+            on_before_uninstall('0.1.0')
+
+        mock_proto.assert_called_once()
+        mock_startup.assert_called_once()
+
+    @staticmethod
+    def test_protocol_failure_does_not_block_startup_removal() -> None:
+        """If remove_protocol raises, remove_startup is still called."""
+        with (
+            patch('synodic_client.updater.remove_protocol', side_effect=OSError('failed')),
+            patch('synodic_client.updater.remove_startup') as mock_startup,
+        ):
+            on_before_uninstall('0.1.0')
+
+        mock_startup.assert_called_once()
+
+    @staticmethod
+    def test_startup_failure_does_not_raise() -> None:
+        """If remove_startup raises, the hook does not propagate and protocol is still removed."""
+        with (
+            patch('synodic_client.updater.remove_protocol') as mock_proto,
+            patch('synodic_client.updater.remove_startup', side_effect=OSError('failed')),
+        ):
+            on_before_uninstall('0.1.0')  # should not raise
+
+        mock_proto.assert_called_once()

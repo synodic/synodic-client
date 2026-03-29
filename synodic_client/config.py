@@ -122,11 +122,16 @@ def load_user_config() -> UserConfig:
 
     try:
         data = json.loads(path.read_text(encoding='utf-8'))
+    except json.JSONDecodeError, OSError:
+        logger.exception('Failed to read config from %s, using defaults', path)
+        return UserConfig()
+
+    try:
         config = UserConfig.model_validate(data)
         logger.debug('Loaded user config from %s', path)
         return config
     except Exception:
-        logger.exception('Failed to load user config from %s, using defaults', path)
+        logger.exception('Failed to validate user config from %s, using defaults', path)
         return UserConfig()
 
 

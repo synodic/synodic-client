@@ -61,6 +61,7 @@ def _make_action(
         action.package.constraint = constraint
     else:
         action.package = None
+    action.distro = None
     return action
 
 

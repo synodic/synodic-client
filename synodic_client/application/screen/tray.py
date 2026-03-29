@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 class TrayScreen:
     """Tray screen for the application."""
 
+    _MENU_POPUP_DELAY_MS = 100
+
     def __init__(
         self,
         app: QApplication,
@@ -148,6 +150,13 @@ class TrayScreen:
         logger.debug('Tray activated: reason=%s', reason.name)
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self._show_window()
+        elif reason == QSystemTrayIcon.ActivationReason.Context:
+            QTimer.singleShot(self._MENU_POPUP_DELAY_MS, self._show_tray_menu)
+
+    def _show_tray_menu(self) -> None:
+        """Show the tray context menu at the current cursor position."""
+        geo = self.tray.geometry()
+        self._menu.popup(geo.center())
 
     def _show_window(self) -> None:
         """Show, raise, and focus the main window."""

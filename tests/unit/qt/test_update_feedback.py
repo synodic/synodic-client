@@ -512,9 +512,9 @@ class TestCompositeSignalKeys:
         header.set_runtime('3.11')
         spy = MagicMock()
         header.auto_update_toggled.connect(spy)
-        # Find the Auto button and click it
+        # Find the auto-update toggle button (checkable ↺ button)
         for child in header.findChildren(QPushButton):
-            if child.text() == 'Auto':
+            if child.isCheckable():
                 child.click()
                 break
         spy.assert_called_once()

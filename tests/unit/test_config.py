@@ -10,6 +10,7 @@ from synodic_client.config import (
     BuildConfig,
     UserConfig,
     config_dir,
+    load_user_config,
     save_user_config,
     set_dev_mode,
 )
@@ -208,3 +209,101 @@ class TestSaveUserConfig:
         assert loaded.update_channel == 'dev'
         assert loaded.auto_start is False
         assert loaded.update_source is None
+
+
+class TestUserConfigRecovery:
+    """Tests for the wrap validator that recovers invalid fields."""
+
+    @staticmethod
+    def test_single_corrupt_field_preserves_others() -> None:
+        """One invalid field is discarded; all other fields survive."""
+        data = {
+            'update_channel': 'dev',
+            'auto_start': False,
+            'auto_update_interval_minutes': 'not_an_int',  # corrupt
+        }
+        config = UserConfig.model_validate(data)
+        assert config.update_channel == 'dev'
+        assert config.auto_start is False
+        assert config.auto_update_interval_minutes is None  # reset to default
+
+    @staticmethod
+    def test_multiple_corrupt_fields() -> None:
+        """Multiple invalid fields are discarded; valid fields survive."""
+        data = {
+            'update_channel': 'stable',
+            'auto_update_interval_minutes': 'bad',
+            'auto_apply': 'not_a_bool',
+            'debug_logging': 42,  # int coerces to bool in Pydantic — this is valid
+            'auto_start': False,
+        }
+        config = UserConfig.model_validate(data)
+        assert config.update_channel == 'stable'
+        assert config.auto_start is False
+        # The corrupt fields revert to defaults
+        assert config.auto_update_interval_minutes is None
+        assert config.auto_apply is None
+
+    @staticmethod
+    def test_all_fields_corrupt() -> None:
+        """When every known field is invalid, result is equivalent to UserConfig()."""
+        data = {
+            'update_source': 123,  # str field, int won't coerce
+            'update_channel': [],
+            'auto_update_interval_minutes': 'bad',
+            'tool_update_interval_minutes': 'bad',
+            'auto_apply': 'nope',
+            'auto_start': 'nope',
+            'debug_logging': 'nope',
+            'plugin_auto_update': 'bad',
+            'prerelease_packages': 42,
+            'last_client_update': [],
+            'last_tool_updates': 'bad',
+        }
+        config = UserConfig.model_validate(data)
+        assert config == UserConfig()
+
+    @staticmethod
+    def test_valid_data_unchanged() -> None:
+        """Fully valid data passes through the wrap validator without modification."""
+        data = {
+            'update_channel': 'dev',
+            'auto_start': True,
+            'auto_update_interval_minutes': 10,
+        }
+        expected_interval = 10
+        config = UserConfig.model_validate(data)
+        assert config.update_channel == 'dev'
+        assert config.auto_start is True
+        assert config.auto_update_interval_minutes == expected_interval
+
+
+class TestLoadUserConfigRecovery:
+    """Integration tests: load_user_config with corrupt files on disk."""
+
+    @staticmethod
+    def test_corrupt_field_recovered_from_disk(tmp_path: Path) -> None:
+        """A config file with one bad field loads with that field reset to default."""
+        config_data = {
+            'update_channel': 'dev',
+            'auto_start': False,
+            'auto_update_interval_minutes': 'not_a_number',
+        }
+        (tmp_path / 'config.json').write_text(json.dumps(config_data), encoding='utf-8')
+
+        with patch('synodic_client.config.config_dir', return_value=tmp_path):
+            config = load_user_config()
+
+        assert config.update_channel == 'dev'
+        assert config.auto_start is False
+        assert config.auto_update_interval_minutes is None
+
+    @staticmethod
+    def test_invalid_json_returns_defaults(tmp_path: Path) -> None:
+        """Completely invalid JSON returns a default UserConfig."""
+        (tmp_path / 'config.json').write_text('{{not valid json', encoding='utf-8')
+
+        with patch('synodic_client.config.config_dir', return_value=tmp_path):
+            config = load_user_config()
+
+        assert config == UserConfig()

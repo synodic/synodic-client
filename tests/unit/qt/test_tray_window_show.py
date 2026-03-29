@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QSystemTrayIcon
 from synodic_client.application.screen.schema import UpdateTarget
 from synodic_client.application.screen.tray import TrayScreen
 from synodic_client.operations.schema import UpdateResult
+from synodic_client.schema import UpdateConfig
 
 from .conftest import make_config_store
 
@@ -18,7 +19,7 @@ from .conftest import make_config_store
 def tray_screen():
     """Build a minimal ``TrayScreen`` with mocked collaborators."""
     with (
-        patch('synodic_client.application.screen.tool_update_controller.resolve_update_config') as mock_ucfg,
+        patch.object(UpdateConfig, 'from_resolved') as mock_ucfg,
         patch('synodic_client.application.screen.tray.UpdateController'),
     ):
         # Disable timers by setting intervals to 0

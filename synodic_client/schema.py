@@ -8,13 +8,16 @@ that every layer can import them without circular dependencies.
 
 from __future__ import annotations
 
+import logging
 import sys
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum, auto
 from typing import Any
 
 from packaging.version import Version
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError, model_validator
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # BuildConfig — read-only, lives next to the executable
@@ -109,6 +112,31 @@ class UserConfig(BaseModel):
     # tool updates have been recorded.
     last_tool_updates: dict[str, str] | None = None
 
+    @model_validator(mode='wrap')
+    @classmethod
+    def _recover_invalid_fields(cls, data: Any, handler: Any) -> UserConfig:
+        """Silently drop fields that fail validation instead of rejecting the entire config.
+
+        When an on-disk ``config.json`` contains a value whose type no longer
+        matches the schema (e.g. after a version upgrade renames or re-types a
+        field), the normal behaviour is to raise ``ValidationError`` and lose
+        *every* setting.  This wrap validator intercepts the error, removes
+        only the offending fields (so their defaults kick in), and retries.
+        """
+        try:
+            return handler(data)
+        except ValidationError as exc:
+            if not isinstance(data, dict):
+                raise
+
+            bad_fields = {str(e['loc'][0]) for e in exc.errors() if e.get('loc')}
+            cleaned = {k: v for k, v in data.items() if k not in bad_fields}
+
+            for name in bad_fields:
+                logger.warning('Discarding invalid config field %r (using default)', name)
+
+            return handler(cleaned)
+
 
 # ---------------------------------------------------------------------------
 # Update channel & state enums
@@ -200,6 +228,24 @@ class UpdateConfig:
 
     # Interval in minutes between tool update checks (0 = disabled)
     tool_update_interval_minutes: int = DEFAULT_TOOL_UPDATE_INTERVAL_MINUTES
+
+    @classmethod
+    def from_resolved(cls, config: ResolvedConfig) -> UpdateConfig:
+        """Derive an ``UpdateConfig`` from resolved configuration values.
+
+        Args:
+            config: A resolved configuration snapshot.
+
+        Returns:
+            An ``UpdateConfig`` ready to initialise the updater.
+        """
+        channel = UpdateChannel.DEVELOPMENT if config.update_channel == 'dev' else UpdateChannel.STABLE
+        return cls(
+            channel=channel,
+            repo_url=config.update_source or GITHUB_REPO_URL,
+            auto_update_interval_minutes=config.auto_update_interval_minutes,
+            tool_update_interval_minutes=config.tool_update_interval_minutes,
+        )
 
     @property
     def channel_name(self) -> str:

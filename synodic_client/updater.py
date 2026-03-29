@@ -208,7 +208,12 @@ class Updater:
                 # moved past it.  A periodic re-check that discovers the
                 # same release must not regress DOWNLOADED → UPDATE_AVAILABLE,
                 # which would cause apply_update_on_exit() to reject the update.
-                if self._state not in {UpdateState.DOWNLOADED, UpdateState.APPLYING, UpdateState.APPLIED}:
+                if self._state not in {
+                    UpdateState.DOWNLOADING,
+                    UpdateState.DOWNLOADED,
+                    UpdateState.APPLYING,
+                    UpdateState.APPLIED,
+                }:
                     self._state = UpdateState.UPDATE_AVAILABLE
                 logger.info('Update available: %s -> %s', self._current_version, latest)
             else:
@@ -379,20 +384,16 @@ class Updater:
         # Verify checksum — prefer SHA256, fall back to SHA1.
         if asset.SHA256:
             actual = sha256_hash.hexdigest()
-            if not actual.lower() == asset.SHA256.lower():
+            if actual.lower() != asset.SHA256.lower():
                 partial_file.unlink(missing_ok=True)
-                raise RuntimeError(
-                    f'SHA256 mismatch for {asset.FileName}: expected {asset.SHA256}, got {actual}'
-                )
+                raise RuntimeError(f'SHA256 mismatch for {asset.FileName}: expected {asset.SHA256}, got {actual}')
         elif asset.SHA1:
             actual_sha1 = hashlib.sha1(partial_file.read_bytes()).hexdigest()  # noqa: S324 — verifying known digest
-            if not actual_sha1.lower() == asset.SHA1.lower():
+            if actual_sha1.lower() != asset.SHA1.lower():
                 partial_file.unlink(missing_ok=True)
-                raise RuntimeError(
-                    f'SHA1 mismatch for {asset.FileName}: expected {asset.SHA1}, got {actual_sha1}'
-                )
+                raise RuntimeError(f'SHA1 mismatch for {asset.FileName}: expected {asset.SHA1}, got {actual_sha1}')
 
-        partial_file.rename(target_file)
+        partial_file.replace(target_file)
         logger.info('Direct download complete: %s', target_file)
 
     def download_update(self, progress_callback: Callable[[int], None] | None = None) -> bool:
@@ -545,7 +546,7 @@ class Updater:
             raise RuntimeError(f'Failed to create Velopack UpdateManager: {e}') from e
 
 
-def _on_before_uninstall(version: str) -> None:
+def on_before_uninstall(version: str) -> None:
     """Velopack hook: called before the app is uninstalled.
 
     Removes the ``synodic://`` URI protocol handler and auto-startup

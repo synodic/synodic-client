@@ -97,6 +97,7 @@ def make_action(
     action.command = overrides.get('command')
     action.include_prereleases = overrides.get('include_prereleases', False)
     action.plugin_target = overrides.get('plugin_target')
+    action.distro = overrides.get('distro')
     return action
 
 
